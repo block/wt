@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+#
+# wt-list — List All Git Worktrees with Status Information
+# =========================================================
+#
+# This script lists all git worktrees associated with the main repository,
+# showing branch names and status indicators for each.
+#
+# Output Format:
+# --------------
+# * ~/Development/java-master (master) [main] [linked]
+#   ~/Development/java-worktrees/feature-foo (feature/foo)
+#   ~/Development/java-worktrees/bugfix-bar (bugfix/bar)
+#
+# Indicators:
+# -----------
+# *        = Currently linked worktree (symlink target)
+# [main]   = The main repository root
+# [linked] = This worktree is currently linked at WT_ACTIVE_WORKTREE
+# [dirty]  = Has uncommitted changes (only with -v)
+# [↑N]     = N commits ahead of upstream (only with -v)
+# [↓N]     = N commits behind upstream (only with -v)
+#
+# Usage:
+#   wt-list           # Fast: shows path, branch, [main], [linked]
+#   wt-list -v        # Verbose: adds [dirty], [↑N], [↓N] (slower)
+#   wt-list --verbose # Same as -v
+#
+
+set -euo pipefail
+
+# Resolve script and lib directories
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIB_DIR="$SCRIPT_DIR/../lib"
+
+# Bootstrap: source wt-common from lib/
+if [[ -f "$LIB_DIR/wt-common" ]]; then
+  . "$LIB_DIR/wt-common"
+elif [[ -f "$HOME/.config/wt/lib/wt-common" ]]; then
+  . "$HOME/.config/wt/lib/wt-common"
+else
+  echo "Error: Cannot find wt-common" >&2
+  exit 1
+fi
+
+# Parse arguments
+VERBOSE=false
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -v|--verbose)
+      VERBOSE=true
+      shift
+      ;;
+    *)
+      echo "Usage: wt-list [-v|--verbose]" >&2
+      exit 1
+      ;;
+  esac
+done
+
+# Validate main repo exists
+if [[ ! -d "$WT_MAIN_REPO_ROOT" ]]; then
+  error "WT_MAIN_REPO_ROOT does not exist: $WT_MAIN_REPO_ROOT"
+  exit 1
+fi
+
+# Get absolute path of main repo
+MAIN_REPO_ABS="$(cd "$WT_MAIN_REPO_ROOT" && pwd)"
+
+# Get currently linked worktree (if any)
+LINKED_WORKTREE="$(wt_get_linked_worktree)"
+
+# List worktrees
+(
+  cd "$WT_MAIN_REPO_ROOT" || exit 1
+
+  if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    error "$WT_MAIN_REPO_ROOT is not a git repository or worktree."
+    exit 1
+  fi
+
+  echo
+
+  while IFS= read -r line; do
+    case "$line" in
+      worktree\ *)
+        wt="${line#worktree }"
+        wt_abs="$(cd "$wt" 2>/dev/null && pwd)" || continue
+
+        # Determine prefix (linked indicator)
+        prefix="  "
+        if [[ -n "$LINKED_WORKTREE" && "$wt_abs" == "$LINKED_WORKTREE" ]]; then
+          prefix="${GREEN}*${NC} "
+        fi
+
+        # Print with shared formatting
+        printf "%s%s\n" "$prefix" "$(wt_format_worktree "$wt_abs" "$MAIN_REPO_ABS" "$LINKED_WORKTREE" "$VERBOSE")"
+        ;;
+    esac
+  done < <(git worktree list --porcelain)
+
+  echo
+)
+

@@ -1,0 +1,207 @@
+#!/usr/bin/env bash
+#
+# wt-ijwb-export — Export IntelliJ `.ijwb` Directories to Metadata Vault
+# =========================================================================
+#
+# This script scans a source directory for IntelliJ Bazel project metadata
+# directories named `.ijwb` and recreates the same directory structure under a
+# target directory. Instead of copying actual files, it creates **symbolic links**
+# pointing back to the real `.ijwb` directories in the source.
+#
+# This is useful when:
+#   - You maintain a *canonical* set of `.ijwb` directories (e.g., from a main
+#     worktree), and
+#   - You want additional worktrees or environments to *reuse* those metadata
+#     directories without duplicating them.
+#
+# Behavior:
+# ---------
+# 1. Accepts a <source-directory> and <target-directory>.
+# 2. Recursively finds all `.ijwb` directories under the source.
+# 3. Computes the relative path from the source root for each `.ijwb`.
+# 4. Recreates that directory structure under the target.
+# 5. Creates symbolic links:
+#        <target>/<relative-path>/.ijwb  →  <source>/<relative-path>/.ijwb
+#
+# Guarantees:
+# -----------
+# - Absolute paths are used to avoid inconsistencies when resolving symlinks.
+# - Only `.ijwb` directories are linked; all other files are ignored.
+# - The script preserves directory structure so the target mirrors the source layout.
+#
+# Usage:
+#   wt-ijwb-export                              # Use defaults from env vars
+#   wt-ijwb-export <source-directory> <target-directory>
+#
+# Defaults (when no arguments):
+#   source = $WT_MAIN_REPO_ROOT
+#   target = $WT_IDEA_FILES_BASE
+#
+# Example:
+#   wt-ijwb-export                              # Use env var defaults
+#   wt-ijwb-export ~/dev/main-worktree ~/dev/shared-idea
+#
+# Notes:
+# ------
+# - This script creates symlinks, not copies, so changes in the source `.ijwb`
+#   directories propagate automatically to all linked targets.
+# - Useful for IntelliJ + Bazel workflows where `.ijwb` metadata is large,
+#   expensive to regenerate, or should be shared across worktrees.
+#
+# IMPORTANT: After creating a new IntelliJ Bazel project in the source directory,
+# re-run this script to sync the new .ijwb metadata to the vault. This ensures
+# that wt-ijwb-import will include the new metadata when setting up worktrees.
+#
+
+set -euo pipefail
+
+# Resolve script and lib directories
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIB_DIR="$SCRIPT_DIR/../lib"
+
+# Bootstrap: source wt-common from lib/
+if [[ -f "$LIB_DIR/wt-common" ]]; then
+  . "$LIB_DIR/wt-common"
+elif [[ -f "$HOME/.config/wt/lib/wt-common" ]]; then
+  . "$HOME/.config/wt/lib/wt-common"
+else
+  echo "Error: Cannot find wt-common" >&2
+  exit 1
+fi
+
+usage() {
+  cat >&2 <<EOF
+Usage: $(basename "$0") [-y|--yes] [source-directory] [target-directory]
+
+Options:
+  -y, --yes           Skip confirmation prompt
+
+Arguments:
+  source-directory    Source containing .ijwb dirs (default: \$WT_MAIN_REPO_ROOT)
+  target-directory    Metadata vault location (default: \$WT_IDEA_FILES_BASE)
+
+When no arguments are provided, uses environment variable defaults:
+  source = $WT_MAIN_REPO_ROOT
+  target = $WT_IDEA_FILES_BASE
+EOF
+}
+
+SOURCE_DIR=""
+TARGET_DIR=""
+SKIP_CONFIRM=false
+
+# Parse options
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    -y|--yes)
+      SKIP_CONFIRM=true
+      shift
+      ;;
+    -*)
+      error "Unknown option: $1"
+      usage
+      exit 1
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+
+# Parse positional arguments
+case $# in
+  0)
+    SOURCE_DIR="$WT_MAIN_REPO_ROOT"
+    TARGET_DIR="$WT_IDEA_FILES_BASE"
+    ;;
+  2)
+    SOURCE_DIR="$1"
+    TARGET_DIR="$2"
+    ;;
+  *)
+    error "Expected 0 or 2 positional arguments, got $#"
+    usage
+    exit 1
+    ;;
+esac
+
+# Validate directories exist before proceeding
+if [[ ! -d "$SOURCE_DIR" ]]; then
+  error "Source directory does not exist: $SOURCE_DIR"
+  exit 1
+fi
+if [[ ! -d "$TARGET_DIR" ]]; then
+  error "Target directory does not exist: $TARGET_DIR"
+  info "You may need to create it first: mkdir -p $TARGET_DIR"
+  exit 1
+fi
+
+# Make sure both directories are absolute to avoid weirdness
+SOURCE_DIR="$(cd "$SOURCE_DIR" && pwd)"
+TARGET_DIR="$(cd "$TARGET_DIR" && pwd)"
+
+echo "Source directory: $SOURCE_DIR"
+echo "Target directory: $TARGET_DIR"
+echo "Linking *.ijwb project directories from source to target"
+echo
+
+# Confirmation prompt (skip if -y/--yes was provided)
+if [[ "$SKIP_CONFIRM" != "true" ]]; then
+  if ! prompt_confirm "Export .ijwb metadata from source to target? [y/N]" "n"; then
+    echo "Aborted."
+    exit 0
+  fi
+  echo
+fi
+
+# First, clean up any existing .ijwb symlinks in the vault
+# This removes stale entries that no longer exist in the source
+echo "Cleaning up existing .ijwb symlinks in vault..."
+find "$TARGET_DIR" -type l -name '.ijwb' -print0 | while IFS= read -r -d '' OLD_LINK; do
+  rm -f "$OLD_LINK"
+done
+echo
+
+# Find all .ijwb directories under SOURCE_DIR
+# Use -maxdepth 5 for better performance since most .ijwb dirs are at service level
+find "$SOURCE_DIR" -maxdepth 5 -type d -name '.ijwb' -print0 |
+  while IFS= read -r -d '' IJWB_DIR; do
+    # Compute the path of the parent directory relative to SOURCE_DIR
+    PARENT_DIR="$(dirname "$IJWB_DIR")"
+    
+    # Handle .ijwb at root (PARENT_DIR == SOURCE_DIR)
+    if [[ "$PARENT_DIR" == "$SOURCE_DIR" ]]; then
+      REL_PARENT=""
+    else
+      REL_PARENT="${PARENT_DIR#"$SOURCE_DIR"/}"
+    fi
+
+    # Validate that we actually stripped the prefix (path should be relative now)
+    if [[ "$REL_PARENT" == /* ]]; then
+      warn "Skipping .ijwb outside source directory: $IJWB_DIR"
+      continue
+    fi
+
+    # Destination parent and .ijwb path in the target directory
+    if [[ -z "$REL_PARENT" ]]; then
+      DEST_PARENT="$TARGET_DIR"
+    else
+      DEST_PARENT="$TARGET_DIR/$REL_PARENT"
+    fi
+    DEST_IJWB="$DEST_PARENT/.ijwb"
+
+    echo " -> Linking $DEST_IJWB"
+
+    # Create the parent directories first
+    mkdir -p "$DEST_PARENT"
+
+    # Create or update the symlink
+    ln -sfn "$IJWB_DIR" "$DEST_IJWB"
+
+  done
+
+success "Done linking .ijwb directories."

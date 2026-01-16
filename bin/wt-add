@@ -1,0 +1,473 @@
+#!/usr/bin/env bash
+#
+# wt-add — Safe wrapper around `git worktree add`
+# ===============================================
+#
+# This script creates git worktrees safely from the main repo at:
+#     $WT_MAIN_REPO_ROOT
+#
+# Behavior:
+# ---------
+# 1. Always operates inside the base repo ($WT_MAIN_REPO_ROOT).
+#
+# 2. If NOT creating a new branch (i.e., no -b/--branch flag), supports:
+#       a) wt-add <path> <branch> [extra args...]
+#            → Direct passthrough to `git worktree add <path> <branch> ...`,
+#              then installs IntelliJ `.ijwb` metadata into the new worktree.
+#
+#       b) wt-add <branch>
+#            → Convenience mode:
+#                path = $WT_WORKTREES_BASE/<branch>
+#                git worktree add "$path" "<branch>"
+#                install IntelliJ `.ijwb` metadata into "$path".
+#
+# 3. If creating a new branch (using -b/--branch):
+#       a. If there are uncommitted changes in the base repo:
+#            - Stash them using a uniquely named stash entry.
+#       b. If not currently on the base branch ($WT_BASE_BRANCH):
+#            - Switch to that base branch.
+#       c. Ensure the base branch is up to date by running `git pull`.
+#       d. Run `git worktree add <args>` to create the new worktree.
+#       e. Run wt-ijwb-import to import IntelliJ metadata into the new worktree.
+#       f. Create symlinks for Bazel outputs (bazel-out, bazel-bin, etc.) pointing
+#            to the same targets as in the main repo, to speed up IntelliJ sync.
+#       g. After completion:
+#            - Switch back to the original branch or detached HEAD commit.
+#            - Pop the specific stash created earlier (if any).
+#
+# 4. Default worktree location (when using -b/--branch and no path is given):
+#       - If no explicit worktree path is provided, the worktree will be created under:
+#             $WT_WORKTREES_BASE/<branch-name>
+#       - If a path *is* provided, the script respects it and does not override it.
+
+#
+# Guarantees:
+# -----------
+# - Uncommitted changes are safely stashed and restored without
+#   interfering with unrelated stash entries.
+# - `git pull` only happens when the script is truly on the base branch.
+# - Detached HEAD states are restored correctly.
+# - Worktree creation behaves like `git worktree add`, but with safety
+#   guardrails and automatic IntelliJ metadata installation.
+#
+# Usage examples:
+# ---------------
+#   wt-add -b feature/foo
+#       → Creates a worktree at $WT_WORKTREES_BASE/feature/foo and installs .ijwb
+#
+#   wt-add -b feature/foo /custom/path origin/master
+#       → Uses the explicit path and extra arguments as-is, then installs .ijwb
+#
+#   wt-add ../path/to/worktree existing-branch
+#       → No branch creation; simply runs git worktree add and installs .ijwb.
+#
+
+set -euo pipefail
+
+# Resolve script and lib directories
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIB_DIR="$SCRIPT_DIR/../lib"
+
+# Bootstrap: source wt-common from lib/
+if [[ -f "$LIB_DIR/wt-common" ]]; then
+  . "$LIB_DIR/wt-common"
+elif [[ -f "$HOME/.config/wt/lib/wt-common" ]]; then
+  . "$HOME/.config/wt/lib/wt-common"
+else
+  echo "Error: Cannot find wt-common" >&2
+  exit 1
+fi
+
+usage() {
+  echo "Usage: $(basename "$0") [git worktree add arguments...]"
+  echo
+  echo "Examples:"
+  echo "  # Create new worktree for existing branch:"
+  echo "  $(basename "$0") feature/foo"
+  echo
+  echo "  # Explicit path + branch:"
+  echo "  $(basename "$0") \$WT_WORKTREES_BASE/feature/foo feature/foo"
+  echo
+  echo "  # Create a new branch and worktree:"
+  echo "  $(basename "$0") -b feature/foo                # path = \$WT_WORKTREES_BASE/feature/foo"
+  echo "  $(basename "$0") -b feature/foo /custom/path origin/master"
+  echo
+  echo "Notes:"
+  echo "  - If -b/--branch is NOT used:"
+  echo "        wt-add <branch>                # uses \$WT_WORKTREES_BASE/<branch> as path"
+  echo "        wt-add <path> <branch> ...     # passed directly to git worktree add"
+  echo "  - If -b/--branch IS used and no worktree path is given, path defaults to:"
+  echo "        \$WT_WORKTREES_BASE/<branch-name>"
+}
+
+ARGS=("$@")
+
+if [[ $# -eq 0 ]]; then
+  usage
+  exit 1
+fi
+
+# 1. Validate and cd into the main repo
+if [[ ! -d "$WT_MAIN_REPO_ROOT" ]]; then
+  error "WT_MAIN_REPO_ROOT does not exist: $WT_MAIN_REPO_ROOT"
+  exit 1
+fi
+cd "$WT_MAIN_REPO_ROOT"
+
+# Detect whether we are creating a new branch: look for -b or --branch and capture name
+creating_new_branch=0
+branch_name=""
+i=0
+while [[ $i -lt ${#ARGS[@]} ]]; do
+  arg="${ARGS[$i]}"
+  case "$arg" in
+    -b|--branch)
+      creating_new_branch=1
+      # Next argument should be the branch name
+      if (( i + 1 < ${#ARGS[@]} )); then
+        branch_name="${ARGS[$((i + 1))]}"
+      fi
+      ;;
+    -b=*|--branch=*)
+      creating_new_branch=1
+      branch_name="${arg#*=}"
+      ;;
+  esac
+  i=$((i + 1))
+done
+
+# Helper: install IntelliJ metadata for a created worktree
+install_ijwb_for_worktree() {
+  local worktree_path="$1"
+
+  # Normalize to absolute (worktree now exists)
+  local worktree_path_abs
+  worktree_path_abs="$(cd "$worktree_path" && pwd)"
+
+  echo "Installing .ijwb metadata into worktree: $worktree_path_abs"
+
+  # Find wt-ijwb-import: try script directory first, then PATH
+  local ijwb_import=""
+  if [[ -f "$SCRIPT_DIR/wt-ijwb-import" ]]; then
+    ijwb_import="$SCRIPT_DIR/wt-ijwb-import"
+  elif command -v wt-ijwb-import >/dev/null 2>&1; then
+    ijwb_import="wt-ijwb-import"
+  else
+    error "Cannot find wt-ijwb-import"
+    return 1
+  fi
+
+  "$ijwb_import" -y "$WT_IDEA_FILES_BASE" "$worktree_path_abs"
+}
+
+# Helper: install Bazel output symlinks (bazel-out, bazel-bin, etc.) for a created worktree
+# These symlinks point to Bazel's cached build artifacts in a temp directory.
+# Sharing them across worktrees significantly speeds up IntelliJ project sync.
+install_bazel_symlinks_for_worktree() {
+  local worktree_path="$1"
+
+  # Normalize to absolute (worktree now exists)
+  local worktree_path_abs
+  worktree_path_abs="$(cd "$worktree_path" && pwd)"
+
+  # List of Bazel symlinks to copy from main repo
+  # These are the most important ones for IntelliJ sync performance
+  local bazel_symlinks=("bazel-out" "bazel-bin" "bazel-testlogs" "bazel-genfiles")
+  
+  local main_repo_abs
+  main_repo_abs="$(cd "$WT_MAIN_REPO_ROOT" && pwd)"
+
+  echo "Installing Bazel symlinks into worktree: $worktree_path_abs"
+
+  for symlink_name in "${bazel_symlinks[@]}"; do
+    local src_link="$main_repo_abs/$symlink_name"
+    local dst_link="$worktree_path_abs/$symlink_name"
+
+    # Check if source symlink exists in main repo
+    if [[ -L "$src_link" ]]; then
+      # Get the target of the symlink
+      local target
+      target="$(readlink "$src_link")"
+
+      # If the target is relative, make it absolute based on main repo location
+      if [[ "$target" != /* ]]; then
+        target="$main_repo_abs/$target"
+      fi
+
+      # Remove existing symlink/file in worktree if present
+      if [[ -L "$dst_link" || -e "$dst_link" ]]; then
+        rm -rf "$dst_link"
+      fi
+
+      # Create symlink pointing to the same target
+      ln -s "$target" "$dst_link"
+      echo "  ✓ $symlink_name -> $target"
+    fi
+  done
+}
+
+########################################
+# Fast path: NOT creating a new branch #
+########################################
+if [[ $creating_new_branch -eq 0 ]]; then
+  # Count non-option arguments and capture the first one
+  nonopt_count=0
+  first_nonopt=""
+  for arg in "${ARGS[@]}"; do
+    case "$arg" in
+      -*) ;;  # option
+      *)
+        if [[ $nonopt_count -eq 0 ]]; then
+          first_nonopt="$arg"
+        fi
+        nonopt_count=$((nonopt_count + 1))
+        ;;
+    esac
+  done
+
+  if [[ $nonopt_count -eq 0 ]]; then
+    error "no worktree path or branch provided."
+    usage
+    exit 1
+  fi
+
+  if [[ $nonopt_count -eq 1 && $# -eq 1 ]]; then
+    #
+    # Convenience mode:
+    #   wt-add <branch>
+    # → path = $WT_WORKTREES_BASE/<branch>
+    #
+    local_branch="$first_nonopt"
+    
+    # Validate branch name doesn't contain path traversal
+    if [[ "$local_branch" == *".."* ]]; then
+      error "Branch name cannot contain '..': $local_branch"
+      exit 1
+    fi
+    
+    worktree_path="${WT_WORKTREES_BASE%/}/$local_branch"
+
+    # Check if worktree directory already exists
+    if [[ -d "$worktree_path" ]]; then
+      warn "Worktree directory already exists: $worktree_path"
+      echo "Use 'wt switch' to switch to this worktree, or remove it first."
+      exit 1
+    fi
+
+    echo "Creating worktree for existing branch '$local_branch' at: $worktree_path"
+    git worktree add -- "$worktree_path" "$local_branch"
+
+    install_ijwb_for_worktree "$worktree_path"
+    install_bazel_symlinks_for_worktree "$worktree_path"
+    success "git worktree add completed successfully."
+    exit 0
+  fi
+
+  #
+  # Normal passthrough mode:
+  #   wt-add <path> <branch> [extra args...]
+  #
+  worktree_path="$first_nonopt"
+
+  # Check if worktree directory already exists
+  if [[ -d "$worktree_path" ]]; then
+    warn "Worktree directory already exists: $worktree_path"
+    echo "Use 'wt switch' to switch to this worktree, or remove it first."
+    exit 1
+  fi
+
+  info "Not creating a new branch; running: git worktree add ${ARGS[*]}"
+  git worktree add "${ARGS[@]}"
+
+  install_ijwb_for_worktree "$worktree_path"
+  install_bazel_symlinks_for_worktree "$worktree_path"
+  success "git worktree add completed successfully."
+  exit 0
+fi
+
+##########################################
+# Creating a new branch via -b/--branch  #
+##########################################
+if [[ -z "$branch_name" ]]; then
+  error "-b/--branch specified but no branch name provided."
+  exit 1
+fi
+
+echo "Creating a new branch '$branch_name'; preparing repo state..."
+
+# Track original state so we can restore it
+orig_branch="$(git rev-parse --abbrev-ref HEAD || echo "")"   # e.g. master, feature/foo, or HEAD
+orig_rev="$(git rev-parse HEAD || echo "")"                   # concrete SHA
+branch_switched=0
+stash_made=0
+stash_name=""
+stash_ref=""
+restore_ran=0
+
+restore_state() {
+  # avoid running twice (EXIT + INT/TERM)
+  if [[ $restore_ran -eq 1 ]]; then
+    return 0
+  fi
+  restore_ran=1
+
+  # Best-effort cleanup; don't let set -e kill us here
+  set +e
+
+  echo "Restoring original repo state..."
+
+  # Switch back to original branch / detached HEAD
+  if [[ $branch_switched -eq 1 ]]; then
+    if [[ "$orig_branch" != "HEAD" && -n "$orig_branch" ]]; then
+      echo "Switching back to original branch: $orig_branch"
+      git checkout "$orig_branch"
+    elif [[ -n "$orig_rev" ]]; then
+      echo "Restoring original detached HEAD at: $orig_rev"
+      git checkout "$orig_rev"
+    fi
+  fi
+
+  # Pop the specific stash we created, if any
+  if [[ $stash_made -eq 1 && -n "$stash_name" ]]; then
+    echo "Looking up stash named: $stash_name"
+    stash_ref="$(git stash list | grep -F "$stash_name" | head -n1 | cut -d: -f1 || true)"
+    if [[ -n "$stash_ref" ]]; then
+      echo "Popping stash: $stash_ref"
+      git stash pop "$stash_ref"
+      if [[ $? -ne 0 ]]; then
+        warn "git stash pop had conflicts or failed; please resolve manually."
+      fi
+    else
+      warn "could not find stash with name '$stash_name' to pop."
+    fi
+  fi
+}
+
+# Ensure we restore on normal exit and most error signals
+trap restore_state EXIT
+trap restore_state INT
+trap restore_state TERM
+
+# 2. If directory has uncommitted changes, stash them with a unique name
+if [[ -n "$(git status --porcelain)" ]]; then
+  stash_name="wta-$(date +%s)-$$"
+  echo "Uncommitted changes detected; stashing as: $stash_name"
+  git stash push -u -m "$stash_name"
+  stash_made=1
+else
+  echo "No uncommitted changes; no stash needed."
+fi
+
+# 3. Ensure we are on WT_BASE_BRANCH before pulling
+current_branch="$(git rev-parse --abbrev-ref HEAD || echo "")"
+if [[ "$current_branch" != "$WT_BASE_BRANCH" ]]; then
+  echo "Currently on '$current_branch'; switching to '$WT_BASE_BRANCH'..."
+  git checkout "$WT_BASE_BRANCH"
+  branch_switched=1
+else
+  echo "Already on $WT_BASE_BRANCH; no branch switch needed."
+fi
+
+# 4. Pull latest changes (can be skipped with WT_SKIP_PULL=1)
+if [[ "${WT_SKIP_PULL:-0}" != "1" ]]; then
+  info "Running 'git pull --ff-only' on $WT_BASE_BRANCH..."
+  # Note: `timeout` is from GNU coreutils, not available by default on macOS.
+  # On macOS with Homebrew coreutils, it's available as `gtimeout`.
+  # If neither is available, we fall back to running without a timeout.
+  timeout_cmd=""
+  if command -v timeout >/dev/null 2>&1; then
+    timeout_cmd="timeout"
+  elif command -v gtimeout >/dev/null 2>&1; then
+    timeout_cmd="gtimeout"
+  fi
+  
+  if [[ -n "$timeout_cmd" ]]; then
+    if ! "$timeout_cmd" 30 git pull --ff-only; then
+      warn "Pull failed or timed out. Continuing with current state."
+    fi
+  else
+    if ! git pull --ff-only; then
+      warn "Could not fast-forward $WT_BASE_BRANCH. Continuing with current state."
+    fi
+  fi
+else
+  info "Skipping git pull (WT_SKIP_PULL=1)"
+fi
+
+echo
+
+# 5. Possibly inject a default worktree path under WT_WORKTREES_BASE
+# We need to find positional arguments that are NOT the branch name after -b/--branch
+has_positional=0
+worktree_path=""
+skip_next=0
+for arg in "${ARGS[@]}"; do
+  if [[ $skip_next -eq 1 ]]; then
+    # This argument is the branch name after -b/--branch, skip it
+    skip_next=0
+    continue
+  fi
+  case "$arg" in
+    -b|--branch)
+      # Next argument is the branch name, not a positional
+      skip_next=1
+      ;;
+    -b=*|--branch=*)
+      # Branch name is embedded, nothing to skip
+      ;;
+    -*)
+      # Other options
+      ;;
+    *)
+      # This is a real positional argument (worktree path)
+      if [[ $has_positional -eq 0 ]]; then
+        worktree_path="$arg"
+      fi
+      has_positional=1
+      ;;
+  esac
+done
+
+FINAL_ARGS=("${ARGS[@]}")
+
+if [[ $has_positional -eq 0 ]]; then
+  # Validate branch name doesn't contain path traversal
+  if [[ "$branch_name" == *".."* ]]; then
+    error "Branch name cannot contain '..': $branch_name"
+    exit 1
+  fi
+  # No explicit path provided -> append "worktrees base + branch name"
+  worktree_path="${WT_WORKTREES_BASE%/}/$branch_name"
+  echo "No worktree path provided; using default: $worktree_path"
+  FINAL_ARGS+=("$worktree_path")
+fi
+
+# Check if worktree directory already exists
+if [[ -d "$worktree_path" ]]; then
+  warn "Worktree directory already exists: $worktree_path"
+  echo "Use 'wt switch' to switch to this worktree, or remove it first."
+  exit 1
+fi
+
+# Check if branch already exists
+if git show-ref --verify --quiet "refs/heads/$branch_name"; then
+  warn "Branch '$branch_name' already exists."
+  echo
+  if ! prompt_confirm "Create worktree for the existing branch instead? [Y/n]" "y"; then
+    echo "Aborted."
+    exit 1
+  fi
+  
+  # Remove -b/--branch from args and just checkout existing branch
+  echo "Creating worktree for existing branch '$branch_name'..."
+  git worktree add "$worktree_path" "$branch_name"
+else
+  echo "Running: git worktree add ${FINAL_ARGS[*]}"
+  git worktree add "${FINAL_ARGS[@]}"
+fi
+
+install_ijwb_for_worktree "$worktree_path"
+install_bazel_symlinks_for_worktree "$worktree_path"
+
+success "git worktree add completed successfully."
+exit 0

@@ -1,0 +1,312 @@
+#!/usr/bin/env bash
+#
+# wt-remove — Remove a Git Worktree with Interactive Selection
+# ============================================================
+#
+# This script safely removes a git worktree. It provides an interactive menu
+# to select which worktree to remove, with a confirmation prompt before removal.
+#
+# Behavior:
+# ---------
+# 1. If a worktree path is provided as an argument, uses it directly.
+#    Otherwise, uses `select_git_worktree` (from wt-choose) to present an
+#    interactive menu of available worktrees.
+#
+# 2. The main repository (WT_MAIN_REPO_ROOT) is excluded from the selection.
+#
+# 3. Shows confirmation prompt before removing.
+#
+# 4. Uses `git worktree remove --force` because worktrees contain
+#    copied .ijwb metadata that git considers "untracked changes".
+#
+# 5. Checks if the worktree being removed is the currently linked worktree
+#    and warns the user.
+#
+# 6. --merged mode: finds and removes all worktrees whose branches have been
+#    merged into the base branch.
+#
+# Usage:
+#   wt-remove                     # Interactive: pick worktree to remove
+#   wt-remove <worktree-path>     # Remove specified worktree (with confirmation)
+#   wt-remove --merged            # Remove all worktrees with merged branches
+#
+
+set -euo pipefail
+
+# Resolve script and lib directories
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIB_DIR="$SCRIPT_DIR/../lib"
+
+# Bootstrap: source wt-common from lib/
+if [[ -f "$LIB_DIR/wt-common" ]]; then
+  . "$LIB_DIR/wt-common"
+elif [[ -f "$HOME/.config/wt/lib/wt-common" ]]; then
+  . "$HOME/.config/wt/lib/wt-common"
+else
+  echo "Error: Cannot find wt-common" >&2
+  exit 1
+fi
+
+# Source wt-choose using the helper
+wt_source wt-choose
+
+usage() {
+  echo "Usage: $(basename "$0") [-y|--yes] [--merged] [worktree-path]"
+  echo
+  echo "Options:"
+  echo "  -y, --yes           Skip confirmation prompt (unless uncommitted changes exist)"
+  echo "  --merged            Remove all worktrees whose branches are merged into $WT_BASE_BRANCH"
+  echo
+  echo "Modes:"
+  echo "  $(basename "$0")                     # Interactive: pick worktree to remove"
+  echo "  $(basename "$0") <worktree-path>     # Remove specified worktree (with confirmation)"
+  echo "  $(basename "$0") --merged            # Remove all worktrees with merged branches"
+}
+
+TARGET_WORKTREE=""
+SKIP_CONFIRM=false
+REMOVE_MERGED=false
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    -y|--yes)
+      SKIP_CONFIRM=true
+      shift
+      ;;
+    --merged)
+      REMOVE_MERGED=true
+      shift
+      ;;
+    -*)
+      error "Unknown option: $1"
+      usage >&2
+      exit 1
+      ;;
+    *)
+      if [[ -n "$TARGET_WORKTREE" ]]; then
+        error "Too many arguments"
+        usage >&2
+        exit 1
+      fi
+      TARGET_WORKTREE="$1"
+      shift
+      ;;
+  esac
+done
+
+# Safety check: get absolute path of main repo
+MAIN_REPO_ABS="$(cd "$WT_MAIN_REPO_ROOT" && pwd)"
+
+#
+# Handle --merged mode: find and remove all worktrees with merged branches
+#
+if [[ "$REMOVE_MERGED" == "true" ]]; then
+  echo "Scanning for worktrees with branches merged into $WT_BASE_BRANCH..."
+  echo
+
+  cd "$WT_MAIN_REPO_ROOT"
+
+  # Get list of merged branches (excluding base branch itself)
+  MERGED_BRANCHES=()
+  while IFS= read -r branch; do
+    # Skip empty lines and the base branch
+    [[ -z "$branch" ]] && continue
+    [[ "$branch" == "$WT_BASE_BRANCH" ]] && continue
+    MERGED_BRANCHES+=("$branch")
+  done < <(git branch --merged "$WT_BASE_BRANCH" --format='%(refname:short)' 2>/dev/null)
+
+  # Find worktrees with merged branches
+  MERGED_WORKTREES=()
+  while IFS= read -r line; do
+    case "$line" in
+      worktree\ *)
+        wt="${line#worktree }"
+        wt_abs="$(cd "$wt" 2>/dev/null && pwd)" || continue
+        # Skip main repo
+        [[ "$wt_abs" == "$MAIN_REPO_ABS" ]] && continue
+        # Get branch name
+        wt_branch="$(git -C "$wt_abs" rev-parse --abbrev-ref HEAD 2>/dev/null)" || continue
+        # Check if branch is in merged list
+        for merged in "${MERGED_BRANCHES[@]}"; do
+          if [[ "$wt_branch" == "$merged" ]]; then
+            MERGED_WORKTREES+=("$wt_abs")
+            break
+          fi
+        done
+        ;;
+    esac
+  done < <(git worktree list --porcelain)
+
+  if [[ ${#MERGED_WORKTREES[@]} -eq 0 ]]; then
+    info "No worktrees found with branches merged into $WT_BASE_BRANCH."
+    exit 0
+  fi
+
+  echo "Found ${#MERGED_WORKTREES[@]} worktree(s) with merged branches:"
+  echo
+  for wt in "${MERGED_WORKTREES[@]}"; do
+    wt_branch="$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null)"
+    has_changes=""
+    if wt_has_uncommitted_changes "$wt"; then
+      has_changes=" ${RED}[dirty]${NC}"
+    fi
+    echo "  - $wt ($wt_branch)$has_changes"
+  done
+  echo
+
+  if [[ "$SKIP_CONFIRM" != "true" ]]; then
+    if ! prompt_confirm "Remove all ${#MERGED_WORKTREES[@]} worktree(s)? [y/N]" "n"; then
+      echo "Aborted."
+      exit 0
+    fi
+  fi
+
+  echo
+  REMOVED=0
+  SKIPPED=0
+  for wt in "${MERGED_WORKTREES[@]}"; do
+    wt_branch="$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null)"
+    
+    # Skip if uncommitted changes and -y wasn't passed
+    if wt_has_uncommitted_changes "$wt"; then
+      if [[ "$SKIP_CONFIRM" == "true" ]]; then
+        warn "Skipping $wt ($wt_branch) - has uncommitted changes"
+        SKIPPED=$((SKIPPED + 1))
+        continue
+      else
+        echo
+        warn "$wt has uncommitted changes"
+        if ! prompt_confirm "  Remove anyway? [y/N]" "n"; then
+          SKIPPED=$((SKIPPED + 1))
+          continue
+        fi
+      fi
+    fi
+
+    echo "Removing: $wt ($wt_branch)"
+    git worktree remove --force -- "$wt" 2>/dev/null && {
+      # Also delete the branch
+      git branch -d "$wt_branch" 2>/dev/null || true
+      REMOVED=$((REMOVED + 1))
+    } || {
+      warn "Failed to remove $wt"
+      SKIPPED=$((SKIPPED + 1))
+    }
+  done
+
+  echo
+  success "Removed $REMOVED worktree(s)."
+  [[ $SKIPPED -gt 0 ]] && warn "Skipped $SKIPPED worktree(s)."
+  exit 0
+fi
+
+#
+# Pick target worktree (interactive or from argument)
+#
+if [[ -z "$TARGET_WORKTREE" ]]; then
+  echo "Select a worktree to remove:"
+  echo
+  TARGET_WORKTREE="$(select_git_worktree exclude_main)" || exit 1
+else
+  # Validate provided worktree path exists
+  if [[ ! -d "$TARGET_WORKTREE" ]]; then
+    error "Worktree path does not exist: $TARGET_WORKTREE"
+    exit 1
+  fi
+  # Normalize to absolute path
+  TARGET_WORKTREE="$(cd "$TARGET_WORKTREE" && pwd)"
+fi
+
+# Safety check: don't remove the main repo
+if [[ "$TARGET_WORKTREE" == "$MAIN_REPO_ABS" ]]; then
+  error "Cannot remove the main repository: $TARGET_WORKTREE"
+  exit 1
+fi
+
+echo
+echo "Selected worktree to remove: $TARGET_WORKTREE"
+
+#
+# Check if this is the currently linked worktree
+#
+IS_CURRENTLY_LINKED=false
+LINK_PATH="$WT_ACTIVE_WORKTREE"
+if [[ -d "$(dirname "$LINK_PATH")" ]]; then
+  LINK_PATH="$(cd "$(dirname "$LINK_PATH")" && pwd)/$(basename "$LINK_PATH")"
+fi
+
+if [[ -L "$LINK_PATH" ]]; then
+  CURRENT_LINKED="$(readlink "$LINK_PATH")"
+  if [[ "$CURRENT_LINKED" != /* ]]; then
+    CURRENT_LINKED="$(cd "$(dirname "$LINK_PATH")" && cd "$(dirname "$CURRENT_LINKED")" && pwd)/$(basename "$CURRENT_LINKED")"
+  fi
+
+  if [[ "$TARGET_WORKTREE" == "$CURRENT_LINKED" ]]; then
+    IS_CURRENTLY_LINKED=true
+    echo
+    warn "This worktree is currently linked at: $LINK_PATH"
+    echo "   The symlink will be switched to main repository after removal."
+  fi
+fi
+
+#
+# Check for uncommitted changes
+#
+HAS_UNCOMMITTED=false
+if wt_has_uncommitted_changes "$TARGET_WORKTREE"; then
+  HAS_UNCOMMITTED=true
+  echo
+  warn "This worktree has uncommitted changes!"
+  UNCOMMITTED_SUMMARY="$(wt_uncommitted_summary "$TARGET_WORKTREE")"
+  if [[ -n "$UNCOMMITTED_SUMMARY" ]]; then
+    echo "   ($UNCOMMITTED_SUMMARY)"
+  fi
+fi
+
+#
+# Confirmation prompt (always required if uncommitted changes exist)
+#
+if [[ "$SKIP_CONFIRM" == "true" && "$HAS_UNCOMMITTED" == "false" ]]; then
+  # Skip confirmation only if -y was passed AND no uncommitted changes
+  :
+else
+  echo
+  if [[ "$HAS_UNCOMMITTED" == "true" ]]; then
+    if ! prompt_confirm "${YELLOW}Remove worktree with uncommitted changes? [y/N]${NC}" "n"; then
+      echo "Aborted."
+      exit 0
+    fi
+  else
+    if ! prompt_confirm "Are you sure you want to remove this worktree? [y/N]" "n"; then
+      echo "Aborted."
+      exit 0
+    fi
+  fi
+fi
+
+#
+# Remove the worktree
+#
+echo
+echo "Removing worktree: $TARGET_WORKTREE"
+
+cd "$WT_MAIN_REPO_ROOT"
+git worktree remove --force -- "$TARGET_WORKTREE"
+
+success "Worktree removed successfully."
+
+#
+# Auto-switch symlink to main repo if the removed worktree was currently linked
+#
+if [[ "$IS_CURRENTLY_LINKED" == "true" ]]; then
+  echo
+  echo "Switching symlink to main repository..."
+  rm -f "$LINK_PATH"
+  ln -s "$MAIN_REPO_ABS" "$LINK_PATH"
+  success "Symlink updated: $LINK_PATH -> $MAIN_REPO_ABS"
+fi

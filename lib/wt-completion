@@ -1,0 +1,130 @@
+#!/usr/bin/env bash
+#
+# wt-completion — Shell completion for the unified `wt` command
+# ==============================================================
+#
+# This file provides shell completion for the unified `wt` command defined
+# in wt.sh. It is sourced by wt.sh and supports both zsh and bash.
+#
+# Note: This is for the `wt <subcommand>` syntax (e.g., `wt add`, `wt switch`).
+# For completion of standalone `wt-*` scripts (e.g., `wt-add`, `wt-switch`),
+# see the completion files in the completion/ directory.
+#
+
+# Completion support for zsh
+if [[ -n "$ZSH_VERSION" ]]; then
+  _wt_completion() {
+    local -a commands
+    commands=(
+      'add:Create a new worktree for a branch'
+      'switch:Switch the active worktree symlink'
+      'remove:Remove a worktree'
+      'list:List all worktrees with status'
+      'cd:Change directory to a worktree'
+      'ijwb-export:Export .ijwb metadata to vault'
+      'ijwb-import:Import .ijwb metadata into worktree'
+      'help:Show help message'
+    )
+    
+    if (( CURRENT == 2 )); then
+      _describe 'command' commands
+    else
+      case "${words[2]}" in
+        add)
+          # Complete branch names
+          local branches
+          branches=($(git branch -a 2>/dev/null | sed 's/^[* ]*//' | sed 's|remotes/origin/||'))
+          _describe 'branch' branches
+          ;;
+        switch|remove|cd)
+          # Complete worktree paths
+          local worktrees
+          if [[ -n "$WT_MAIN_REPO_ROOT" ]] && [[ -d "$WT_MAIN_REPO_ROOT" ]]; then
+            worktrees=($(git -C "$WT_MAIN_REPO_ROOT" worktree list --porcelain 2>/dev/null | grep '^worktree ' | cut -d' ' -f2-))
+            _describe 'worktree' worktrees
+          fi
+          ;;
+        ijwb-import)
+          # First arg: source directory or target worktree
+          # Second arg: target worktree
+          if (( CURRENT == 3 )); then
+            # First argument - could be source or target, offer both directories and worktrees
+            local worktrees
+            if [[ -n "$WT_MAIN_REPO_ROOT" ]] && [[ -d "$WT_MAIN_REPO_ROOT" ]]; then
+              worktrees=($(git -C "$WT_MAIN_REPO_ROOT" worktree list --porcelain 2>/dev/null | grep '^worktree ' | cut -d' ' -f2-))
+              _describe 'worktree' worktrees
+            fi
+            _files -/
+          elif (( CURRENT == 4 )); then
+            # Second argument - target worktree
+            local worktrees
+            if [[ -n "$WT_MAIN_REPO_ROOT" ]] && [[ -d "$WT_MAIN_REPO_ROOT" ]]; then
+              worktrees=($(git -C "$WT_MAIN_REPO_ROOT" worktree list --porcelain 2>/dev/null | grep '^worktree ' | cut -d' ' -f2-))
+              _describe 'worktree' worktrees
+            fi
+          fi
+          ;;
+        ijwb-export)
+          # Complete directories
+          _files -/
+          ;;
+      esac
+    fi
+  }
+  compdef _wt_completion wt
+fi
+
+# Completion support for bash
+if [[ -n "$BASH_VERSION" ]]; then
+  _wt_completion_bash() {
+    local cur commands
+    COMPREPLY=()
+    cur="${COMP_WORDS[COMP_CWORD]}"
+    commands="add switch remove list cd ijwb-export ijwb-import help"
+
+    if [[ ${COMP_CWORD} -eq 1 ]]; then
+      COMPREPLY=($(compgen -W "$commands" -- "$cur"))
+    else
+      case "${COMP_WORDS[1]}" in
+        add)
+          local branches
+          branches=$(git branch -a 2>/dev/null | sed 's/^[* ]*//' | sed 's|remotes/origin/||')
+          COMPREPLY=($(compgen -W "$branches" -- "$cur"))
+          ;;
+        switch|remove|cd)
+          local worktrees
+          if [[ -n "$WT_MAIN_REPO_ROOT" ]] && [[ -d "$WT_MAIN_REPO_ROOT" ]]; then
+            worktrees=$(git -C "$WT_MAIN_REPO_ROOT" worktree list --porcelain 2>/dev/null | grep '^worktree ' | cut -d' ' -f2-)
+            COMPREPLY=($(compgen -W "$worktrees" -- "$cur"))
+          fi
+          ;;
+        ijwb-import)
+          # First arg: source directory or target worktree
+          # Second arg: target worktree
+          if [[ ${COMP_CWORD} -eq 2 ]]; then
+            # First argument - could be source or target, offer both directories and worktrees
+            local worktrees
+            if [[ -n "$WT_MAIN_REPO_ROOT" ]] && [[ -d "$WT_MAIN_REPO_ROOT" ]]; then
+              worktrees=$(git -C "$WT_MAIN_REPO_ROOT" worktree list --porcelain 2>/dev/null | grep '^worktree ' | cut -d' ' -f2-)
+              COMPREPLY=($(compgen -W "$worktrees" -- "$cur"))
+            fi
+            COMPREPLY+=($(compgen -d -- "$cur"))
+          elif [[ ${COMP_CWORD} -eq 3 ]]; then
+            # Second argument - target worktree
+            local worktrees
+            if [[ -n "$WT_MAIN_REPO_ROOT" ]] && [[ -d "$WT_MAIN_REPO_ROOT" ]]; then
+              worktrees=$(git -C "$WT_MAIN_REPO_ROOT" worktree list --porcelain 2>/dev/null | grep '^worktree ' | cut -d' ' -f2-)
+              COMPREPLY=($(compgen -W "$worktrees" -- "$cur"))
+            fi
+          fi
+          ;;
+        ijwb-export)
+          # Complete directories
+          COMPREPLY=($(compgen -d -- "$cur"))
+          ;;
+      esac
+    fi
+  }
+  complete -F _wt_completion_bash wt
+fi
+

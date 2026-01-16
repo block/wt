@@ -1,0 +1,425 @@
+#!/usr/bin/env bash
+#
+# wt-ijwb-refresh — Refresh .ijwb directories and re-export to vault
+# ===================================================================
+#
+# This script refreshes stale `.ijwb` directories in the main repository by
+# regenerating their `targets/targets-*` files using bazel query, then
+# re-exports the refreshed metadata to the vault.
+#
+# This is useful for:
+#   - Keeping .ijwb metadata current when most work is done in worktrees
+#   - Running as a nightly cron job to prevent metadata staleness
+#   - Ensuring new Bazel targets are included in IntelliJ project metadata
+#
+# Behavior:
+# ---------
+# 1. Finds all `.ijwb` directories in $WT_MAIN_REPO_ROOT
+# 2. For each `.ijwb` directory:
+#    - Determines the project root (parent directory of .ijwb)
+#    - Runs `bazel query` to regenerate the targets file
+#    - Preserves the existing targets file hash if present
+# 3. Re-exports all .ijwb directories to the vault using wt-ijwb-export
+#
+# Usage:
+#   wt-ijwb-refresh                 # Refresh all .ijwb directories
+#   wt-ijwb-refresh --dry-run       # Show what would be done without making changes
+#   wt-ijwb-refresh --no-export     # Refresh targets files but skip re-export step
+#
+# Cron Setup:
+#   # Run nightly at 2am with full shell environment, log output
+#   0 2 * * * /bin/zsh -lc '~/.config/wt/lib/wt-ijwb-refresh' >> ~/.config/wt/logs/ijwb-refresh.log 2>&1
+#
+# Note:
+#   The bazel query approach may include more targets than IntelliJ's native sync
+#   (includes targets with manual/no-ide tags), but this is acceptable for keeping
+#   metadata current.
+#
+
+set -euo pipefail
+
+# Resolve script, lib, and bin directories
+# Note: This script lives in lib/, so LIB_DIR is the same as SCRIPT_DIR
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIB_DIR="$SCRIPT_DIR"
+BIN_DIR="$SCRIPT_DIR/../bin"
+
+# Bootstrap: source wt-common from lib/
+if [[ -f "$LIB_DIR/wt-common" ]]; then
+  . "$LIB_DIR/wt-common"
+elif [[ -f "$HOME/.config/wt/lib/wt-common" ]]; then
+  . "$HOME/.config/wt/lib/wt-common"
+else
+  echo "Error: Cannot find wt-common" >&2
+  exit 1
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Configuration
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Log directory for cron runs
+LOG_DIR="${WT_LOG_DIR:-$HOME/.config/wt/logs}"
+
+# Exit codes
+EXIT_SUCCESS=0
+EXIT_ERROR=1
+EXIT_PARTIAL=2
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Global state
+# ═══════════════════════════════════════════════════════════════════════════════
+
+DRY_RUN=false
+NO_EXPORT=false
+REFRESH_COUNT=0
+ERROR_COUNT=0
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Functions
+# ═══════════════════════════════════════════════════════════════════════════════
+
+usage() {
+  cat <<EOF
+Usage: $(basename "$0") [OPTIONS]
+
+Refresh .ijwb directories in the main repository and re-export to vault.
+
+Options:
+  --dry-run       Show what would be done without making changes
+  --no-export     Refresh targets files but skip re-export to vault
+  -h, --help      Show this help message
+
+Environment Variables:
+  WT_MAIN_REPO_ROOT   Main repository root (current: $WT_MAIN_REPO_ROOT)
+  WT_IDEA_FILES_BASE  IntelliJ metadata vault (current: $WT_IDEA_FILES_BASE)
+  WT_LOG_DIR          Log directory (current: $LOG_DIR)
+
+Cron Setup Example:
+  # Run nightly at 2am
+  0 2 * * * $SCRIPT_DIR/wt-ijwb-refresh >> $LOG_DIR/ijwb-refresh.log 2>&1
+
+EOF
+}
+
+# Log with timestamp (useful for cron logs)
+log() {
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
+}
+
+# Find all .ijwb directories in the main repo
+find_all_ijwb_dirs() {
+  # Use -maxdepth 5 for better performance since most .ijwb dirs are at service level
+  find "$WT_MAIN_REPO_ROOT" -maxdepth 5 -type d -name '.ijwb' 2>/dev/null
+}
+
+# Get the project root for an .ijwb directory (parent directory)
+get_project_root() {
+  local ijwb_dir="$1"
+  dirname "$ijwb_dir"
+}
+
+# Get the existing targets file in an .ijwb directory
+# Returns the path to the targets file, or empty if none exists
+get_existing_targets_file() {
+  local ijwb_dir="$1"
+  local targets_dir="$ijwb_dir/targets"
+  
+  if [[ -d "$targets_dir" ]]; then
+    # Find the first targets-* file
+    find "$targets_dir" -maxdepth 1 -name 'targets-*' -type f 2>/dev/null | head -n1
+  fi
+}
+
+# Generate a new targets file hash based on timestamp
+generate_targets_hash() {
+  echo "targets-$(date +%s)"
+}
+
+# Parse .bazelproject file and extract directories
+# Args: $1 = path to .bazelproject file
+# Returns: space-separated list of directories, or empty string if none found
+parse_bazelproject_directories() {
+  local bazelproject_file="$1"
+  
+  if [[ ! -f "$bazelproject_file" ]]; then
+    return
+  fi
+  
+  # Extract directories section (lines after "directories:" until next section or EOF)
+  # A section starts with a non-indented line ending with ":"
+  awk '
+    /^directories:/ { in_dirs=1; next }
+    /^[a-z_]+:/ { in_dirs=0 }
+    in_dirs && /^[[:space:]]+[^#]/ { gsub(/^[[:space:]]+/, ""); print }
+  ' "$bazelproject_file"
+}
+
+# Build bazel query expression from directories list
+# Args: directories (one per line via stdin)
+# Returns: query expression like "//dir1/... + //dir2/..."
+build_query_expression() {
+  local first=true
+  local query=""
+  
+  while IFS= read -r dir; do
+    # Skip empty lines
+    [[ -z "$dir" ]] && continue
+    
+    if [[ "$first" == "true" ]]; then
+      query="//${dir}/..."
+      first=false
+    else
+      query="$query + //${dir}/..."
+    fi
+  done
+  
+  echo "$query"
+}
+
+# Refresh the targets file for a single .ijwb directory using bazel query
+# Args: $1 = .ijwb directory path
+# Returns: 0 on success, 1 on failure
+refresh_targets_file() {
+  local ijwb_dir="$1"
+  local project_root
+  project_root="$(get_project_root "$ijwb_dir")"
+  
+  local project_name
+  project_name="$(basename "$project_root")"
+  
+  log "Refreshing: $project_name"
+  
+  # Check for .bazelproject file to determine query scope
+  local bazelproject_file="$ijwb_dir/.bazelproject"
+  local query_expr=""
+  
+  if [[ -f "$bazelproject_file" ]]; then
+    local directories
+    directories="$(parse_bazelproject_directories "$bazelproject_file")"
+    
+    if [[ -n "$directories" ]]; then
+      query_expr="$(echo "$directories" | build_query_expression)"
+      log "  Using directories from .bazelproject: $(echo "$directories" | tr '\n' ' ')"
+    fi
+  fi
+  
+  # Fallback to //... if no .bazelproject or no directories found
+  if [[ -z "$query_expr" ]]; then
+    query_expr="//..."
+    log "  No .bazelproject found, using //..."
+  fi
+  
+  # Ensure targets directory exists
+  local targets_dir="$ijwb_dir/targets"
+  if [[ "$DRY_RUN" == "false" ]]; then
+    mkdir -p "$targets_dir"
+  fi
+  
+  # Determine targets file path
+  local existing_targets_file
+  existing_targets_file="$(get_existing_targets_file "$ijwb_dir")"
+  
+  local targets_file
+  if [[ -n "$existing_targets_file" ]]; then
+    # Preserve existing filename (hash)
+    targets_file="$existing_targets_file"
+  else
+    # Generate new filename
+    targets_file="$targets_dir/$(generate_targets_hash)"
+  fi
+  
+  # Full bazel query command
+  local full_query="kind('.*', $query_expr)"
+  
+  if [[ "$DRY_RUN" == "true" ]]; then
+    log "  [dry-run] Would run: bazel query \"$full_query\" from $WT_MAIN_REPO_ROOT"
+    log "  [dry-run] Would write to: $targets_file"
+    return 0
+  fi
+  
+  # Run bazel query from the MAIN REPO ROOT (not project root)
+  # This is important because .bazelproject directories are relative to repo root
+  local query_output
+  local query_exit_code=0
+  
+  query_output=$(
+    cd "$WT_MAIN_REPO_ROOT" 2>/dev/null && \
+    bazel query "$full_query" --output=label 2>/dev/null | sort
+  ) || query_exit_code=$?
+  
+  if [[ $query_exit_code -ne 0 ]]; then
+    warn "  Bazel query failed for $project_name (exit code: $query_exit_code)"
+    return 1
+  fi
+  
+  if [[ -z "$query_output" ]]; then
+    warn "  Bazel query returned empty results for $project_name"
+    return 1
+  fi
+  
+  # Write output to targets file
+  echo "$query_output" > "$targets_file"
+  
+  local target_count
+  target_count=$(echo "$query_output" | wc -l | tr -d ' ')
+  log "  ✓ Updated $targets_file ($target_count targets)"
+  
+  return 0
+}
+
+# Refresh all .ijwb directories
+refresh_all_ijwb() {
+  log "Starting .ijwb refresh"
+  log "Main repo: $WT_MAIN_REPO_ROOT"
+  log ""
+  
+  local ijwb_dirs
+  ijwb_dirs=$(find_all_ijwb_dirs)
+  
+  if [[ -z "$ijwb_dirs" ]]; then
+    log "No .ijwb directories found in $WT_MAIN_REPO_ROOT"
+    return 0
+  fi
+  
+  local total_count
+  total_count=$(echo "$ijwb_dirs" | wc -l | tr -d ' ')
+  log "Found $total_count .ijwb directories"
+  log ""
+  
+  while IFS= read -r ijwb_dir; do
+    if refresh_targets_file "$ijwb_dir"; then
+      REFRESH_COUNT=$((REFRESH_COUNT + 1))
+    else
+      ERROR_COUNT=$((ERROR_COUNT + 1))
+    fi
+  done <<< "$ijwb_dirs"
+  
+  log ""
+  log "Refresh complete: $REFRESH_COUNT succeeded, $ERROR_COUNT failed"
+}
+
+# Re-export .ijwb directories to vault
+do_export() {
+  if [[ "$NO_EXPORT" == "true" ]]; then
+    log "Skipping export (--no-export specified)"
+    return 0
+  fi
+  
+  log ""
+  log "Re-exporting .ijwb directories to vault..."
+  
+  # Find wt-ijwb-export: try bin directory first, then PATH
+  local ijwb_export=""
+  if [[ -x "$BIN_DIR/wt-ijwb-export" ]]; then
+    ijwb_export="$BIN_DIR/wt-ijwb-export"
+  elif command -v wt-ijwb-export >/dev/null 2>&1; then
+    ijwb_export="wt-ijwb-export"
+  else
+    error "Cannot find wt-ijwb-export"
+    return 1
+  fi
+  
+  if [[ "$DRY_RUN" == "true" ]]; then
+    log "[dry-run] Would run: $ijwb_export -y"
+    return 0
+  fi
+  
+  "$ijwb_export" -y
+}
+
+# Ensure log directory exists
+ensure_log_dir() {
+  if [[ ! -d "$LOG_DIR" ]]; then
+    mkdir -p "$LOG_DIR"
+  fi
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Main
+# ═══════════════════════════════════════════════════════════════════════════════
+
+main() {
+  # Parse arguments
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --dry-run)
+        DRY_RUN=true
+        shift
+        ;;
+      --no-export)
+        NO_EXPORT=true
+        shift
+        ;;
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      *)
+        error "Unknown option: $1"
+        usage >&2
+        exit 1
+        ;;
+    esac
+  done
+  
+  # Validate main repo exists
+  if [[ ! -d "$WT_MAIN_REPO_ROOT" ]]; then
+    error "WT_MAIN_REPO_ROOT does not exist: $WT_MAIN_REPO_ROOT"
+    exit 1
+  fi
+  
+  # Verify bazel is available (critical for cron environments)
+  if ! command -v bazel >/dev/null 2>&1; then
+    error "bazel not found in PATH"
+    error "PATH=$PATH"
+    error "If running from cron, ensure bazel is in a standard location or update this script"
+    exit 1
+  fi
+  
+  # Validate vault exists (for export step)
+  if [[ "$NO_EXPORT" == "false" && ! -d "$WT_IDEA_FILES_BASE" ]]; then
+    error "WT_IDEA_FILES_BASE does not exist: $WT_IDEA_FILES_BASE"
+    exit 1
+  fi
+  
+  # Ensure log directory exists
+  ensure_log_dir
+  
+  log "════════════════════════════════════════════════════════════════════"
+  log "  wt-ijwb-refresh"
+  log "════════════════════════════════════════════════════════════════════"
+  
+  if [[ "$DRY_RUN" == "true" ]]; then
+    log "[DRY RUN MODE - no changes will be made]"
+  fi
+  
+  log ""
+  
+  # Refresh all .ijwb directories
+  refresh_all_ijwb
+  
+  # Re-export to vault
+  if [[ $REFRESH_COUNT -gt 0 || "$DRY_RUN" == "true" ]]; then
+    do_export
+  else
+    log "No .ijwb directories refreshed; skipping export"
+  fi
+  
+  log ""
+  log "════════════════════════════════════════════════════════════════════"
+  
+  # Determine exit code
+  if [[ $ERROR_COUNT -eq 0 ]]; then
+    log "All done!"
+    exit $EXIT_SUCCESS
+  elif [[ $REFRESH_COUNT -gt 0 ]]; then
+    log "Completed with some errors"
+    exit $EXIT_PARTIAL
+  else
+    log "Failed"
+    exit $EXIT_ERROR
+  fi
+}
+
+main "$@"

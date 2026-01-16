@@ -1,0 +1,155 @@
+#!/usr/bin/env bash
+#
+# wt-choose — Interactive Git Worktree Selection Helpers
+# ======================================================
+#
+# This script provides helper functions for working with git worktrees in a
+# consistent, interactive way. It is intended to be *sourced* by other scripts,
+# not executed directly.
+#
+# Behavior:
+# ---------
+# 1. Always operates inside the main repo located at:
+#        $WT_MAIN_REPO_ROOT
+#
+# 2. Provides `select_git_worktree`, an interactive menu for choosing from all
+#    existing git worktrees associated with the main repo.
+#       - Lists all worktrees using `git worktree list --porcelain`
+#       - Displays them in a numbered menu
+#       - Prompts the user to choose one
+#       - Returns the chosen worktree path via STDOUT
+#       - Sends all UI output to STDERR so caller scripts can safely use:
+#
+#            TARGET_DIR="$(select_git_worktree)"
+#
+# Intended Use:
+# -------------
+# These helper functions are used by:
+#    - wt-ijwb-import   (imports IntelliJ project metadata into a worktree)
+#    - wt-switch         (updates a symlink to point to a chosen worktree)
+#
+# Guarantees:
+# -----------
+# - All interactive output goes to STDERR, keeping STDOUT clean for return values.
+# - Fails clearly if WT_MAIN_REPO_ROOT is missing or not a valid git repo.
+# - Always returns a fully resolved absolute path to the selected worktree.
+# - Does not change the caller's working directory (runs in a subshell).
+#
+# Notes:
+# ------
+# - This script should be sourced, not invoked directly:
+#       source wt-choose
+# - Only minimal state is kept; behavior is deterministic and safe for shells,
+#   automation wrappers, and nested scripts.
+#
+
+set -euo pipefail
+
+# Resolve lib directory (where this script lives)
+LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Bootstrap: source wt-common from same directory
+if [[ -f "$LIB_DIR/wt-common" ]]; then
+  . "$LIB_DIR/wt-common"
+elif [[ -f "$HOME/.config/wt/lib/wt-common" ]]; then
+  . "$HOME/.config/wt/lib/wt-common"
+else
+  echo "Error: Cannot find wt-common" >&2
+  exit 1
+fi
+
+# Interactively pick a worktree from WT_MAIN_REPO_ROOT
+# Runs in a subshell to avoid changing the caller's working directory
+# Args: $1 = "exclude_main" to exclude the main repository from selection
+select_git_worktree() {
+  local exclude_main="${1:-}"
+  (
+    if [[ ! -d "$WT_MAIN_REPO_ROOT" ]]; then
+      error "WT_MAIN_REPO_ROOT does not exist: $WT_MAIN_REPO_ROOT"
+      exit 1
+    fi
+
+    cd "$WT_MAIN_REPO_ROOT" || {
+      error "cannot cd to $WT_MAIN_REPO_ROOT"
+      exit 1
+    }
+
+    if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+      error "$WT_MAIN_REPO_ROOT is not a git repo/worktree."
+      exit 1
+    fi
+
+    # Get absolute path of main repo
+    local main_repo_abs
+    main_repo_abs="$(cd "$WT_MAIN_REPO_ROOT" && pwd)"
+    
+    # Get currently linked worktree for display
+    local linked_worktree
+    linked_worktree="$(wt_get_linked_worktree)"
+
+    local WORKTREES=()
+    local line wt wt_abs
+
+    while IFS= read -r line; do
+      case "$line" in
+        worktree\ *)
+          wt="${line#worktree }"
+          wt_abs="$(cd "$wt" && pwd)"
+          # Skip main repo if exclude_main is set
+          if [[ "$exclude_main" != "exclude_main" || "$wt_abs" != "$main_repo_abs" ]]; then
+            WORKTREES[${#WORKTREES[@]}]="$wt_abs"
+          fi
+          ;;
+      esac
+    done < <(git worktree list --porcelain)
+
+    if [[ ${#WORKTREES[@]} -eq 0 ]]; then
+      if [[ "$exclude_main" == "exclude_main" ]]; then
+        echoerr "No worktrees found (main repo is excluded)."
+      else
+      echoerr "No worktrees found."
+      fi
+      exit 1
+    fi
+
+    echoerr ""
+
+    local i=1
+    for wt in "${WORKTREES[@]}"; do
+      # Determine prefix (* for currently linked worktree)
+      local prefix="  "
+      if [[ -n "$linked_worktree" && "$wt" == "$linked_worktree" ]]; then
+        prefix="${GREEN}*${NC} "
+      fi
+      # Use shared formatting with number prefix (fast mode - no status checks)
+      printf "%s%2d) %s\n" "$prefix" "$i" "$(wt_format_worktree "$wt" "$main_repo_abs" "$linked_worktree" "false")" >&2
+      i=$((i + 1))
+    done
+
+    echoerr ""
+    # Prompt goes to stderr so stdout stays clean for return value
+    # Note: read -p outputs prompt to stderr by default
+    local choice
+    if ! read -rp "Select worktree [1-${#WORKTREES[@]}]: " choice; then
+      # Ctrl-C or EOF
+      echoerr ""
+      exit 1
+    fi
+
+    case "$choice" in
+      ''|*[!0-9]*)
+        echoerr "Invalid selection."
+        exit 1
+        ;;
+    esac
+
+    if (( choice < 1 || choice > ${#WORKTREES[@]} )); then
+      echoerr "Invalid selection."
+      exit 1
+    fi
+
+    local selected="${WORKTREES[$((choice - 1))]}"
+    echo "$selected"
+    exit 0
+  )
+}

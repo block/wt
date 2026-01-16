@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+#
+# wt-cd — Output Worktree Path for Quick Navigation
+# ==================================================
+#
+# This script outputs a worktree path to stdout for use with shell navigation.
+# It supports both interactive mode (menu selection) and argument mode.
+#
+# Usage:
+#   wt-cd                  # Interactive: pick worktree from menu, output path
+#   wt-cd <worktree-path>  # Output the validated absolute path
+#
+# Typical Usage Pattern:
+#   cd "$(wt-cd)"          # Interactive navigation
+#   cd "$(wt-cd /path)"    # Direct navigation with validation
+#
+# Shell Integration:
+#   Add to your ~/.zshrc or ~/.bashrc:
+#     wtcd() { cd "$(wt-cd "$@")"; }
+#
+# Notes:
+# ------
+# - All UI output goes to STDERR, keeping STDOUT clean for the path.
+# - The script validates that the target is a valid git worktree.
+# - Returns exit code 1 if selection is cancelled or validation fails.
+#
+
+set -euo pipefail
+
+# Resolve script and lib directories
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIB_DIR="$SCRIPT_DIR/../lib"
+
+# Bootstrap: source wt-common from lib/
+if [[ -f "$LIB_DIR/wt-common" ]]; then
+  . "$LIB_DIR/wt-common"
+elif [[ -f "$HOME/.config/wt/lib/wt-common" ]]; then
+  . "$HOME/.config/wt/lib/wt-common"
+else
+  echo "Error: Cannot find wt-common" >&2
+  exit 1
+fi
+
+# Source wt-choose using the helper
+wt_source wt-choose
+
+usage() {
+  cat >&2 <<EOF
+Usage: $(basename "$0") [worktree-path]
+
+Modes:
+  $(basename "$0")              # Interactive: pick worktree from menu
+  $(basename "$0") <worktree>   # Output validated path directly
+
+Typical Usage:
+  cd "\$(wt-cd)"          # Navigate to selected worktree
+  cd "\$(wt-cd /path)"    # Navigate with validation
+
+Shell Integration:
+  Add to your shell config:
+    wtcd() { cd "\$(wt-cd "\$@")"; }
+EOF
+}
+
+TARGET_WORKTREE=""
+
+if [[ $# -gt 1 ]]; then
+  usage
+  exit 1
+fi
+
+if [[ $# -eq 1 ]]; then
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      TARGET_WORKTREE="$1"
+      ;;
+  esac
+fi
+
+#
+# Pick target worktree (interactive or from argument)
+#
+if [[ -z "$TARGET_WORKTREE" ]]; then
+  TARGET_WORKTREE="$(select_git_worktree)" || exit 1
+else
+  # Validate provided worktree path exists
+  if [[ ! -d "$TARGET_WORKTREE" ]]; then
+    error "Worktree path does not exist: $TARGET_WORKTREE"
+    exit 1
+  fi
+  # Normalize to absolute path
+  TARGET_WORKTREE="$(cd "$TARGET_WORKTREE" && pwd)"
+  # Validate it's a git worktree
+  if ! git -C "$TARGET_WORKTREE" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    error "$TARGET_WORKTREE is not a git repository or worktree"
+    exit 1
+  fi
+fi
+
+# Output the path (only thing that goes to stdout)
+echo "$TARGET_WORKTREE"
+
+# If stdout is a TTY (script run directly, not via command substitution),
+# show a hint about how to actually change directories
+if [[ -t 1 ]]; then
+  echoerr ""
+  echoerr "${YELLOW}Hint:${NC} To change directory, use: ${BOLD}cd \"\$(wt-cd)\"${NC}"
+  echoerr "      Or add to ~/.zshrc: ${BOLD}wtcd() { cd \"\$(wt-cd \"\$@\")\"; }${NC}"
+fi
+

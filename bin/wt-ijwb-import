@@ -1,0 +1,246 @@
+#!/usr/bin/env bash
+#
+# wt-ijwb-import — Import IntelliJ `.ijwb` Metadata Into a Target Worktree
+# ==========================================================================
+#
+# This script locates all `.ijwb` directories within a source directory and
+# reproduces them inside a target directory. Instead of linking the `.ijwb`
+# directory itself, the script **resolves any symlinks** in the source and
+# **copies the actual underlying directory** into the target.
+#
+# This allows a worktree to receive the “real” IntelliJ Bazel project metadata
+# even when the source `.ijwb` directories are symlinked (e.g., from a shared
+# metadata workspace). It is especially useful in large monorepos where Bazel
+# import time is expensive, and multiple worktrees must share identical IDE
+# metadata.
+#
+# Behavior:
+# ---------
+# 1. Supports three invocation modes:
+#      - `wt-ijwb-import <source> <target>`   → explicit paths
+#      - `wt-ijwb-import <target>`            → $WT_IDEA_FILES_BASE is source
+#      - `wt-ijwb-import`                     → $WT_IDEA_FILES_BASE is source,
+#                                               interactively pick the target worktree
+#
+# 2. If no target directory is provided, the script invokes `select_git_worktree`
+#    (from `wt-choose`) to interactively select one.
+#
+# 3. For every `.ijwb` directory found under the source:
+#      - Computes its relative path
+#      - Ensures the corresponding directory exists under the target
+#      - If the source `.ijwb` is a symlink:
+#            • Resolves the real path (absolute)
+#            • Copies the *real* directory using `cp -a`
+#      - If the source `.ijwb` is a real directory:
+#            • Copies it directly
+#
+# 4. The result is a target worktree whose `.ijwb` directories exactly mirror the
+#    underlying canonical IntelliJ metadata, avoiding duplication while remaining
+#    resilient to changes in the source workspace.
+#
+# Guarantees:
+# -----------
+# - Works with absolute paths to avoid symlink resolution issues.
+# - Only `.ijwb` directories are processed; other files and directories are ignored.
+# - Safe to rerun; existing `.ijwb` directories in the target are replaced.
+# - All UI output is printed normally; scripting callers can capture behavior reliably.
+#
+# Usage Examples:
+# ---------------
+#   # Import real .ijwb content from current directory into a selected worktree
+#   wt-ijwb-import
+#
+#   # Import from one explicit directory to another
+#   wt-ijwb-import ~/dev/shared-idea ~/dev/worktrees/feature-x
+#
+#   # Use current directory as source, specific directory as target
+#   wt-ijwb-import ~/Development/java-worktrees/feature-x
+#
+# Note: If you create a new IntelliJ Bazel project in the source directory,
+# you need to run wt-ijwb-export again to sync it to the metadata vault.
+# This ensures newly created worktrees will receive the new .ijwb metadata.
+#
+
+set -euo pipefail
+
+# Resolve script and lib directories
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIB_DIR="$SCRIPT_DIR/../lib"
+
+# Bootstrap: source wt-common from lib/
+if [[ -f "$LIB_DIR/wt-common" ]]; then
+  . "$LIB_DIR/wt-common"
+elif [[ -f "$HOME/.config/wt/lib/wt-common" ]]; then
+  . "$HOME/.config/wt/lib/wt-common"
+else
+  echo "Error: Cannot find wt-common" >&2
+  exit 1
+fi
+
+# Source wt-choose using the helper
+wt_source wt-choose
+
+usage() {
+  cat >&2 <<EOF
+Usage: $(basename "$0") [-y|--yes] [source-directory] <target-directory>
+
+Options:
+  -y, --yes           Skip confirmation prompt
+
+Arguments:
+  source-directory    Metadata vault location (default: \$WT_IDEA_FILES_BASE)
+  target-directory    Target worktree to import into (REQUIRED, or interactive if omitted)
+
+Modes:
+  $(basename "$0")                              # Interactive: pick target worktree
+  $(basename "$0") <target>                     # Import to specific worktree
+  $(basename "$0") <source> <target>            # Explicit source and target
+
+Default source: $WT_IDEA_FILES_BASE
+EOF
+}
+
+SOURCE_DIR=""
+TARGET_DIR=""
+SKIP_CONFIRM=false
+
+# Parse options
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    -y|--yes)
+      SKIP_CONFIRM=true
+      shift
+      ;;
+    -*)
+      error "Unknown option: $1"
+      usage
+      exit 1
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+
+# Parse positional arguments
+case $# in
+  0)
+    # No arguments: default source, interactive target selection
+    SOURCE_DIR="$WT_IDEA_FILES_BASE"
+    echo "Source: $SOURCE_DIR (from \$WT_IDEA_FILES_BASE)"
+    echo "No target directory specified, selecting a git worktree..."
+    TARGET_DIR="$(select_git_worktree)" || exit 1
+    ;;
+  1)
+    # One argument: default source, specified target
+    SOURCE_DIR="$WT_IDEA_FILES_BASE"
+    TARGET_DIR="$1"
+    ;;
+  2)
+    # Two arguments: explicit source and target
+    SOURCE_DIR="$1"
+    TARGET_DIR="$2"
+    ;;
+  *)
+    error "Too many arguments"
+    usage
+    exit 1
+    ;;
+esac
+
+# Resolve absolute paths
+SOURCE_DIR="$(cd "$SOURCE_DIR" && pwd)"
+TARGET_DIR="$(cd "$TARGET_DIR" && pwd)"
+
+echo "Source directory: $SOURCE_DIR"
+echo "Target directory: $TARGET_DIR"
+echo
+
+# Confirmation prompt (skip if -y/--yes was provided)
+if [[ "$SKIP_CONFIRM" != "true" ]]; then
+  if ! prompt_confirm "Import .ijwb metadata from source to target? [y/N]" "n"; then
+    echo "Aborted."
+    exit 0
+  fi
+  echo
+fi
+
+# Copy a .ijwb directory, resolving symlinks to real paths when needed.
+# Args:
+#   $1 = source .ijwb path (may be symlink or real dir)
+#   $2 = destination .ijwb path (directory to create)
+# Returns:
+#   0 on success, 1 if source doesn't exist (broken symlink)
+copy_real_ijwb() {
+  local src="$1"
+  local dst="$2"
+  local real_path
+
+  if [[ -L "$src" ]]; then
+    # It's a symlink: resolve it
+    real_path="$(readlink "$src")"
+
+    # If the symlink target is relative, make it absolute
+    if [[ "$real_path" != /* ]]; then
+      real_path="$(cd "$(dirname "$src")" && cd "$(dirname "$real_path")" && pwd)/$(basename "$real_path")"
+    fi
+
+    # Check if the resolved path exists
+    if [[ ! -e "$real_path" ]]; then
+      warn "Broken symlink: $src -> $real_path (target does not exist)"
+      return 1
+    fi
+  else
+    # Not a symlink; use the directory itself
+    real_path="$src"
+  fi
+
+  # Copy the real directory contents
+  # Use cp -a to preserve attributes and copy recursively
+  cp -a "$real_path" "$dst"
+}
+
+# Find all .ijwb directories (symlinks or real directories) under the source directory
+find "$SOURCE_DIR" \( -type l -o -type d \) -name '.ijwb' -print0 |
+  while IFS= read -r -d '' IJWB_SRC; do
+    # Parent dir relative to SOURCE_DIR
+    PARENT_SRC="$(dirname "$IJWB_SRC")"
+    
+    # Handle .ijwb at root (PARENT_SRC == SOURCE_DIR)
+    if [[ "$PARENT_SRC" == "$SOURCE_DIR" ]]; then
+      REL_PATH=""
+    else
+      REL_PATH="${PARENT_SRC#"$SOURCE_DIR"/}"
+    fi
+
+    # Corresponding target parent
+    if [[ -z "$REL_PATH" ]]; then
+      TARGET_PARENT="$TARGET_DIR"
+    else
+      TARGET_PARENT="$TARGET_DIR/$REL_PATH"
+    fi
+    TARGET_IJWB="$TARGET_PARENT/.ijwb"
+
+    echo "Found source: $IJWB_SRC"
+    echo " -> Installing to: $TARGET_IJWB"
+
+    mkdir -p "$TARGET_PARENT"
+
+    if [[ -e "$TARGET_IJWB" || -L "$TARGET_IJWB" ]]; then
+      rm -rf "$TARGET_IJWB"
+    fi
+
+    if ! copy_real_ijwb "$IJWB_SRC" "$TARGET_IJWB"; then
+      echo "   Skipping due to broken symlink"
+      echo "   Removing broken symlink from vault: $IJWB_SRC"
+      rm -f "$IJWB_SRC"
+    fi
+
+    echo
+  done
+
+success "Done installing .ijwb metadata."

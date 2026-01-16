@@ -1,0 +1,132 @@
+#!/usr/bin/env bash
+#
+# wt-switch — Switch Active Git Worktree via Symlink
+# ==================================================
+#
+# This script selects an existing git worktree and updates a symbolic link
+# to point to it. The link acts as a "current worktree pointer," allowing
+# tools and editors (e.g., IntelliJ) to consistently open whichever worktree
+# you switch to without manually navigating directories.
+#
+# Behavior:
+# ---------
+# 1. If a worktree path is provided as an argument, uses it directly.
+#    Otherwise, uses `select_git_worktree` (from wt-choose) to present an
+#    interactive menu of available worktrees.
+#
+# 2. The symlink path is WT_ACTIVE_WORKTREE (configured in wt-common).
+#
+# 3. Displays the *current* linked worktree (if the symlink already exists).
+#
+# 4. Ensures parent directories exist, removes any existing link or file at the
+#    target location, and creates a fresh symlink pointing to the selected
+#    worktree.
+#
+# Usage:
+#   wt-switch                 # Interactive: pick worktree from menu
+#   wt-switch <worktree>      # Non-interactive: switch to specified worktree
+#
+# Notes:
+# ------
+# - The symlink location is configured via WT_ACTIVE_WORKTREE in wt-common.
+# - This script is intended to be used together with the `wt-add`, `wt-choose`,
+#   `wt-ijwb-import`, and `wt-ijwb-export` tools as part of the workflow suite.
+#
+
+set -euo pipefail
+
+# Resolve script and lib directories
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIB_DIR="$SCRIPT_DIR/../lib"
+
+# Bootstrap: source wt-common from lib/
+if [[ -f "$LIB_DIR/wt-common" ]]; then
+  . "$LIB_DIR/wt-common"
+elif [[ -f "$HOME/.config/wt/lib/wt-common" ]]; then
+  . "$HOME/.config/wt/lib/wt-common"
+else
+  echo "Error: Cannot find wt-common" >&2
+  exit 1
+fi
+
+# Source wt-choose using the helper
+wt_source wt-choose
+
+usage() {
+  echo "Usage: $(basename "$0") [worktree_path]"
+  echo
+  echo "Modes:"
+  echo "  $(basename "$0")              # Interactive: pick worktree from menu"
+  echo "  $(basename "$0") <worktree>   # Non-interactive: switch to specified worktree"
+}
+
+TARGET_WORKTREE=""
+
+if [[ $# -gt 1 ]]; then
+  usage >&2
+  exit 1
+fi
+
+if [[ $# -eq 1 ]]; then
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      TARGET_WORKTREE="$1"
+      ;;
+  esac
+fi
+
+# Resolve link path from config
+LINK_PATH="$WT_ACTIVE_WORKTREE"
+if [[ -d "$(dirname "$LINK_PATH")" ]]; then
+  LINK_PATH="$(cd "$(dirname "$LINK_PATH")" && pwd)/$(basename "$LINK_PATH")"
+fi
+
+#
+# Display current linked worktree if it exists
+#
+if [[ -L "$LINK_PATH" ]]; then
+  : # Symlink exists, will be updated below
+elif [[ -e "$LINK_PATH" ]]; then
+  warn "$LINK_PATH exists but is not a symlink (cannot determine current worktree)"
+else
+  info "No current linked worktree (symlink does not exist)"
+fi
+
+#
+# Pick target worktree (interactive or from argument)
+#
+if [[ -z "$TARGET_WORKTREE" ]]; then
+  TARGET_WORKTREE="$(select_git_worktree)" || exit 1
+else
+  # Validate provided worktree path exists
+  if [[ ! -d "$TARGET_WORKTREE" ]]; then
+    error "Worktree path does not exist: $TARGET_WORKTREE"
+    exit 1
+  fi
+  # Normalize to absolute path
+  TARGET_WORKTREE="$(cd "$TARGET_WORKTREE" && pwd)"
+  # Validate it's a git worktree
+  if ! git -C "$TARGET_WORKTREE" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    error "$TARGET_WORKTREE is not a git repository or worktree"
+    exit 1
+  fi
+fi
+
+mkdir -p "$(dirname "$LINK_PATH")"
+
+# Safely handle existing link path - only remove symlinks, error on real files/dirs
+if [[ -L "$LINK_PATH" ]]; then
+  rm "$LINK_PATH"
+elif [[ -e "$LINK_PATH" ]]; then
+  error "$LINK_PATH exists but is not a symlink. Refusing to remove."
+  exit 1
+fi
+
+ln -s "$TARGET_WORKTREE" "$LINK_PATH"
+
+success "Switched active worktree:"
+echo "  $LINK_PATH -> $TARGET_WORKTREE"
