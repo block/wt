@@ -227,6 +227,53 @@ The refresh script:
 - Returns exit codes: 0=success, 1=error, 2=partial success
 
 
+## Using `wt` with Conductor Workspaces
+
+[Conductor](https://conductor.build) creates git worktrees in `.conductor/<workspace-name>/`. Here's how to configure `wt` to work with them.
+
+### Installation
+
+During `wt` install, set these values:
+- **Worktrees base**: `<repo-root>/.conductor`
+- **Active worktree symlink**: `<repo-root>-conductor` (or another unused path)
+- **Main repo root**: `<repo-root>`
+
+### Setup
+
+```bash
+# Export IntelliJ metadata to the vault (if not done automatically)
+wt ijwb-export
+
+# Import metadata into your Conductor workspace
+wt switch .conductor/<workspace-name>
+wt ijwb-import
+
+# Open the symlink in IntelliJ (one-time)
+# File > Open > <repo-root>-conductor
+```
+
+### Switching Workspaces
+
+```bash
+wt switch .conductor/<workspace-name>
+```
+
+IntelliJ will refresh incrementally in seconds.
+
+**Tip**: Add an alias for convenience:
+```bash
+# In .zshrc
+cwt() { wt switch ".conductor/$1"; }
+
+# Usage: cwt valencia
+```
+
+### Notes
+
+- First open in IntelliJ requires a full index build
+- New Conductor workspaces need `wt ijwb-import` before opening
+- You can have both `<repo-root>` and `<repo-root>-conductor` open in IntelliJ simultaneously
+
 ## Configuration: Environment Variables
 The scripts rely on a few environment variables to know where your
 main repository, worktrees, and IntelliJ metadata live.
