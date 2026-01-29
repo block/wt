@@ -127,20 +127,61 @@ derive_paths_from_repo() {
 # Detect which known metadata patterns exist in a repository
 # Args: $1 = repo path
 # Outputs: space-separated list of detected patterns
+# Note: Deduplicates by finding top-level metadata dirs only
+#       (e.g., if .ijwb contains .idea, only .ijwb is reported)
 detect_metadata_patterns() {
   local repo="$1"
-  local detected=()
+  local all_paths=()
 
+  # Find all metadata directories for all known patterns
   for entry in "${WT_KNOWN_METADATA[@]}"; do
     local pattern="${entry%%:*}"
-    # Search for the pattern in the repo (up to depth 3 for nested projects)
-    # Use -L to follow symlinks (repo path might be a symlink)
-    if find -L "$repo" -maxdepth 3 -type d -name "$pattern" 2>/dev/null | grep -q .; then
-      detected+=("$pattern")
-    fi
+    while IFS= read -r path; do
+      [[ -n "$path" ]] && all_paths+=("$path")
+    done < <(find -L "$repo" -maxdepth 5 -type d -name "$pattern" 2>/dev/null)
   done
 
-  echo "${detected[*]}"
+  # No metadata found
+  if [[ ${#all_paths[@]} -eq 0 ]]; then
+    return
+  fi
+
+  # Sort paths (shorter paths come first)
+  local sorted_paths
+  sorted_paths=$(printf '%s\n' "${all_paths[@]}" | sort)
+
+  # Deduplicate: keep only top-level metadata dirs
+  local kept_paths=()
+  while IFS= read -r path; do
+    [[ -z "$path" ]] && continue
+    local dominated=false
+
+    for kept in "${kept_paths[@]}"; do
+      if [[ "$path" == "$kept/"* ]]; then
+        dominated=true
+        break
+      fi
+    done
+
+    if [[ "$dominated" == "false" ]]; then
+      kept_paths+=("$path")
+    fi
+  done <<< "$sorted_paths"
+
+  # Extract unique pattern names from kept paths
+  local patterns=()
+  for path in "${kept_paths[@]}"; do
+    local pattern
+    pattern="$(basename "$path")"
+    # Add to patterns if not already present
+    local found=false
+    for p in "${patterns[@]}"; do
+      [[ "$p" == "$pattern" ]] && found=true && break
+    done
+    [[ "$found" == "false" ]] && patterns+=("$pattern")
+  done
+
+  echo "${patterns[*]}"
 }
 
 # Get description for a metadata pattern

@@ -110,6 +110,12 @@ case $# in
     ;;
 esac
 
+# Expand ~ to $HOME (bash doesn't expand ~ in variable assignments)
+[[ "$SOURCE_DIR" == "~/"* ]] && SOURCE_DIR="${HOME}/${SOURCE_DIR:2}"
+[[ "$SOURCE_DIR" == "~" ]] && SOURCE_DIR="$HOME"
+[[ "$TARGET_DIR" == "~/"* ]] && TARGET_DIR="${HOME}/${TARGET_DIR:2}"
+[[ "$TARGET_DIR" == "~" ]] && TARGET_DIR="$HOME"
+
 # Validate directories exist before proceeding
 if [[ ! -d "$SOURCE_DIR" ]]; then
   error "Source directory does not exist: $SOURCE_DIR"
@@ -146,68 +152,99 @@ if [[ "$SKIP_CONFIRM" != "true" ]]; then
   echo
 fi
 
-# Export a single pattern
-# Args: $1 = pattern name (e.g., ".ijwb")
-export_pattern() {
-  local pattern="$1"
-  local count=0
+# Find all metadata directories and deduplicate
+# Outputs: one path per line, with nested paths removed
+# (e.g., if .ijwb contains .idea, only .ijwb is listed)
+find_all_metadata_dirs() {
+  local all_paths=()
 
-  echo "Exporting '$pattern' directories..."
+  # Collect all metadata directories for all patterns
+  for pattern in $WT_METADATA_PATTERNS; do
+    while IFS= read -r path; do
+      [[ -n "$path" ]] && all_paths+=("$path")
+    done < <(find -L "$SOURCE_DIR" -maxdepth 5 -type d -name "$pattern" 2>/dev/null)
+  done
 
-  # First, clean up any existing symlinks for this pattern in the vault
+  # Sort paths (shorter paths come first)
+  local sorted_paths
+  sorted_paths=$(printf '%s\n' "${all_paths[@]}" | sort)
+
+  # Deduplicate: skip paths that are inside another metadata path
+  local kept_paths=()
+  while IFS= read -r path; do
+    [[ -z "$path" ]] && continue
+    local dominated=false
+
+    for kept in "${kept_paths[@]}"; do
+      # Check if $path is inside $kept (kept is a prefix of path)
+      if [[ "$path" == "$kept/"* ]]; then
+        dominated=true
+        break
+      fi
+    done
+
+    if [[ "$dominated" == "false" ]]; then
+      kept_paths+=("$path")
+      echo "$path"
+    fi
+  done <<< "$sorted_paths"
+}
+
+echo "Finding and deduplicating metadata directories..."
+echo
+
+# Clean up existing symlinks in vault for all patterns
+for pattern in $WT_METADATA_PATTERNS; do
   find -L "$TARGET_DIR" -type l -name "$pattern" -print0 2>/dev/null | while IFS= read -r -d '' OLD_LINK; do
     rm -f "$OLD_LINK"
   done
-
-  # Find all matching directories under SOURCE_DIR
-  # Use -maxdepth 5 for better performance
-  # Use -L to follow symlinks (source path might be a symlink)
-  find -L "$SOURCE_DIR" -maxdepth 5 -type d -name "$pattern" -print0 2>/dev/null |
-    while IFS= read -r -d '' META_DIR; do
-      # Compute the path of the parent directory relative to SOURCE_DIR
-      PARENT_DIR="$(dirname "$META_DIR")"
-
-      # Handle pattern at root (PARENT_DIR == SOURCE_DIR)
-      if [[ "$PARENT_DIR" == "$SOURCE_DIR" ]]; then
-        REL_PARENT=""
-      else
-        REL_PARENT="${PARENT_DIR#"$SOURCE_DIR"/}"
-      fi
-
-      # Validate that we actually stripped the prefix (path should be relative now)
-      if [[ "$REL_PARENT" == /* ]]; then
-        warn "Skipping $pattern outside source directory: $META_DIR"
-        continue
-      fi
-
-      # Destination parent and pattern path in the target directory
-      if [[ -z "$REL_PARENT" ]]; then
-        DEST_PARENT="$TARGET_DIR"
-      else
-        DEST_PARENT="$TARGET_DIR/$REL_PARENT"
-      fi
-      DEST_META="$DEST_PARENT/$pattern"
-
-      echo "  -> Linking $DEST_META"
-
-      # Create the parent directories first
-      mkdir -p "$DEST_PARENT"
-
-      # Create or update the symlink
-      ln -sfn "$META_DIR" "$DEST_META"
-
-      count=$((count + 1))
-    done
-
-  if [[ $count -eq 0 ]]; then
-    echo "  (no '$pattern' directories found)"
-  fi
-}
-
-# Export each configured pattern
-for pattern in $WT_METADATA_PATTERNS; do
-  export_pattern "$pattern"
-  echo
 done
 
-success "Done exporting metadata directories."
+# Find all metadata dirs (deduplicated) and export them
+count=0
+while IFS= read -r META_DIR; do
+  [[ -z "$META_DIR" ]] && continue
+
+  pattern="$(basename "$META_DIR")"
+  PARENT_DIR="$(dirname "$META_DIR")"
+
+  # Handle pattern at root (PARENT_DIR == SOURCE_DIR)
+  if [[ "$PARENT_DIR" == "$SOURCE_DIR" ]]; then
+    REL_PARENT=""
+  else
+    REL_PARENT="${PARENT_DIR#"$SOURCE_DIR"/}"
+  fi
+
+  # Validate that we actually stripped the prefix (path should be relative now)
+  if [[ "$REL_PARENT" == /* ]]; then
+    warn "Skipping $pattern outside source directory: $META_DIR"
+    continue
+  fi
+
+  # Destination parent and pattern path in the target directory
+  if [[ -z "$REL_PARENT" ]]; then
+    DEST_PARENT="$TARGET_DIR"
+  else
+    DEST_PARENT="$TARGET_DIR/$REL_PARENT"
+  fi
+  DEST_META="$DEST_PARENT/$pattern"
+
+  echo "  -> Linking $DEST_META"
+
+  # Create the parent directories first
+  mkdir -p "$DEST_PARENT"
+
+  # Create or update the symlink
+  ln -sfn "$META_DIR" "$DEST_META"
+
+  count=$((count + 1))
+done < <(find_all_metadata_dirs)
+
+if [[ $count -eq 0 ]]; then
+  echo "  (no metadata directories found)"
+else
+  echo
+  echo "Exported $count metadata directories."
+fi
+
+success "Done."

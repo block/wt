@@ -127,6 +127,12 @@ case $# in
     ;;
 esac
 
+# Expand ~ to $HOME (bash doesn't expand ~ in variable assignments)
+[[ "$SOURCE_DIR" == "~/"* ]] && SOURCE_DIR="${HOME}/${SOURCE_DIR:2}"
+[[ "$SOURCE_DIR" == "~" ]] && SOURCE_DIR="$HOME"
+[[ "$TARGET_DIR" == "~/"* ]] && TARGET_DIR="${HOME}/${TARGET_DIR:2}"
+[[ "$TARGET_DIR" == "~" ]] && TARGET_DIR="$HOME"
+
 # Resolve absolute paths
 SOURCE_DIR="$(cd "$SOURCE_DIR" && pwd)"
 TARGET_DIR="$(cd "$TARGET_DIR" && pwd)"
