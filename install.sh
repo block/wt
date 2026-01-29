@@ -155,7 +155,7 @@ detect_metadata_patterns() {
     [[ -z "$path" ]] && continue
     local dominated=false
 
-    for kept in "${kept_paths[@]}"; do
+    for kept in ${kept_paths[@]+"${kept_paths[@]}"}; do
       if [[ "$path" == "$kept/"* ]]; then
         dominated=true
         break
@@ -169,7 +169,7 @@ detect_metadata_patterns() {
 
   # Extract unique pattern names from kept paths
   local patterns=()
-  for path in "${kept_paths[@]}"; do
+  for path in ${kept_paths[@]+"${kept_paths[@]}"}; do
     local pattern
     pattern="$(basename "$path")"
     # Add to patterns if not already present
@@ -287,11 +287,7 @@ select_metadata_patterns() {
             done
             if ((found)); then
               # Assign empty or populated array safely
-              if [[ ${#new_selected[@]} -gt 0 ]]; then
-                selected=("${new_selected[@]}")
-              else
-                selected=()
-              fi
+              selected=(${new_selected[@]+"${new_selected[@]}"})
             else
               selected+=("$pattern")
             fi
@@ -317,7 +313,7 @@ select_metadata_patterns() {
     echo "Enter numbers to toggle, 'a' for all, 'n' for none, or Enter to confirm:"
   done
 
-  # Safely handle empty array (${arr[*]} on empty array is fine, but be explicit)
+  # Safely handle empty array
   if [[ ${#selected[@]} -gt 0 ]]; then
     WT_METADATA_PATTERNS="${selected[*]}"
   else
@@ -348,8 +344,8 @@ install_toolkit() {
   # Make bin scripts executable
   chmod +x "$INSTALL_DIR"/bin/wt-*
 
-  # Make lib/wt-metadata-refresh executable (for cron job)
-  chmod +x "$INSTALL_DIR"/lib/wt-metadata-refresh
+  # Make lib/wt-ijwb-refresh executable (for cron job)
+  [[ -f "$INSTALL_DIR/lib/wt-ijwb-refresh" ]] && chmod +x "$INSTALL_DIR"/lib/wt-ijwb-refresh
 
   echo "  ✓ Installed to $INSTALL_DIR"
 }
@@ -591,9 +587,15 @@ migrate_repo() {
 
 # Set up cron job for metadata refresh
 setup_cron_job() {
-  local refresh_script="$INSTALL_DIR/lib/wt-metadata-refresh"
+  local refresh_script="$INSTALL_DIR/lib/wt-ijwb-refresh"
+
+  # Skip if refresh script doesn't exist
+  if [[ ! -f "$refresh_script" ]]; then
+    return 0
+  fi
+
   local log_dir="$HOME/.wt/logs"
-  local log_file="$log_dir/metadata-refresh.log"
+  local log_file="$log_dir/ijwb-refresh.log"
   local cron_entry="0 2 * * * /bin/zsh -lc '$refresh_script' >> $log_file 2>&1"
 
   echo "════════════════════════════════════════════════════════════════════════════════"
@@ -623,15 +625,8 @@ setup_cron_job() {
   mkdir -p "$log_dir"
   echo "  ✓ Created log directory: $log_dir"
 
-  # Check for old cron job (wt-ijwb-refresh) and offer to migrate
+  # Check if cron job already exists
   if crontab -l 2>/dev/null | grep -qF "wt-ijwb-refresh"; then
-    echo "  Found old cron job (wt-ijwb-refresh)."
-    echo "  Replacing with new cron job (wt-metadata-refresh)..."
-    # Remove old entry and add new one
-    (crontab -l 2>/dev/null | grep -vF "wt-ijwb-refresh"; echo "$cron_entry") | crontab -
-    echo "  ✓ Cron job migrated to wt-metadata-refresh"
-    echo "  ✓ Logs will be written to: $log_file"
-  elif crontab -l 2>/dev/null | grep -qF "wt-metadata-refresh"; then
     echo "  Cron job already exists. Skipping."
   else
     # Add cron job
