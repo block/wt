@@ -32,7 +32,6 @@
 #   wt-metadata-import                              # Interactive: pick target worktree
 #   wt-metadata-import ~/dev/worktrees/feature-x    # Import to specific worktree
 #   wt-metadata-import ~/dev/vault ~/dev/worktree   # Explicit source and target
-#
 
 set -euo pipefail
 

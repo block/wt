@@ -328,6 +328,164 @@ select_metadata_patterns() {
   fi
 }
 
+# Detect which known metadata patterns exist in a repository
+# Args: $1 = repo path
+# Outputs: space-separated list of detected patterns
+detect_metadata_patterns() {
+  local repo="$1"
+  local detected=()
+
+  for entry in "${WT_KNOWN_METADATA[@]}"; do
+    local pattern="${entry%%:*}"
+    # Search for the pattern in the repo (up to depth 3 for nested projects)
+    # Use -L to follow symlinks (repo path might be a symlink)
+    if find -L "$repo" -maxdepth 3 -type d -name "$pattern" 2>/dev/null | grep -q .; then
+      detected+=("$pattern")
+    fi
+  done
+
+  echo "${detected[*]}"
+}
+
+# Get description for a metadata pattern
+# Args: $1 = pattern
+get_pattern_description() {
+  local pattern="$1"
+  for entry in "${WT_KNOWN_METADATA[@]}"; do
+    if [[ "${entry%%:*}" == "$pattern" ]]; then
+      echo "${entry#*:}"
+      return
+    fi
+  done
+  echo "$pattern"
+}
+
+# Interactive selection of metadata patterns to preserve
+# Args: $1 = repo path
+# Sets: WT_METADATA_PATTERNS
+select_metadata_patterns() {
+  local repo="$1"
+
+  echo "════════════════════════════════════════════════════════════════════════════════"
+  echo "  Project Metadata Detection"
+  echo "════════════════════════════════════════════════════════════════════════════════"
+  echo
+  echo "Scanning repository for IDE/editor project metadata..."
+  echo
+
+  local detected
+  detected=$(detect_metadata_patterns "$repo")
+
+  if [[ -z "$detected" ]]; then
+    echo "No known project metadata found in repository."
+    echo
+    echo "Known patterns that can be preserved:"
+    for entry in "${WT_KNOWN_METADATA[@]}"; do
+      local pattern="${entry%%:*}"
+      local desc="${entry#*:}"
+      echo "  $pattern - $desc"
+    done
+    echo
+    echo "You can manually add patterns to WT_METADATA_PATTERNS in wt-common later."
+    WT_METADATA_PATTERNS=""
+    return 0
+  fi
+
+  echo "Detected project metadata:"
+  echo
+
+  # Convert to array for selection
+  local -a detected_arr
+  read -ra detected_arr <<< "$detected"
+  local -a selected=()
+
+  # Display each detected pattern with checkbox
+  local i=1
+  for pattern in "${detected_arr[@]}"; do
+    local desc
+    desc=$(get_pattern_description "$pattern")
+    echo "  $i) [x] $pattern - $desc"
+    selected+=("$pattern")
+    ((i++))
+  done
+
+  echo
+  echo "All detected patterns are selected by default."
+  echo "Enter numbers to toggle (e.g., '1 3'), 'a' for all, 'n' for none, or Enter to confirm:"
+  echo
+
+  while true; do
+    local input
+    if ! read -rp "> " input; then
+      echo
+      exit 1
+    fi
+
+    # Empty input = confirm current selection
+    if [[ -z "$input" ]]; then
+      break
+    fi
+
+    case "$input" in
+      a|A|all)
+        selected=("${detected_arr[@]}")
+        ;;
+      n|N|none)
+        selected=()
+        ;;
+      *)
+        # Toggle specified numbers
+        for num in $input; do
+          if [[ "$num" =~ ^[0-9]+$ ]] && ((num >= 1 && num <= ${#detected_arr[@]})); then
+            local idx=$((num - 1))
+            local pattern="${detected_arr[$idx]}"
+            # Check if already selected
+            local found=0
+            local new_selected=()
+            for s in "${selected[@]}"; do
+              if [[ "$s" == "$pattern" ]]; then
+                found=1
+              else
+                new_selected+=("$s")
+              fi
+            done
+            if ((found)); then
+              selected=("${new_selected[@]}")
+            else
+              selected+=("$pattern")
+            fi
+          fi
+        done
+        ;;
+    esac
+
+    # Redisplay with current selection
+    echo
+    i=1
+    for pattern in "${detected_arr[@]}"; do
+      local desc
+      desc=$(get_pattern_description "$pattern")
+      local mark=" "
+      for s in "${selected[@]}"; do
+        [[ "$s" == "$pattern" ]] && mark="x"
+      done
+      echo "  $i) [$mark] $pattern - $desc"
+      ((i++))
+    done
+    echo
+    echo "Enter numbers to toggle, 'a' for all, 'n' for none, or Enter to confirm:"
+  done
+
+  WT_METADATA_PATTERNS="${selected[*]}"
+
+  echo
+  if [[ -n "$WT_METADATA_PATTERNS" ]]; then
+    echo "Selected patterns: $WT_METADATA_PATTERNS"
+  else
+    echo "No patterns selected."
+  fi
+}
+
 # Copy toolkit to installation directory
 install_toolkit() {
   echo "Installing worktree-toolkit to $INSTALL_DIR ..."
