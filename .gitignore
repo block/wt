@@ -1,0 +1,38 @@
+# Backup files
+*.bak
+*~
+*.swp
+*.swo
+*.orig
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+tmp/
+
+# Environment/secrets
+.env
+.env.*
+
+# OS files
+.DS_Store
+._*
+Thumbs.db
+
+# Editor/IDE
+.idea/
+.vscode/
+*.sublime-*
+
+# Shell
+*.sh.bak
+.bash_history
+.zsh_history
+
+# Agent files
+.claude/
+CLAUDE.md
+[Aa]gent*.md
