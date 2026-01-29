@@ -97,7 +97,7 @@ _wt_detect_metadata_patterns() {
   while IFS= read -r path; do
     [[ -z "$path" ]] && continue
     local dominated=false
-    for kept in "${kept_paths[@]}"; do
+    for kept in ${kept_paths[@]+"${kept_paths[@]}"}; do
       if [[ "$path" == "$kept/"* ]]; then
         dominated=true
         break
@@ -109,11 +109,11 @@ _wt_detect_metadata_patterns() {
   done <<< "$sorted_paths"
 
   local patterns=()
-  for path in "${kept_paths[@]}"; do
+  for path in ${kept_paths[@]+"${kept_paths[@]}"}; do
     local pattern
     pattern="$(basename "$path")"
     local found=false
-    for p in "${patterns[@]}"; do
+    for p in ${patterns[@]+"${patterns[@]}"}; do
       [[ "$p" == "$pattern" ]] && found=true && break
     done
     [[ "$found" == "false" ]] && patterns+=("$pattern")
@@ -211,7 +211,7 @@ _wt_select_metadata_patterns() {
             local pattern="${detected_arr[$idx]}"
             local found=0
             local new_selected=()
-            for s in "${selected[@]}"; do
+            for s in ${selected[@]+"${selected[@]}"}; do
               if [[ "$s" == "$pattern" ]]; then
                 found=1
               else
@@ -219,7 +219,7 @@ _wt_select_metadata_patterns() {
               fi
             done
             if ((found)); then
-              selected=("${new_selected[@]}")
+              selected=(${new_selected[@]+"${new_selected[@]}"})
             else
               selected+=("$pattern")
             fi
@@ -234,7 +234,7 @@ _wt_select_metadata_patterns() {
       local desc
       desc=$(_wt_get_pattern_description "$pattern")
       local mark=" "
-      for s in "${selected[@]}"; do
+      for s in ${selected[@]+"${selected[@]}"}; do
         [[ "$s" == "$pattern" ]] && mark="x"
       done
       echo "  $i) [$mark] $pattern - $desc"
@@ -244,7 +244,7 @@ _wt_select_metadata_patterns() {
     echo "Enter numbers to toggle, 'a' for all, 'n' for none, or Enter to confirm:"
   done
 
-  WT_METADATA_PATTERNS="${selected[*]}"
+  WT_METADATA_PATTERNS="${selected[*]+"${selected[*]}"}"
 
   echo
   if [[ -n "$WT_METADATA_PATTERNS" ]]; then
