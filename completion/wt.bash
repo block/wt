@@ -26,13 +26,13 @@
 #
 # Usage:
 #   1. Place this file as: completion/wt.bash
-#   2. Have install.sh copy it into ~/.config/wt/wt.bash
+#   2. Have install.sh copy it into ~/.wt/wt.bash
 #   3. In ~/.bashrc (or ~/.bash_profile), add:
-#        [[ -f "$HOME/.config/wt/wt.bash" ]] && source "$HOME/.config/wt/wt.bash"
+#        [[ -f "$HOME/.wt/wt.bash" ]] && source "$HOME/.wt/wt.bash"
 
 # --- Load shared config (wt-common) if available ---
-if [[ -f "$HOME/.config/wt/lib/wt-common" ]]; then
-  . "$HOME/.config/wt/lib/wt-common"
+if [[ -f "$HOME/.wt/lib/wt-common" ]]; then
+  . "$HOME/.wt/lib/wt-common"
 fi
 
 # --- Helper: resolve which repo to use for branch completion ---

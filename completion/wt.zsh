@@ -22,8 +22,8 @@
 # This file is designed for personal use.
 
 # --- Load shared config (wt-common) if available ---
-if [[ -r "$HOME/.config/wt/lib/wt-common" ]]; then
-  source "$HOME/.config/wt/lib/wt-common"
+if [[ -r "$HOME/.wt/lib/wt-common" ]]; then
+  source "$HOME/.wt/lib/wt-common"
 fi
 
 # --- Helper: resolve which repo to use for branch completion ---
