@@ -81,6 +81,9 @@ if [[ $# -eq 1 ]]; then
   esac
 fi
 
+# Show context banner if contexts are configured (output to stderr)
+wt_show_context_banner
+
 #
 # Pick target worktree (interactive or from argument)
 #

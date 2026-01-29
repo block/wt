@@ -12,24 +12,80 @@
 #   - wt-remove
 #
 
-# Main monorepo root (where `git worktree` is managed)
-: "${WT_MAIN_REPO_ROOT:="$HOME/Development/java-master"}"
+# ─────────────────────────────────────────────────────────────────────────────
+# Multi-repo context support
+# ─────────────────────────────────────────────────────────────────────────────
+# The wt toolkit supports multiple repository contexts. Each context has its
+# own configuration stored in ~/.config/wt/repos/<name>.conf
+#
+# If contexts are configured, variables are loaded from the current context.
+# Otherwise, fallback defaults are used (backward compatibility).
+# ─────────────────────────────────────────────────────────────────────────────
 
-# Base directory where new worktrees will be created by default
-: "${WT_WORKTREES_BASE:="$HOME/Development/java-worktrees"}"
+# Helper to source wt-context from lib directory
+# This is defined early so we can use it before wt_source is available
+_wt_source_context_lib() {
+  local lib_dir="${LIB_DIR:-}"
 
-# Base directory for IntelliJ / Bazel project metadata (e.g. canonical .ijwb)
-: "${WT_IDEA_FILES_BASE:="$HOME/Development/idea-project-files"}"
+  # Try LIB_DIR first (set by calling script)
+  if [[ -n "$lib_dir" && -f "$lib_dir/wt-context" ]]; then
+    . "$lib_dir/wt-context"
+    return 0
+  fi
 
-# Symlink path that points to the currently active worktree (for IDE integration)
-: "${WT_ACTIVE_WORKTREE:="$HOME/Development/java"}"
+  # Try relative to this script
+  local this_dir
+  this_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+  if [[ -f "$this_dir/wt-context" ]]; then
+    . "$this_dir/wt-context"
+    return 0
+  fi
 
-# Default primary branch to sync from when creating new worktrees
-: "${WT_BASE_BRANCH:="master"}"
+  # Try installed location
+  if [[ -f "$HOME/.config/wt/lib/wt-context" ]]; then
+    . "$HOME/.config/wt/lib/wt-context"
+    return 0
+  fi
 
-# Project metadata patterns to preserve across worktrees (space-separated)
-# Detected during install, can be customized later
-: "${WT_METADATA_PATTERNS:=""}"
+  return 1
+}
+
+# Try to load context configuration
+_wt_context_loaded=false
+if _wt_source_context_lib; then
+  # Check if any contexts are configured
+  _wt_repos_dir="$HOME/.config/wt/repos"
+  if [[ -d "$_wt_repos_dir" ]] && compgen -G "$_wt_repos_dir/*.conf" >/dev/null 2>&1; then
+    # Try to load current context config
+    if wt_load_context_config 2>/dev/null; then
+      _wt_context_loaded=true
+    fi
+  fi
+  unset _wt_repos_dir
+fi
+
+# Fallback defaults (used when no context is configured or loading fails)
+# These provide backward compatibility for single-repo setups
+if [[ "$_wt_context_loaded" != "true" ]]; then
+  # Main monorepo root (where `git worktree` is managed)
+  : "${WT_MAIN_REPO_ROOT:="$HOME/Development/java-master"}"
+
+  # Base directory where new worktrees will be created by default
+  : "${WT_WORKTREES_BASE:="$HOME/Development/java-worktrees"}"
+
+  # Base directory for IntelliJ / Bazel project metadata (e.g. canonical .ijwb)
+  : "${WT_IDEA_FILES_BASE:="$HOME/Development/idea-project-files"}"
+
+  # Symlink path that points to the currently active worktree (for IDE integration)
+  : "${WT_ACTIVE_WORKTREE:="$HOME/Development/java"}"
+
+  # Default primary branch to sync from when creating new worktrees
+  : "${WT_BASE_BRANCH:="master"}"
+
+  # Project metadata patterns to preserve across worktrees (space-separated)
+  # Detected during install, can be customized later
+  : "${WT_METADATA_PATTERNS:=""}"
+fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Known project metadata patterns (for detection)

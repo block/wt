@@ -107,6 +107,9 @@ if [[ $# -eq 0 ]]; then
   exit 1
 fi
 
+# Show context banner if contexts are configured
+wt_show_context_banner
+
 # 1. Validate and cd into the main repo
 if [[ ! -d "$WT_MAIN_REPO_ROOT" ]]; then
   error "WT_MAIN_REPO_ROOT does not exist: $WT_MAIN_REPO_ROOT"
