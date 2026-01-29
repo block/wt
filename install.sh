@@ -58,6 +58,72 @@ prompt_with_default() {
   echo "${result:-$default}"
 }
 
+# Expand ~ to $HOME in a path
+expand_path() {
+  local path="$1"
+  # Expand ~ at the beginning of the path (e.g., ~/foo -> /home/user/foo)
+  case "$path" in
+    "~")
+      echo "$HOME"
+      ;;
+    "~/"*)
+      echo "${HOME}${path#\~}"
+      ;;
+    *)
+      echo "$path"
+      ;;
+  esac
+}
+
+# Detect the default branch for a repository
+# Tries: origin/HEAD, then common branch names
+detect_default_branch() {
+  local repo="$1"
+
+  # Try to get from origin/HEAD
+  local default_branch
+  default_branch=$(git -C "$repo" symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||')
+
+  if [[ -n "$default_branch" ]]; then
+    echo "$default_branch"
+    return 0
+  fi
+
+  # Check for common default branch names
+  for branch in main master; do
+    if git -C "$repo" show-ref --verify --quiet "refs/heads/$branch" 2>/dev/null || \
+       git -C "$repo" show-ref --verify --quiet "refs/remotes/origin/$branch" 2>/dev/null; then
+      echo "$branch"
+      return 0
+    fi
+  done
+
+  # Fallback to main
+  echo "main"
+}
+
+# Derive all paths from the repository location
+# Sets: WT_MAIN_REPO_ROOT, WT_WORKTREES_BASE, WT_ACTIVE_WORKTREE, WT_IDEA_FILES_BASE
+derive_paths_from_repo() {
+  local repo="$1"
+  local repo_name repo_parent
+
+  repo_name="$(basename "$repo")"
+  repo_parent="$(dirname "$repo")"
+
+  # The current repo location becomes the symlink location
+  WT_ACTIVE_WORKTREE="$repo"
+
+  # Main repo gets "-master" suffix
+  WT_MAIN_REPO_ROOT="${repo_parent}/${repo_name}-master"
+
+  # Worktrees base gets "-worktrees" suffix
+  WT_WORKTREES_BASE="${repo_parent}/${repo_name}-worktrees"
+
+  # IntelliJ metadata goes to a central location in ~/.config/wt/
+  WT_IDEA_FILES_BASE="$HOME/.config/wt/idea-files/${repo_name}"
+}
+
 # Copy toolkit to installation directory
 install_toolkit() {
   echo "Installing worktree-toolkit to $INSTALL_DIR ..."
@@ -96,7 +162,7 @@ configure_shell_rc() {
 }
 
 # Prompt user for configuration and write to wt-common
-# Note: WT_* variables are already set with defaults from wt-common
+# Uses a user-centric flow: start with which repo to manage, then derive paths
 configure_wt_common() {
   local wt_common="$INSTALL_DIR/lib/wt-common"
 
@@ -105,26 +171,120 @@ configure_wt_common() {
     return 1
   fi
 
-  echo "Configure your worktree environment. Press Enter to accept defaults."
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Step 1: Ask which repository to manage
+  # ─────────────────────────────────────────────────────────────────────────────
+  echo "Which repository do you want to manage with worktrees?"
+  echo
+  echo "Enter the path to your existing git repository."
+  echo "Example: ~/Development/myrepo"
   echo
 
-  WT_MAIN_REPO_ROOT=$(prompt_with_default "Main repository root" "$WT_MAIN_REPO_ROOT")
-  WT_WORKTREES_BASE=$(prompt_with_default "Worktrees base directory" "$WT_WORKTREES_BASE")
-  WT_IDEA_FILES_BASE=$(prompt_with_default "IntelliJ metadata directory" "$WT_IDEA_FILES_BASE")
-  WT_ACTIVE_WORKTREE=$(prompt_with_default "Active worktree symlink" "$WT_ACTIVE_WORKTREE")
-  WT_BASE_BRANCH=$(prompt_with_default "Default base branch" "$WT_BASE_BRANCH")
+  local repo_path
+  while true; do
+    if ! read -rp "Repository path: " repo_path; then
+      echo
+      exit 1
+    fi
+
+    # Handle empty input
+    if [[ -z "$repo_path" ]]; then
+      echo "Please enter a repository path."
+      continue
+    fi
+
+    # Expand ~ to $HOME
+    repo_path=$(expand_path "$repo_path")
+
+    # Validate it exists
+    if [[ ! -d "$repo_path" ]]; then
+      error "Directory not found: $repo_path"
+      continue
+    fi
+
+    # Validate it's a git repository
+    if ! git -C "$repo_path" rev-parse --git-dir &>/dev/null; then
+      error "Not a git repository: $repo_path"
+      continue
+    fi
+
+    break
+  done
+
+  # Normalize to absolute path
+  repo_path="$(cd "$repo_path" && pwd)"
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Step 2: Auto-detect git info and show confirmation
+  # ─────────────────────────────────────────────────────────────────────────────
+  echo
+  echo "Detected repository:"
+  echo "  Path:   $repo_path"
+
+  # Get remote origin URL if available
+  local remote_url
+  remote_url=$(git -C "$repo_path" remote get-url origin 2>/dev/null || echo "(no remote)")
+  echo "  Remote: $remote_url"
+
+  # Detect default branch
+  WT_BASE_BRANCH=$(detect_default_branch "$repo_path")
+  echo "  Branch: $WT_BASE_BRANCH (default branch)"
 
   echo
-  echo "Configuration:"
-  echo "  WT_MAIN_REPO_ROOT:   $WT_MAIN_REPO_ROOT"
-  echo "  WT_WORKTREES_BASE:   $WT_WORKTREES_BASE"
-  echo "  WT_IDEA_FILES_BASE:  $WT_IDEA_FILES_BASE"
-  echo "  WT_ACTIVE_WORKTREE:  $WT_ACTIVE_WORKTREE"
-  echo "  WT_BASE_BRANCH:      $WT_BASE_BRANCH"
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Step 3: Derive paths automatically
+  # ─────────────────────────────────────────────────────────────────────────────
+  derive_paths_from_repo "$repo_path"
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Step 4: Show derived configuration and allow edits
+  # ─────────────────────────────────────────────────────────────────────────────
+  echo "Derived configuration:"
   echo
+  echo "  The worktree toolkit will set up the following structure:"
+  echo
+  echo "  ${BOLD}Active symlink:${NC}      $WT_ACTIVE_WORKTREE"
+  echo "     Your IDE opens this path. It's a symlink that can point to any worktree."
+  echo
+  echo "  ${BOLD}Main repository:${NC}     $WT_MAIN_REPO_ROOT"
+  echo "     Your current repo will be moved here (the \"master\" worktree)."
+  echo
+  echo "  ${BOLD}Worktrees directory:${NC} $WT_WORKTREES_BASE"
+  echo "     New worktrees will be created here."
+  echo
+  echo "  ${BOLD}IntelliJ metadata:${NC}   $WT_IDEA_FILES_BASE"
+  echo "     Shared .ijwb files for instant project switching."
+  echo
+  echo "  ${BOLD}Default branch:${NC}      $WT_BASE_BRANCH"
+  echo "     Used when creating new worktrees."
+  echo
+
+  if prompt_confirm "Use this configuration? [Y/n]" "y"; then
+    : # Continue with derived values
+  else
+    echo
+    echo "You can customize each value. Press Enter to keep the default."
+    echo
+
+    WT_ACTIVE_WORKTREE=$(prompt_with_default "Active symlink path" "$WT_ACTIVE_WORKTREE")
+    WT_MAIN_REPO_ROOT=$(prompt_with_default "Main repository path" "$WT_MAIN_REPO_ROOT")
+    WT_WORKTREES_BASE=$(prompt_with_default "Worktrees directory" "$WT_WORKTREES_BASE")
+    WT_IDEA_FILES_BASE=$(prompt_with_default "IntelliJ metadata directory" "$WT_IDEA_FILES_BASE")
+    WT_BASE_BRANCH=$(prompt_with_default "Default base branch" "$WT_BASE_BRANCH")
+
+    echo
+    echo "Final configuration:"
+    echo "  WT_ACTIVE_WORKTREE:  $WT_ACTIVE_WORKTREE"
+    echo "  WT_MAIN_REPO_ROOT:   $WT_MAIN_REPO_ROOT"
+    echo "  WT_WORKTREES_BASE:   $WT_WORKTREES_BASE"
+    echo "  WT_IDEA_FILES_BASE:  $WT_IDEA_FILES_BASE"
+    echo "  WT_BASE_BRANCH:      $WT_BASE_BRANCH"
+    echo
+  fi
 
   # Write to wt-common using sed
-  echo "Saving to wt-common..."
+  echo "Saving configuration..."
   sed -i.bak \
     -e "s|: \"\${WT_MAIN_REPO_ROOT:=.*}\"|: \"\${WT_MAIN_REPO_ROOT:=\"$WT_MAIN_REPO_ROOT\"}\"|" \
     -e "s|: \"\${WT_WORKTREES_BASE:=.*}\"|: \"\${WT_WORKTREES_BASE:=\"$WT_WORKTREES_BASE\"}\"|" \
@@ -348,7 +508,7 @@ main() {
   echo
 
   echo "════════════════════════════════════════════════════════════════════════════════"
-  echo "  Workspace Configuration"
+  echo "  Repository Setup"
   echo "════════════════════════════════════════════════════════════════════════════════"
   echo
 
