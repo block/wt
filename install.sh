@@ -124,6 +124,205 @@ derive_paths_from_repo() {
   WT_IDEA_FILES_BASE="$HOME/.config/wt/idea-files/${repo_name}"
 }
 
+# Detect which known metadata patterns exist in a repository
+# Args: $1 = repo path
+# Outputs: space-separated list of detected patterns
+# Note: Deduplicates by finding top-level metadata dirs only
+#       (e.g., if .ijwb contains .idea, only .ijwb is reported)
+detect_metadata_patterns() {
+  local repo="$1"
+  local all_paths=()
+
+  # Find all metadata directories for all known patterns
+  for entry in "${WT_KNOWN_METADATA[@]}"; do
+    local pattern="${entry%%:*}"
+    while IFS= read -r path; do
+      [[ -n "$path" ]] && all_paths+=("$path")
+    done < <(find -L "$repo" -maxdepth 5 -type d -name "$pattern" 2>/dev/null)
+  done
+
+  # No metadata found
+  if [[ ${#all_paths[@]} -eq 0 ]]; then
+    return
+  fi
+
+  # Sort paths (shorter paths come first)
+  local sorted_paths
+  sorted_paths=$(printf '%s\n' "${all_paths[@]}" | sort)
+
+  # Deduplicate: keep only top-level metadata dirs
+  local kept_paths=()
+  while IFS= read -r path; do
+    [[ -z "$path" ]] && continue
+    local dominated=false
+
+    for kept in "${kept_paths[@]}"; do
+      if [[ "$path" == "$kept/"* ]]; then
+        dominated=true
+        break
+      fi
+    done
+
+    if [[ "$dominated" == "false" ]]; then
+      kept_paths+=("$path")
+    fi
+  done <<< "$sorted_paths"
+
+  # Extract unique pattern names from kept paths
+  local patterns=()
+  for path in "${kept_paths[@]}"; do
+    local pattern
+    pattern="$(basename "$path")"
+    # Add to patterns if not already present
+    local found=false
+    for p in "${patterns[@]}"; do
+      [[ "$p" == "$pattern" ]] && found=true && break
+    done
+    [[ "$found" == "false" ]] && patterns+=("$pattern")
+  done
+
+  echo "${patterns[*]}"
+}
+
+# Get description for a metadata pattern
+# Args: $1 = pattern
+get_pattern_description() {
+  local pattern="$1"
+  for entry in "${WT_KNOWN_METADATA[@]}"; do
+    if [[ "${entry%%:*}" == "$pattern" ]]; then
+      echo "${entry#*:}"
+      return
+    fi
+  done
+  echo "$pattern"
+}
+
+# Interactive selection of metadata patterns to preserve
+# Args: $1 = repo path
+# Sets: WT_METADATA_PATTERNS
+select_metadata_patterns() {
+  local repo="$1"
+
+  echo "════════════════════════════════════════════════════════════════════════════════"
+  echo "  Project Metadata Detection"
+  echo "════════════════════════════════════════════════════════════════════════════════"
+  echo
+  echo "Scanning repository for IDE/editor project metadata..."
+  echo
+
+  local detected
+  detected=$(detect_metadata_patterns "$repo")
+
+  if [[ -z "$detected" ]]; then
+    echo "No known project metadata found in repository."
+    echo
+    echo "Known patterns that can be preserved:"
+    for entry in "${WT_KNOWN_METADATA[@]}"; do
+      local pattern="${entry%%:*}"
+      local desc="${entry#*:}"
+      echo "  $pattern - $desc"
+    done
+    echo
+    echo "You can manually add patterns to WT_METADATA_PATTERNS in wt-common later."
+    WT_METADATA_PATTERNS=""
+    return 0
+  fi
+
+  echo "Detected project metadata:"
+  echo
+
+  # Convert to array for selection
+  local -a detected_arr
+  read -ra detected_arr <<< "$detected"
+  local -a selected=()
+
+  # Display each detected pattern with checkbox
+  local i=1
+  for pattern in "${detected_arr[@]}"; do
+    local desc
+    desc=$(get_pattern_description "$pattern")
+    echo "  $i) [x] $pattern - $desc"
+    selected+=("$pattern")
+    ((i++))
+  done
+
+  echo
+  echo "All detected patterns are selected by default."
+  echo "Enter numbers to toggle (e.g., '1 3'), 'a' for all, 'n' for none, or Enter to confirm:"
+  echo
+
+  while true; do
+    local input
+    if ! read -rp "> " input; then
+      echo
+      exit 1
+    fi
+
+    # Empty input = confirm current selection
+    if [[ -z "$input" ]]; then
+      break
+    fi
+
+    case "$input" in
+      a|A|all)
+        selected=("${detected_arr[@]}")
+        ;;
+      n|N|none)
+        selected=()
+        ;;
+      *)
+        # Toggle specified numbers
+        for num in $input; do
+          if [[ "$num" =~ ^[0-9]+$ ]] && ((num >= 1 && num <= ${#detected_arr[@]})); then
+            local idx=$((num - 1))
+            local pattern="${detected_arr[$idx]}"
+            # Check if already selected
+            local found=0
+            local new_selected=()
+            for s in "${selected[@]}"; do
+              if [[ "$s" == "$pattern" ]]; then
+                found=1
+              else
+                new_selected+=("$s")
+              fi
+            done
+            if ((found)); then
+              selected=("${new_selected[@]}")
+            else
+              selected+=("$pattern")
+            fi
+          fi
+        done
+        ;;
+    esac
+
+    # Redisplay with current selection
+    echo
+    i=1
+    for pattern in "${detected_arr[@]}"; do
+      local desc
+      desc=$(get_pattern_description "$pattern")
+      local mark=" "
+      for s in "${selected[@]}"; do
+        [[ "$s" == "$pattern" ]] && mark="x"
+      done
+      echo "  $i) [$mark] $pattern - $desc"
+      ((i++))
+    done
+    echo
+    echo "Enter numbers to toggle, 'a' for all, 'n' for none, or Enter to confirm:"
+  done
+
+  WT_METADATA_PATTERNS="${selected[*]}"
+
+  echo
+  if [[ -n "$WT_METADATA_PATTERNS" ]]; then
+    echo "Selected patterns: $WT_METADATA_PATTERNS"
+  else
+    echo "No patterns selected."
+  fi
+}
+
 # Copy toolkit to installation directory
 install_toolkit() {
   echo "Installing worktree-toolkit to $INSTALL_DIR ..."
@@ -283,7 +482,14 @@ configure_wt_common() {
     echo
   fi
 
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Step 5: Detect and select project metadata to preserve
+  # ─────────────────────────────────────────────────────────────────────────────
+  echo
+  select_metadata_patterns "$repo_path"
+
   # Write to wt-common using sed
+  echo
   echo "Saving configuration..."
   sed -i.bak \
     -e "s|: \"\${WT_MAIN_REPO_ROOT:=.*}\"|: \"\${WT_MAIN_REPO_ROOT:=\"$WT_MAIN_REPO_ROOT\"}\"|" \
@@ -291,6 +497,7 @@ configure_wt_common() {
     -e "s|: \"\${WT_IDEA_FILES_BASE:=.*}\"|: \"\${WT_IDEA_FILES_BASE:=\"$WT_IDEA_FILES_BASE\"}\"|" \
     -e "s|: \"\${WT_ACTIVE_WORKTREE:=.*}\"|: \"\${WT_ACTIVE_WORKTREE:=\"$WT_ACTIVE_WORKTREE\"}\"|" \
     -e "s|: \"\${WT_BASE_BRANCH:=.*}\"|: \"\${WT_BASE_BRANCH:=\"$WT_BASE_BRANCH\"}\"|" \
+    -e "s|: \"\${WT_METADATA_PATTERNS:=.*}\"|: \"\${WT_METADATA_PATTERNS:=\"$WT_METADATA_PATTERNS\"}\"|" \
     "$wt_common"
   rm -f "$wt_common.bak"
   echo "  ✓ Configuration saved"
@@ -413,51 +620,64 @@ setup_cron_job() {
   echo "  crontab -e        Edit cron jobs (to modify or remove)"
 }
 
-# Sync .ijwb metadata from main repo to shared location
-sync_ijwb() {
+# Sync project metadata from main repo to shared location
+sync_metadata() {
   if [[ ! -d "$WT_MAIN_REPO_ROOT" ]]; then
-    echo "Skipping .ijwb sync: Main repository not found at $WT_MAIN_REPO_ROOT"
+    echo "Skipping metadata sync: Main repository not found at $WT_MAIN_REPO_ROOT"
+    return 0
+  fi
+
+  # Check if any patterns are configured
+  if [[ -z "${WT_METADATA_PATTERNS:-}" ]]; then
+    echo "Skipping metadata sync: No patterns configured"
     return 0
   fi
 
   echo "════════════════════════════════════════════════════════════════════════════════"
-  echo "  IntelliJ Metadata Export (.ijwb)"
+  echo "  Project Metadata Export"
   echo "════════════════════════════════════════════════════════════════════════════════"
   echo
-  echo "Scanning for existing IntelliJ Bazel projects..."
+  echo "Scanning for existing project metadata..."
+  echo "Patterns: $WT_METADATA_PATTERNS"
+  echo
 
-  local ijwb_count
-  # Use -maxdepth 3 since .ijwb dirs are at service level (e.g., orders/.ijwb)
-  ijwb_count=$(find "$WT_MAIN_REPO_ROOT" -maxdepth 3 -type d -name '.ijwb' 2>/dev/null | wc -l | tr -d ' ')
+  # Count total metadata directories found
+  local total_count=0
+  for pattern in $WT_METADATA_PATTERNS; do
+    local count
+    count=$(find -L "$WT_MAIN_REPO_ROOT" -maxdepth 5 -type d -name "$pattern" 2>/dev/null | wc -l | tr -d ' ')
+    if [[ $count -gt 0 ]]; then
+      echo "  Found $count '$pattern' directories"
+      total_count=$((total_count + count))
+    fi
+  done
 
-  if [[ "$ijwb_count" -eq 0 ]]; then
-    echo "No .ijwb directories found in $WT_MAIN_REPO_ROOT"
+  if [[ $total_count -eq 0 ]]; then
+    echo "No project metadata directories found in $WT_MAIN_REPO_ROOT"
     echo
-    echo "This is expected if you haven't imported any projects in IntelliJ yet."
-    echo "After importing projects, run 'wt ijwb-export' to export metadata."
+    echo "This is expected if you haven't set up any IDE projects yet."
+    echo "After setting up projects, run 'wt metadata-export' to export metadata."
     return 0
   fi
 
-  echo "Found $ijwb_count .ijwb directories in main repository."
   echo
   echo "This step will:"
-  echo "  1. Copy .ijwb directories from: $WT_MAIN_REPO_ROOT"
-  echo "  2. Store them in the vault:     $WT_IDEA_FILES_BASE"
+  echo "  1. Link metadata directories from: $WT_MAIN_REPO_ROOT"
+  echo "  2. Store links in the vault:       $WT_IDEA_FILES_BASE"
   echo
-  echo "The vault is a shared location where .ijwb metadata is stored."
-  echo "When you create new worktrees, this metadata is automatically installed,"
-  echo "avoiding expensive IntelliJ re-imports and re-indexing."
+  echo "The vault is a shared location where metadata is stored."
+  echo "When you create new worktrees, this metadata is automatically installed."
   echo
 
-  if ! prompt_confirm "Export .ijwb metadata to vault? [Y/n]" "y"; then
-    echo "Skipping. You can run 'wt ijwb-export' manually later."
+  if ! prompt_confirm "Export metadata to vault? [Y/n]" "y"; then
+    echo "Skipping. You can run 'wt metadata-export' manually later."
     return 0
   fi
 
   echo
-  echo "Exporting .ijwb metadata..."
+  echo "Exporting metadata..."
   # Use -y to skip internal confirmation (installer already prompted)
-  "$INSTALL_DIR/bin/wt-ijwb-export" -y "$WT_MAIN_REPO_ROOT" "$WT_IDEA_FILES_BASE"
+  "$INSTALL_DIR/bin/wt-metadata-export" -y "$WT_MAIN_REPO_ROOT" "$WT_IDEA_FILES_BASE"
 }
 
 # Print completion message
@@ -521,7 +741,7 @@ main() {
   migrate_repo
   echo
 
-  sync_ijwb
+  sync_metadata
   echo
 
   setup_cron_job

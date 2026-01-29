@@ -120,13 +120,16 @@ wt() {
   shift 2>/dev/null || true
 
   case "$cmd" in
-    add)         _wt_run wt-add "$@" ;;
-    switch)      _wt_run wt-switch "$@" ;;
-    remove)      _wt_run wt-remove "$@" ;;
-    list)        _wt_run wt-list "$@" ;;
-    ijwb-export) _wt_run wt-ijwb-export "$@" ;;
-    ijwb-import) _wt_run wt-ijwb-import "$@" ;;
-    cd)          __wt_do_cd "$@" ;;
+    add)             _wt_run wt-add "$@" ;;
+    switch)          _wt_run wt-switch "$@" ;;
+    remove)          _wt_run wt-remove "$@" ;;
+    list)            _wt_run wt-list "$@" ;;
+    metadata-export) _wt_run wt-metadata-export "$@" ;;
+    metadata-import) _wt_run wt-metadata-import "$@" ;;
+    # Legacy aliases (kept for backward compatibility)
+    ijwb-export)     _wt_run wt-metadata-export "$@" ;;
+    ijwb-import)     _wt_run wt-metadata-import "$@" ;;
+    cd)              __wt_do_cd "$@" ;;
     help|--help|-h|"")
       wt_show_help          # helper for showing help, defined in wt-help library
       ;;

@@ -27,6 +27,39 @@
 # Default primary branch to sync from when creating new worktrees
 : "${WT_BASE_BRANCH:="master"}"
 
+# Project metadata patterns to preserve across worktrees (space-separated)
+# Detected during install, can be customized later
+: "${WT_METADATA_PATTERNS:=""}"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Known project metadata patterns (for detection)
+# Format: pattern:description
+# ─────────────────────────────────────────────────────────────────────────────
+WT_KNOWN_METADATA=(
+  # JetBrains IDEs
+  ".idea:JetBrains IDEs (IntelliJ, WebStorm, PyCharm, etc.)"
+  ".run:JetBrains run/debug configurations"
+  ".fleet:JetBrains Fleet"
+  # Bazel
+  ".ijwb:IntelliJ + Bazel plugin (legacy)"
+  ".aswb:Android Studio + Bazel plugin (legacy)"
+  ".clwb:CLion + Bazel plugin (legacy)"
+  ".bazelbsp:JetBrains Bazel plugin (new, BSP-based)"
+  ".bsp:Build Server Protocol (Scala, Java, Bazel)"
+  # Xcode / iOS
+  ".swiftpm:Swift Package Manager metadata"
+  "xcuserdata:Xcode user data (breakpoints, UI state)"
+  # VS Code
+  ".vscode:Visual Studio Code"
+  # Scala
+  ".metals:Metals LSP (Scala)"
+  ".bloop:Bloop build server (Scala)"
+  # Eclipse
+  ".settings:Eclipse settings"
+  ".project:Eclipse project"
+  ".classpath:Eclipse classpath"
+)
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Color support (only if output is a TTY)
 # ─────────────────────────────────────────────────────────────────────────────
