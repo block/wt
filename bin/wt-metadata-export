@@ -1,0 +1,213 @@
+#!/usr/bin/env bash
+#
+# wt-metadata-export — Export Project Metadata Directories to Vault
+# ===================================================================
+#
+# This script scans a source directory for project metadata directories
+# (as configured in WT_METADATA_PATTERNS) and recreates the same directory
+# structure under a target directory using symbolic links.
+#
+# Supported metadata includes:
+#   - .ijwb, .aswb, .clwb (Bazel IDE plugins)
+#   - .idea (JetBrains IDEs)
+#   - .vscode (VS Code)
+#   - .swiftpm (Swift Package Manager)
+#   - And more (see WT_KNOWN_METADATA in wt-common)
+#
+# Behavior:
+# ---------
+# 1. Accepts a <source-directory> and <target-directory>.
+# 2. For each pattern in WT_METADATA_PATTERNS:
+#    - Recursively finds all matching directories under the source
+#    - Computes the relative path from the source root
+#    - Recreates that directory structure under the target
+#    - Creates symbolic links to the source directories
+#
+# Usage:
+#   wt-metadata-export                              # Use defaults from env vars
+#   wt-metadata-export <source-directory> <target-directory>
+#
+# Defaults (when no arguments):
+#   source = $WT_MAIN_REPO_ROOT
+#   target = $WT_IDEA_FILES_BASE
+#
+
+set -euo pipefail
+
+# Resolve script and lib directories
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIB_DIR="$SCRIPT_DIR/../lib"
+
+# Bootstrap: source wt-common from lib/
+if [[ -f "$LIB_DIR/wt-common" ]]; then
+  . "$LIB_DIR/wt-common"
+elif [[ -f "$HOME/.config/wt/lib/wt-common" ]]; then
+  . "$HOME/.config/wt/lib/wt-common"
+else
+  echo "Error: Cannot find wt-common" >&2
+  exit 1
+fi
+
+usage() {
+  cat >&2 <<EOF
+Usage: $(basename "$0") [-y|--yes] [source-directory] [target-directory]
+
+Options:
+  -y, --yes           Skip confirmation prompt
+
+Arguments:
+  source-directory    Source containing metadata dirs (default: \$WT_MAIN_REPO_ROOT)
+  target-directory    Metadata vault location (default: \$WT_IDEA_FILES_BASE)
+
+Patterns to export: ${WT_METADATA_PATTERNS:-"(none configured)"}
+
+When no arguments are provided, uses environment variable defaults:
+  source = $WT_MAIN_REPO_ROOT
+  target = $WT_IDEA_FILES_BASE
+EOF
+}
+
+SOURCE_DIR=""
+TARGET_DIR=""
+SKIP_CONFIRM=false
+
+# Parse options
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    -y|--yes)
+      SKIP_CONFIRM=true
+      shift
+      ;;
+    -*)
+      error "Unknown option: $1"
+      usage
+      exit 1
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+
+# Parse positional arguments
+case $# in
+  0)
+    SOURCE_DIR="$WT_MAIN_REPO_ROOT"
+    TARGET_DIR="$WT_IDEA_FILES_BASE"
+    ;;
+  2)
+    SOURCE_DIR="$1"
+    TARGET_DIR="$2"
+    ;;
+  *)
+    error "Expected 0 or 2 positional arguments, got $#"
+    usage
+    exit 1
+    ;;
+esac
+
+# Validate directories exist before proceeding
+if [[ ! -d "$SOURCE_DIR" ]]; then
+  error "Source directory does not exist: $SOURCE_DIR"
+  exit 1
+fi
+if [[ ! -d "$TARGET_DIR" ]]; then
+  error "Target directory does not exist: $TARGET_DIR"
+  info "You may need to create it first: mkdir -p $TARGET_DIR"
+  exit 1
+fi
+
+# Check if any patterns are configured
+if [[ -z "${WT_METADATA_PATTERNS:-}" ]]; then
+  warn "No metadata patterns configured (WT_METADATA_PATTERNS is empty)"
+  info "Configure patterns during 'wt install' or edit wt-common directly"
+  exit 0
+fi
+
+# Make sure both directories are absolute to avoid weirdness
+SOURCE_DIR="$(cd "$SOURCE_DIR" && pwd)"
+TARGET_DIR="$(cd "$TARGET_DIR" && pwd)"
+
+echo "Source directory: $SOURCE_DIR"
+echo "Target directory: $TARGET_DIR"
+echo "Patterns: $WT_METADATA_PATTERNS"
+echo
+
+# Confirmation prompt (skip if -y/--yes was provided)
+if [[ "$SKIP_CONFIRM" != "true" ]]; then
+  if ! prompt_confirm "Export metadata from source to target? [y/N]" "n"; then
+    echo "Aborted."
+    exit 0
+  fi
+  echo
+fi
+
+# Export a single pattern
+# Args: $1 = pattern name (e.g., ".ijwb")
+export_pattern() {
+  local pattern="$1"
+  local count=0
+
+  echo "Exporting '$pattern' directories..."
+
+  # First, clean up any existing symlinks for this pattern in the vault
+  find -L "$TARGET_DIR" -type l -name "$pattern" -print0 2>/dev/null | while IFS= read -r -d '' OLD_LINK; do
+    rm -f "$OLD_LINK"
+  done
+
+  # Find all matching directories under SOURCE_DIR
+  # Use -maxdepth 5 for better performance
+  # Use -L to follow symlinks (source path might be a symlink)
+  find -L "$SOURCE_DIR" -maxdepth 5 -type d -name "$pattern" -print0 2>/dev/null |
+    while IFS= read -r -d '' META_DIR; do
+      # Compute the path of the parent directory relative to SOURCE_DIR
+      PARENT_DIR="$(dirname "$META_DIR")"
+
+      # Handle pattern at root (PARENT_DIR == SOURCE_DIR)
+      if [[ "$PARENT_DIR" == "$SOURCE_DIR" ]]; then
+        REL_PARENT=""
+      else
+        REL_PARENT="${PARENT_DIR#"$SOURCE_DIR"/}"
+      fi
+
+      # Validate that we actually stripped the prefix (path should be relative now)
+      if [[ "$REL_PARENT" == /* ]]; then
+        warn "Skipping $pattern outside source directory: $META_DIR"
+        continue
+      fi
+
+      # Destination parent and pattern path in the target directory
+      if [[ -z "$REL_PARENT" ]]; then
+        DEST_PARENT="$TARGET_DIR"
+      else
+        DEST_PARENT="$TARGET_DIR/$REL_PARENT"
+      fi
+      DEST_META="$DEST_PARENT/$pattern"
+
+      echo "  -> Linking $DEST_META"
+
+      # Create the parent directories first
+      mkdir -p "$DEST_PARENT"
+
+      # Create or update the symlink
+      ln -sfn "$META_DIR" "$DEST_META"
+
+      count=$((count + 1))
+    done
+
+  if [[ $count -eq 0 ]]; then
+    echo "  (no '$pattern' directories found)"
+  fi
+}
+
+# Export each configured pattern
+for pattern in $WT_METADATA_PATTERNS; do
+  export_pattern "$pattern"
+  echo
+done
+
+success "Done exporting metadata directories."

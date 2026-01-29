@@ -299,33 +299,33 @@ refresh_all_ijwb() {
   log "Refresh complete: $REFRESH_COUNT succeeded, $ERROR_COUNT failed"
 }
 
-# Re-export .ijwb directories to vault
+# Re-export metadata directories to vault
 do_export() {
   if [[ "$NO_EXPORT" == "true" ]]; then
     log "Skipping export (--no-export specified)"
     return 0
   fi
-  
+
   log ""
-  log "Re-exporting .ijwb directories to vault..."
-  
-  # Find wt-ijwb-export: try bin directory first, then PATH
-  local ijwb_export=""
-  if [[ -x "$BIN_DIR/wt-ijwb-export" ]]; then
-    ijwb_export="$BIN_DIR/wt-ijwb-export"
-  elif command -v wt-ijwb-export >/dev/null 2>&1; then
-    ijwb_export="wt-ijwb-export"
+  log "Re-exporting metadata directories to vault..."
+
+  # Find wt-metadata-export: try bin directory first, then PATH
+  local metadata_export=""
+  if [[ -x "$BIN_DIR/wt-metadata-export" ]]; then
+    metadata_export="$BIN_DIR/wt-metadata-export"
+  elif command -v wt-metadata-export >/dev/null 2>&1; then
+    metadata_export="wt-metadata-export"
   else
-    error "Cannot find wt-ijwb-export"
+    error "Cannot find wt-metadata-export"
     return 1
   fi
-  
+
   if [[ "$DRY_RUN" == "true" ]]; then
-    log "[dry-run] Would run: $ijwb_export -y"
+    log "[dry-run] Would run: $metadata_export -y"
     return 0
   fi
-  
-  "$ijwb_export" -y
+
+  "$metadata_export" -y
 }
 
 # Ensure log directory exists

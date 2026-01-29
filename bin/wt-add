@@ -13,13 +13,13 @@
 # 2. If NOT creating a new branch (i.e., no -b/--branch flag), supports:
 #       a) wt-add <path> <branch> [extra args...]
 #            → Direct passthrough to `git worktree add <path> <branch> ...`,
-#              then installs IntelliJ `.ijwb` metadata into the new worktree.
+#              then installs project metadata into the new worktree.
 #
 #       b) wt-add <branch>
 #            → Convenience mode:
 #                path = $WT_WORKTREES_BASE/<branch>
 #                git worktree add "$path" "<branch>"
-#                install IntelliJ `.ijwb` metadata into "$path".
+#                install project metadata into "$path".
 #
 # 3. If creating a new branch (using -b/--branch):
 #       a. If there are uncommitted changes in the base repo:
@@ -28,7 +28,7 @@
 #            - Switch to that base branch.
 #       c. Ensure the base branch is up to date by running `git pull`.
 #       d. Run `git worktree add <args>` to create the new worktree.
-#       e. Run wt-ijwb-import to import IntelliJ metadata into the new worktree.
+#       e. Run wt-metadata-import to import project metadata into the new worktree.
 #       f. Create symlinks for Bazel outputs (bazel-out, bazel-bin, etc.) pointing
 #            to the same targets as in the main repo, to speed up IntelliJ sync.
 #       g. After completion:
@@ -48,18 +48,18 @@
 # - `git pull` only happens when the script is truly on the base branch.
 # - Detached HEAD states are restored correctly.
 # - Worktree creation behaves like `git worktree add`, but with safety
-#   guardrails and automatic IntelliJ metadata installation.
+#   guardrails and automatic project metadata installation.
 #
 # Usage examples:
 # ---------------
 #   wt-add -b feature/foo
-#       → Creates a worktree at $WT_WORKTREES_BASE/feature/foo and installs .ijwb
+#       → Creates a worktree at $WT_WORKTREES_BASE/feature/foo and installs metadata
 #
 #   wt-add -b feature/foo /custom/path origin/master
-#       → Uses the explicit path and extra arguments as-is, then installs .ijwb
+#       → Uses the explicit path and extra arguments as-is, then installs metadata
 #
 #   wt-add ../path/to/worktree existing-branch
-#       → No branch creation; simply runs git worktree add and installs .ijwb.
+#       → No branch creation; simply runs git worktree add and installs metadata.
 #
 
 set -euo pipefail
@@ -136,28 +136,28 @@ while [[ $i -lt ${#ARGS[@]} ]]; do
   i=$((i + 1))
 done
 
-# Helper: install IntelliJ metadata for a created worktree
-install_ijwb_for_worktree() {
+# Helper: install project metadata for a created worktree
+install_metadata_for_worktree() {
   local worktree_path="$1"
 
   # Normalize to absolute (worktree now exists)
   local worktree_path_abs
   worktree_path_abs="$(cd "$worktree_path" && pwd)"
 
-  echo "Installing .ijwb metadata into worktree: $worktree_path_abs"
+  echo "Installing project metadata into worktree: $worktree_path_abs"
 
-  # Find wt-ijwb-import: try script directory first, then PATH
-  local ijwb_import=""
-  if [[ -f "$SCRIPT_DIR/wt-ijwb-import" ]]; then
-    ijwb_import="$SCRIPT_DIR/wt-ijwb-import"
-  elif command -v wt-ijwb-import >/dev/null 2>&1; then
-    ijwb_import="wt-ijwb-import"
+  # Find wt-metadata-import: try script directory first, then PATH
+  local metadata_import=""
+  if [[ -f "$SCRIPT_DIR/wt-metadata-import" ]]; then
+    metadata_import="$SCRIPT_DIR/wt-metadata-import"
+  elif command -v wt-metadata-import >/dev/null 2>&1; then
+    metadata_import="wt-metadata-import"
   else
-    error "Cannot find wt-ijwb-import"
+    error "Cannot find wt-metadata-import"
     return 1
   fi
 
-  "$ijwb_import" -y "$WT_IDEA_FILES_BASE" "$worktree_path_abs"
+  "$metadata_import" -y "$WT_IDEA_FILES_BASE" "$worktree_path_abs"
 }
 
 # Helper: install Bazel output symlinks (bazel-out, bazel-bin, etc.) for a created worktree
@@ -257,7 +257,7 @@ if [[ $creating_new_branch -eq 0 ]]; then
     echo "Creating worktree for existing branch '$local_branch' at: $worktree_path"
     git worktree add -- "$worktree_path" "$local_branch"
 
-    install_ijwb_for_worktree "$worktree_path"
+    install_metadata_for_worktree "$worktree_path"
     install_bazel_symlinks_for_worktree "$worktree_path"
     success "git worktree add completed successfully."
     exit 0
@@ -279,7 +279,7 @@ if [[ $creating_new_branch -eq 0 ]]; then
   info "Not creating a new branch; running: git worktree add ${ARGS[*]}"
   git worktree add "${ARGS[@]}"
 
-  install_ijwb_for_worktree "$worktree_path"
+  install_metadata_for_worktree "$worktree_path"
   install_bazel_symlinks_for_worktree "$worktree_path"
   success "git worktree add completed successfully."
   exit 0
@@ -466,7 +466,7 @@ else
   git worktree add "${FINAL_ARGS[@]}"
 fi
 
-install_ijwb_for_worktree "$worktree_path"
+install_metadata_for_worktree "$worktree_path"
 install_bazel_symlinks_for_worktree "$worktree_path"
 
 success "git worktree add completed successfully."

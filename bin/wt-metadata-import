@@ -1,0 +1,249 @@
+#!/usr/bin/env bash
+#
+# wt-metadata-import — Import Project Metadata Into a Target Worktree
+# =====================================================================
+#
+# This script locates all project metadata directories within a source
+# directory (vault) and copies them into a target worktree. It resolves
+# any symlinks and copies the actual underlying directories.
+#
+# Supported metadata includes:
+#   - .ijwb, .aswb, .clwb (Bazel IDE plugins)
+#   - .idea (JetBrains IDEs)
+#   - .vscode (VS Code)
+#   - .swiftpm (Swift Package Manager)
+#   - And more (see WT_KNOWN_METADATA in wt-common)
+#
+# Behavior:
+# ---------
+# 1. Supports three invocation modes:
+#      - `wt-metadata-import <source> <target>`   → explicit paths
+#      - `wt-metadata-import <target>`            → $WT_IDEA_FILES_BASE is source
+#      - `wt-metadata-import`                     → interactive worktree selection
+#
+# 2. For every metadata directory found under the source:
+#      - Computes its relative path
+#      - Ensures the corresponding directory exists under the target
+#      - If the source is a symlink, resolves and copies the real directory
+#      - If the source is a real directory, copies it directly
+#
+# Usage Examples:
+# ---------------
+#   wt-metadata-import                              # Interactive: pick target worktree
+#   wt-metadata-import ~/dev/worktrees/feature-x    # Import to specific worktree
+#   wt-metadata-import ~/dev/vault ~/dev/worktree   # Explicit source and target
+#
+
+set -euo pipefail
+
+# Resolve script and lib directories
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIB_DIR="$SCRIPT_DIR/../lib"
+
+# Bootstrap: source wt-common from lib/
+if [[ -f "$LIB_DIR/wt-common" ]]; then
+  . "$LIB_DIR/wt-common"
+elif [[ -f "$HOME/.config/wt/lib/wt-common" ]]; then
+  . "$HOME/.config/wt/lib/wt-common"
+else
+  echo "Error: Cannot find wt-common" >&2
+  exit 1
+fi
+
+# Source wt-choose using the helper
+wt_source wt-choose
+
+usage() {
+  cat >&2 <<EOF
+Usage: $(basename "$0") [-y|--yes] [source-directory] <target-directory>
+
+Options:
+  -y, --yes           Skip confirmation prompt
+
+Arguments:
+  source-directory    Metadata vault location (default: \$WT_IDEA_FILES_BASE)
+  target-directory    Target worktree to import into (REQUIRED, or interactive if omitted)
+
+Patterns to import: ${WT_METADATA_PATTERNS:-"(none configured)"}
+
+Modes:
+  $(basename "$0")                              # Interactive: pick target worktree
+  $(basename "$0") <target>                     # Import to specific worktree
+  $(basename "$0") <source> <target>            # Explicit source and target
+
+Default source: $WT_IDEA_FILES_BASE
+EOF
+}
+
+SOURCE_DIR=""
+TARGET_DIR=""
+SKIP_CONFIRM=false
+
+# Parse options
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    -y|--yes)
+      SKIP_CONFIRM=true
+      shift
+      ;;
+    -*)
+      error "Unknown option: $1"
+      usage
+      exit 1
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+
+# Parse positional arguments
+case $# in
+  0)
+    # No arguments: default source, interactive target selection
+    SOURCE_DIR="$WT_IDEA_FILES_BASE"
+    echo "Source: $SOURCE_DIR (from \$WT_IDEA_FILES_BASE)"
+    echo "No target directory specified, selecting a git worktree..."
+    TARGET_DIR="$(select_git_worktree)" || exit 1
+    ;;
+  1)
+    # One argument: default source, specified target
+    SOURCE_DIR="$WT_IDEA_FILES_BASE"
+    TARGET_DIR="$1"
+    ;;
+  2)
+    # Two arguments: explicit source and target
+    SOURCE_DIR="$1"
+    TARGET_DIR="$2"
+    ;;
+  *)
+    error "Too many arguments"
+    usage
+    exit 1
+    ;;
+esac
+
+# Resolve absolute paths
+SOURCE_DIR="$(cd "$SOURCE_DIR" && pwd)"
+TARGET_DIR="$(cd "$TARGET_DIR" && pwd)"
+
+# Check if any patterns are configured
+if [[ -z "${WT_METADATA_PATTERNS:-}" ]]; then
+  warn "No metadata patterns configured (WT_METADATA_PATTERNS is empty)"
+  info "Configure patterns during 'wt install' or edit wt-common directly"
+  exit 0
+fi
+
+echo "Source directory: $SOURCE_DIR"
+echo "Target directory: $TARGET_DIR"
+echo "Patterns: $WT_METADATA_PATTERNS"
+echo
+
+# Confirmation prompt (skip if -y/--yes was provided)
+if [[ "$SKIP_CONFIRM" != "true" ]]; then
+  if ! prompt_confirm "Import metadata from source to target? [y/N]" "n"; then
+    echo "Aborted."
+    exit 0
+  fi
+  echo
+fi
+
+# Copy a metadata directory, resolving symlinks to real paths when needed.
+# Args:
+#   $1 = source path (may be symlink or real dir)
+#   $2 = destination path (directory to create)
+# Returns:
+#   0 on success, 1 if source doesn't exist (broken symlink)
+copy_real_metadata() {
+  local src="$1"
+  local dst="$2"
+  local real_path
+
+  if [[ -L "$src" ]]; then
+    # It's a symlink: resolve it
+    real_path="$(readlink "$src")"
+
+    # If the symlink target is relative, make it absolute
+    if [[ "$real_path" != /* ]]; then
+      real_path="$(cd "$(dirname "$src")" && cd "$(dirname "$real_path")" && pwd)/$(basename "$real_path")"
+    fi
+
+    # Check if the resolved path exists
+    if [[ ! -e "$real_path" ]]; then
+      warn "Broken symlink: $src -> $real_path (target does not exist)"
+      return 1
+    fi
+  else
+    # Not a symlink; use the directory itself
+    real_path="$src"
+  fi
+
+  # Copy the real directory contents
+  # Use cp -a to preserve attributes and copy recursively
+  cp -a "$real_path" "$dst"
+}
+
+# Import a single pattern
+# Args: $1 = pattern name (e.g., ".ijwb")
+import_pattern() {
+  local pattern="$1"
+  local count=0
+
+  echo "Importing '$pattern' directories..."
+
+  # Find all matching directories (symlinks or real directories) under the source directory
+  # Use -L to follow symlinks (source path might be a symlink)
+  find -L "$SOURCE_DIR" \( -type l -o -type d \) -name "$pattern" -print0 2>/dev/null |
+    while IFS= read -r -d '' META_SRC; do
+      # Parent dir relative to SOURCE_DIR
+      PARENT_SRC="$(dirname "$META_SRC")"
+
+      # Handle pattern at root (PARENT_SRC == SOURCE_DIR)
+      if [[ "$PARENT_SRC" == "$SOURCE_DIR" ]]; then
+        REL_PATH=""
+      else
+        REL_PATH="${PARENT_SRC#"$SOURCE_DIR"/}"
+      fi
+
+      # Corresponding target parent
+      if [[ -z "$REL_PATH" ]]; then
+        TARGET_PARENT="$TARGET_DIR"
+      else
+        TARGET_PARENT="$TARGET_DIR/$REL_PATH"
+      fi
+      TARGET_META="$TARGET_PARENT/$pattern"
+
+      echo "  Found source: $META_SRC"
+      echo "  -> Installing to: $TARGET_META"
+
+      mkdir -p "$TARGET_PARENT"
+
+      if [[ -e "$TARGET_META" || -L "$TARGET_META" ]]; then
+        rm -rf "$TARGET_META"
+      fi
+
+      if ! copy_real_metadata "$META_SRC" "$TARGET_META"; then
+        echo "     Skipping due to broken symlink"
+        echo "     Removing broken symlink from vault: $META_SRC"
+        rm -f "$META_SRC"
+      fi
+
+      count=$((count + 1))
+    done
+
+  if [[ $count -eq 0 ]]; then
+    echo "  (no '$pattern' directories found in vault)"
+  fi
+}
+
+# Import each configured pattern
+for pattern in $WT_METADATA_PATTERNS; do
+  import_pattern "$pattern"
+  echo
+done
+
+success "Done importing metadata."
