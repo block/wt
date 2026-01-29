@@ -136,6 +136,9 @@ esac
 SOURCE_DIR="$(cd "$SOURCE_DIR" && pwd)"
 TARGET_DIR="$(cd "$TARGET_DIR" && pwd)"
 
+# Show context banner if contexts are configured
+wt_show_context_banner
+
 # Check if any patterns are configured
 if [[ -z "${WT_METADATA_PATTERNS:-}" ]]; then
   warn "No metadata patterns configured (WT_METADATA_PATTERNS is empty)"

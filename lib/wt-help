@@ -9,6 +9,15 @@
 
 # Display help for the wt command
 wt_show_help() {
+  # Check if contexts are configured and get current context
+  local current_context=""
+  local repos_dir="$HOME/.wt/repos"
+  if [[ -d "$repos_dir" ]] && compgen -G "$repos_dir/*.conf" >/dev/null 2>&1; then
+    if [[ -f "$HOME/.wt/current" ]]; then
+      current_context="$(cat "$HOME/.wt/current")"
+    fi
+  fi
+
   cat <<'EOF'
 wt — Unified Worktree Toolkit
 
@@ -26,6 +35,14 @@ Worktree Commands:
   cd [worktree]             Change directory to a worktree
                             - interactive worktree selection if omitted
 
+Context Commands (multi-repo support):
+  context                   Interactive: pick repository context to switch to
+  context <name>            Switch to named repository context
+  context --list            List all available contexts
+  context add               Add a new repository context (interactive)
+  context add <path>        Add context for repository at path
+  context add <name> <path> Add context with specific name and path
+
 Metadata Commands:
   metadata-export [src] [vault] Export project metadata to vault
                                 - src: source repo (default: $WT_MAIN_REPO_ROOT)
@@ -34,6 +51,8 @@ Metadata Commands:
   metadata-import [wt]          Import project metadata into a worktree
   metadata-import [vault] [wt]  - wt: target worktree (interactive if omitted)
                                 - vault: metadata vault (default: $WT_IDEA_FILES_BASE)
+
+  ijwb-export, ijwb-import      Legacy aliases for metadata commands
 
 Other:
   help                      Show this help message
@@ -47,14 +66,27 @@ Examples:
   wt remove                       # Interactive: remove a worktree
   wt remove --merged              # Remove all worktrees with merged branches
 
+  wt context                      # Switch to a different repository
+  wt context java                 # Switch to 'java' context
+  wt context add ~/code/myrepo    # Add a new repository context
+
   wt metadata-export              # Export using default paths
   wt metadata-export ~/repo ~/vault
   wt metadata-import              # Interactive: pick worktree to import into
   wt metadata-import ~/worktree   # Import into specific worktree
 
 EOF
+
+  # Show context info if configured
+  if [[ -n "$current_context" ]]; then
+    cat <<EOF
+Current Context: $current_context
+EOF
+  fi
+
   cat <<EOF
-Environment Variables (configured in lib/wt-common):
+
+Configuration (from ${current_context:-"defaults"}):
   WT_MAIN_REPO_ROOT     Main repository root
                         [current: $WT_MAIN_REPO_ROOT]
   WT_WORKTREES_BASE     Directory where worktrees are created
@@ -69,4 +101,3 @@ Environment Variables (configured in lib/wt-common):
                         [current: $WT_METADATA_PATTERNS]
 EOF
 }
-

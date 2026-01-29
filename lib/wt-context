@@ -1,0 +1,298 @@
+#!/usr/bin/env bash
+#
+# wt-context — Context management library for multi-repo support
+# ==============================================================
+#
+# Provides functions for managing multiple repository contexts.
+# Each context represents a separate git repository with its own
+# configuration (worktree paths, metadata location, etc.).
+#
+# Storage Structure:
+#   ~/.config/wt/
+#   ├── repos/
+#   │   ├── java.conf          # per-repo config
+#   │   ├── go.conf
+#   │   └── frontend.conf
+#   ├── current                 # contains name of current context
+#   └── idea-files/
+#       ├── java/              # per-repo metadata vault
+#       ├── go/
+#       └── frontend/
+#
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Path helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Get the directory where context config files are stored
+# Returns: ~/.config/wt/repos
+wt_get_repos_dir() {
+  echo "$HOME/.config/wt/repos"
+}
+
+# Get the path to the current context file
+# Returns: ~/.config/wt/current
+wt_get_current_file() {
+  echo "$HOME/.config/wt/current"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Context listing and querying
+# ─────────────────────────────────────────────────────────────────────────────
+
+# List all available contexts (repo names)
+# Outputs: one context name per line
+wt_list_contexts() {
+  local repos_dir
+  repos_dir="$(wt_get_repos_dir)"
+
+  if [[ ! -d "$repos_dir" ]]; then
+    return 0
+  fi
+
+  for conf in "$repos_dir"/*.conf; do
+    [[ -f "$conf" ]] || continue
+    local name
+    name="$(basename "$conf" .conf)"
+    echo "$name"
+  done
+}
+
+# Get the current context name
+# Returns: context name, or empty string if not set
+wt_get_current_context() {
+  local current_file
+  current_file="$(wt_get_current_file)"
+
+  if [[ -f "$current_file" ]]; then
+    cat "$current_file"
+  fi
+}
+
+# Check if a context exists
+# Args: $1 = context name
+# Returns: 0 if exists, 1 otherwise
+wt_context_exists() {
+  local name="$1"
+  local repos_dir
+  repos_dir="$(wt_get_repos_dir)"
+
+  [[ -f "$repos_dir/$name.conf" ]]
+}
+
+# Get the config file path for a context
+# Args: $1 = context name
+# Returns: path to config file
+wt_get_context_config_path() {
+  local name="$1"
+  local repos_dir
+  repos_dir="$(wt_get_repos_dir)"
+  echo "$repos_dir/$name.conf"
+}
+
+# Get the main repo root for a context (without loading it)
+# Args: $1 = context name
+# Returns: WT_MAIN_REPO_ROOT value from the config
+wt_get_context_repo_root() {
+  local name="$1"
+  local config_path
+  config_path="$(wt_get_context_config_path "$name")"
+
+  if [[ -f "$config_path" ]]; then
+    grep -E '^WT_MAIN_REPO_ROOT=' "$config_path" 2>/dev/null | cut -d'"' -f2
+  fi
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Context switching and loading
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Set the current context
+# Args: $1 = context name
+# Returns: 0 on success, 1 if context doesn't exist
+wt_set_current_context() {
+  local name="$1"
+  local current_file repos_dir
+  current_file="$(wt_get_current_file)"
+  repos_dir="$(wt_get_repos_dir)"
+
+  if [[ ! -f "$repos_dir/$name.conf" ]]; then
+    return 1
+  fi
+
+  # Ensure parent directory exists
+  mkdir -p "$(dirname "$current_file")"
+  echo "$name" > "$current_file"
+}
+
+# Load the current context's configuration
+# Sources the .conf file for the current context, setting WT_* variables
+# Returns: 0 on success, 1 if no context or context not found
+wt_load_context_config() {
+  local current_context config_path
+  current_context="$(wt_get_current_context)"
+
+  if [[ -z "$current_context" ]]; then
+    return 1
+  fi
+
+  config_path="$(wt_get_context_config_path "$current_context")"
+
+  if [[ ! -f "$config_path" ]]; then
+    return 1
+  fi
+
+  # Source the config file to set WT_* variables
+  . "$config_path"
+  return 0
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Context banner (for display in commands)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Show the context banner if contexts are configured
+# Output goes to stderr so it doesn't interfere with command output
+wt_show_context_banner() {
+  local current_context repos_dir
+  repos_dir="$(wt_get_repos_dir)"
+
+  # Only show banner if contexts are configured
+  if [[ ! -d "$repos_dir" ]] || ! compgen -G "$repos_dir/*.conf" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  current_context="$(wt_get_current_context)"
+
+  if [[ -n "$current_context" ]]; then
+    printf "${BLUE}[Context: %s]${NC} ${YELLOW}(wt context to switch)${NC}\n" "$current_context" >&2
+  else
+    printf "${YELLOW}[No context set]${NC} ${YELLOW}(wt context to switch)${NC}\n" >&2
+  fi
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Context creation helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Create a new context configuration file
+# Args:
+#   $1 = context name
+#   $2 = WT_MAIN_REPO_ROOT
+#   $3 = WT_WORKTREES_BASE
+#   $4 = WT_ACTIVE_WORKTREE
+#   $5 = WT_IDEA_FILES_BASE
+#   $6 = WT_BASE_BRANCH
+#   $7 = WT_METADATA_PATTERNS (optional)
+wt_create_context_config() {
+  local name="$1"
+  local main_repo_root="$2"
+  local worktrees_base="$3"
+  local active_worktree="$4"
+  local idea_files_base="$5"
+  local base_branch="$6"
+  local metadata_patterns="${7:-}"
+
+  local repos_dir config_path
+  repos_dir="$(wt_get_repos_dir)"
+  config_path="$repos_dir/$name.conf"
+
+  # Ensure repos directory exists
+  mkdir -p "$repos_dir"
+
+  cat > "$config_path" <<EOF
+# Repository configuration for: $name
+# Generated by wt installer
+
+WT_MAIN_REPO_ROOT="$main_repo_root"
+WT_WORKTREES_BASE="$worktrees_base"
+WT_ACTIVE_WORKTREE="$active_worktree"
+WT_IDEA_FILES_BASE="$idea_files_base"
+WT_BASE_BRANCH="$base_branch"
+WT_METADATA_PATTERNS="$metadata_patterns"
+EOF
+
+  echo "$config_path"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Interactive selection helper
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Interactively select a context from the list
+# Displays a numbered menu and returns the selected context name
+# All UI output goes to stderr, selection to stdout
+select_context() {
+  local repos_dir current_context
+  repos_dir="$(wt_get_repos_dir)"
+  current_context="$(wt_get_current_context)"
+
+  if [[ ! -d "$repos_dir" ]] || ! compgen -G "$repos_dir/*.conf" >/dev/null 2>&1; then
+    echoerr "No contexts configured."
+    echoerr "Run 'wt context add' to add a repository."
+    return 1
+  fi
+
+  local -a contexts=()
+  local -a paths=()
+
+  for conf in "$repos_dir"/*.conf; do
+    [[ -f "$conf" ]] || continue
+    local name path
+    name="$(basename "$conf" .conf)"
+    path="$(wt_get_context_repo_root "$name")"
+    contexts+=("$name")
+    paths+=("$path")
+  done
+
+  if [[ ${#contexts[@]} -eq 0 ]]; then
+    echoerr "No contexts configured."
+    echoerr "Run 'wt context add' to add a repository."
+    return 1
+  fi
+
+  echoerr ""
+  echoerr "Current context: ${current_context:-<none>}"
+  echoerr ""
+  echoerr "Select a context:"
+  echoerr ""
+
+  local i=1
+  for idx in "${!contexts[@]}"; do
+    local name="${contexts[$idx]}"
+    local path="${paths[$idx]}"
+    local prefix="  "
+    local suffix=""
+
+    if [[ "$name" == "$current_context" ]]; then
+      prefix="${GREEN}*${NC} "
+      suffix=" ${GREEN}(current)${NC}"
+    fi
+
+    printf "%s%2d) %-15s %s%s\n" "$prefix" "$i" "$name" "$path" "$suffix" >&2
+    ((i++))
+  done
+
+  echoerr ""
+
+  local choice
+  if ! read -rp "Select context [1-${#contexts[@]}]: " choice; then
+    echoerr ""
+    return 1
+  fi
+
+  case "$choice" in
+    ''|*[!0-9]*)
+      echoerr "Invalid selection."
+      return 1
+      ;;
+  esac
+
+  if (( choice < 1 || choice > ${#contexts[@]} )); then
+    echoerr "Invalid selection."
+    return 1
+  fi
+
+  local selected="${contexts[$((choice - 1))]}"
+  echo "$selected"
+}

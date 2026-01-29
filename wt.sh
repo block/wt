@@ -124,6 +124,7 @@ wt() {
     switch)          _wt_run wt-switch "$@" ;;
     remove)          _wt_run wt-remove "$@" ;;
     list)            _wt_run wt-list "$@" ;;
+    context)         _wt_run wt-context "$@" ;;
     metadata-export) _wt_run wt-metadata-export "$@" ;;
     metadata-import) _wt_run wt-metadata-import "$@" ;;
     # Legacy aliases (kept for backward compatibility)
