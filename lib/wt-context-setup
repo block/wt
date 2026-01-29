@@ -1,0 +1,717 @@
+#!/usr/bin/env bash
+#
+# wt-context-setup — Full context setup flow for new repositories
+# ================================================================
+#
+# This library provides the complete setup flow for adding a new repository
+# context, including:
+#   - Repository path validation
+#   - Context naming
+#   - Path derivation and customization
+#   - Metadata pattern detection
+#   - Directory creation
+#   - Repository migration (move + symlink)
+#   - Metadata export
+#
+# Used by both install.sh and `wt context add`.
+#
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Helper functions
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Expand ~ to $HOME in a path
+_wt_expand_path() {
+  local path="$1"
+  case "$path" in
+    "~") echo "$HOME" ;;
+    "~/"*) echo "${HOME}${path#\~}" ;;
+    *) echo "$path" ;;
+  esac
+}
+
+# Detect the default branch for a repository
+_wt_detect_default_branch() {
+  local repo="$1"
+
+  # Try to get from origin/HEAD
+  local default_branch
+  default_branch=$(git -C "$repo" symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||')
+
+  if [[ -n "$default_branch" ]]; then
+    echo "$default_branch"
+    return 0
+  fi
+
+  # Check for common default branch names
+  for branch in main master; do
+    if git -C "$repo" show-ref --verify --quiet "refs/heads/$branch" 2>/dev/null || \
+       git -C "$repo" show-ref --verify --quiet "refs/remotes/origin/$branch" 2>/dev/null; then
+      echo "$branch"
+      return 0
+    fi
+  done
+
+  echo "main"
+}
+
+# Derive all paths from the repository location
+# Args: $1 = repo path, $2 = context name (for idea-files path)
+# Sets: WT_MAIN_REPO_ROOT, WT_WORKTREES_BASE, WT_ACTIVE_WORKTREE, WT_IDEA_FILES_BASE
+_wt_derive_paths() {
+  local repo="$1"
+  local context_name="${2:-}"
+  local repo_name repo_parent
+
+  repo_name="$(basename "$repo")"
+  repo_parent="$(dirname "$repo")"
+
+  WT_ACTIVE_WORKTREE="$repo"
+  WT_MAIN_REPO_ROOT="${repo_parent}/${repo_name}-master"
+  WT_WORKTREES_BASE="${repo_parent}/${repo_name}-worktrees"
+
+  local idea_name="${context_name:-$repo_name}"
+  WT_IDEA_FILES_BASE="$HOME/.config/wt/idea-files/${idea_name}"
+}
+
+# Detect which known metadata patterns exist in a repository
+_wt_detect_metadata_patterns() {
+  local repo="$1"
+  local all_paths=()
+
+  for entry in "${WT_KNOWN_METADATA[@]}"; do
+    local pattern="${entry%%:*}"
+    while IFS= read -r path; do
+      [[ -n "$path" ]] && all_paths+=("$path")
+    done < <(find -L "$repo" -maxdepth 5 -type d -name "$pattern" 2>/dev/null)
+  done
+
+  if [[ ${#all_paths[@]} -eq 0 ]]; then
+    return
+  fi
+
+  local sorted_paths
+  sorted_paths=$(printf '%s\n' "${all_paths[@]}" | sort)
+
+  local kept_paths=()
+  while IFS= read -r path; do
+    [[ -z "$path" ]] && continue
+    local dominated=false
+    for kept in "${kept_paths[@]}"; do
+      if [[ "$path" == "$kept/"* ]]; then
+        dominated=true
+        break
+      fi
+    done
+    if [[ "$dominated" == "false" ]]; then
+      kept_paths+=("$path")
+    fi
+  done <<< "$sorted_paths"
+
+  local patterns=()
+  for path in "${kept_paths[@]}"; do
+    local pattern
+    pattern="$(basename "$path")"
+    local found=false
+    for p in "${patterns[@]}"; do
+      [[ "$p" == "$pattern" ]] && found=true && break
+    done
+    [[ "$found" == "false" ]] && patterns+=("$pattern")
+  done
+
+  echo "${patterns[*]}"
+}
+
+# Get description for a metadata pattern
+_wt_get_pattern_description() {
+  local pattern="$1"
+  for entry in "${WT_KNOWN_METADATA[@]}"; do
+    if [[ "${entry%%:*}" == "$pattern" ]]; then
+      echo "${entry#*:}"
+      return
+    fi
+  done
+  echo "$pattern"
+}
+
+# Interactive selection of metadata patterns
+# Args: $1 = repo path
+# Sets: WT_METADATA_PATTERNS
+_wt_select_metadata_patterns() {
+  local repo="$1"
+
+  echo "════════════════════════════════════════════════════════════════════════════════"
+  echo "  Project Metadata Detection"
+  echo "════════════════════════════════════════════════════════════════════════════════"
+  echo
+  echo "Scanning repository for IDE/editor project metadata..."
+  echo
+
+  local detected
+  detected=$(_wt_detect_metadata_patterns "$repo")
+
+  if [[ -z "$detected" ]]; then
+    echo "No known project metadata found in repository."
+    echo
+    echo "Known patterns that can be preserved:"
+    for entry in "${WT_KNOWN_METADATA[@]}"; do
+      local pattern="${entry%%:*}"
+      local desc="${entry#*:}"
+      echo "  $pattern - $desc"
+    done
+    echo
+    echo "You can manually add patterns to the context config later."
+    WT_METADATA_PATTERNS=""
+    return 0
+  fi
+
+  echo "Detected project metadata:"
+  echo
+
+  local -a detected_arr
+  read -ra detected_arr <<< "$detected"
+  local -a selected=()
+
+  local i=1
+  for pattern in "${detected_arr[@]}"; do
+    local desc
+    desc=$(_wt_get_pattern_description "$pattern")
+    echo "  $i) [x] $pattern - $desc"
+    selected+=("$pattern")
+    ((i++))
+  done
+
+  echo
+  echo "All detected patterns are selected by default."
+  echo "Enter numbers to toggle (e.g., '1 3'), 'a' for all, 'n' for none, or Enter to confirm:"
+  echo
+
+  while true; do
+    local input
+    if ! read -rp "> " input; then
+      echo
+      exit 1
+    fi
+
+    if [[ -z "$input" ]]; then
+      break
+    fi
+
+    case "$input" in
+      a|A|all)
+        selected=("${detected_arr[@]}")
+        ;;
+      n|N|none)
+        selected=()
+        ;;
+      *)
+        for num in $input; do
+          if [[ "$num" =~ ^[0-9]+$ ]] && ((num >= 1 && num <= ${#detected_arr[@]})); then
+            local idx=$((num - 1))
+            local pattern="${detected_arr[$idx]}"
+            local found=0
+            local new_selected=()
+            for s in "${selected[@]}"; do
+              if [[ "$s" == "$pattern" ]]; then
+                found=1
+              else
+                new_selected+=("$s")
+              fi
+            done
+            if ((found)); then
+              selected=("${new_selected[@]}")
+            else
+              selected+=("$pattern")
+            fi
+          fi
+        done
+        ;;
+    esac
+
+    echo
+    i=1
+    for pattern in "${detected_arr[@]}"; do
+      local desc
+      desc=$(_wt_get_pattern_description "$pattern")
+      local mark=" "
+      for s in "${selected[@]}"; do
+        [[ "$s" == "$pattern" ]] && mark="x"
+      done
+      echo "  $i) [$mark] $pattern - $desc"
+      ((i++))
+    done
+    echo
+    echo "Enter numbers to toggle, 'a' for all, 'n' for none, or Enter to confirm:"
+  done
+
+  WT_METADATA_PATTERNS="${selected[*]}"
+
+  echo
+  if [[ -n "$WT_METADATA_PATTERNS" ]]; then
+    echo "Selected patterns: $WT_METADATA_PATTERNS"
+  else
+    echo "No patterns selected."
+  fi
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Main setup functions
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Create required directories for a context
+_wt_create_directories() {
+  echo "Creating directories..."
+
+  mkdir -p "$WT_WORKTREES_BASE"
+  echo "  ✓ $WT_WORKTREES_BASE"
+
+  mkdir -p "$WT_IDEA_FILES_BASE"
+  echo "  ✓ $WT_IDEA_FILES_BASE"
+
+  local symlink_parent
+  symlink_parent="$(dirname "$WT_ACTIVE_WORKTREE")"
+  mkdir -p "$symlink_parent"
+  echo "  ✓ $symlink_parent (parent for symlink)"
+}
+
+# Update the context config file with new main repo path
+# Args: $1 = context name, $2 = new WT_MAIN_REPO_ROOT value
+_wt_update_context_main_repo() {
+  local context_name="$1"
+  local new_main_repo="$2"
+  local config_path="$HOME/.config/wt/repos/$context_name.conf"
+
+  if [[ -f "$config_path" ]]; then
+    sed -i.bak "s|^WT_MAIN_REPO_ROOT=.*|WT_MAIN_REPO_ROOT=\"$new_main_repo\"|" "$config_path"
+    rm -f "$config_path.bak"
+    WT_MAIN_REPO_ROOT="$new_main_repo"
+  fi
+}
+
+# Migrate repository to worktree structure
+# Args: $1 = context name
+_wt_migrate_repo() {
+  local context_name="$1"
+
+  if [[ -d "$WT_ACTIVE_WORKTREE" && ! -L "$WT_ACTIVE_WORKTREE" ]]; then
+    echo "════════════════════════════════════════════════════════════════════════════════"
+    echo "  Repository Migration"
+    echo "════════════════════════════════════════════════════════════════════════════════"
+    echo
+    echo "Found existing directory at: $WT_ACTIVE_WORKTREE"
+    echo
+    echo "This step will:"
+    echo "  1. Move $WT_ACTIVE_WORKTREE → $WT_MAIN_REPO_ROOT"
+    echo "  2. Create a symlink $WT_ACTIVE_WORKTREE → $WT_MAIN_REPO_ROOT"
+    echo
+    echo "This enables the symlink trick: your IDE always opens the same path,"
+    echo "but the symlink can point to different worktrees for instant switching."
+    echo
+
+    if ! prompt_confirm "Migrate repository now? [Y/n]" "y"; then
+      echo "Skipping migration."
+      echo
+      echo "Using repository at current location as main repo."
+      _wt_update_context_main_repo "$context_name" "$WT_ACTIVE_WORKTREE"
+      echo "  ✓ Updated config: WT_MAIN_REPO_ROOT=$WT_ACTIVE_WORKTREE"
+      return 0
+    fi
+
+    if [[ -e "$WT_MAIN_REPO_ROOT" ]]; then
+      error "$WT_MAIN_REPO_ROOT already exists. Cannot migrate."
+      return 1
+    fi
+
+    echo "Moving $WT_ACTIVE_WORKTREE -> $WT_MAIN_REPO_ROOT ..."
+    mv "$WT_ACTIVE_WORKTREE" "$WT_MAIN_REPO_ROOT"
+
+    echo "Creating symlink $WT_ACTIVE_WORKTREE -> $WT_MAIN_REPO_ROOT ..."
+    ln -s "$WT_MAIN_REPO_ROOT" "$WT_ACTIVE_WORKTREE"
+
+    echo "  ✓ Migration complete!"
+
+  elif [[ -L "$WT_ACTIVE_WORKTREE" ]]; then
+    local symlink_target
+    symlink_target="$(readlink "$WT_ACTIVE_WORKTREE")"
+    if [[ "$symlink_target" != /* ]]; then
+      symlink_target="$(cd "$(dirname "$WT_ACTIVE_WORKTREE")" && cd "$(dirname "$symlink_target")" && pwd)/$(basename "$symlink_target")"
+    fi
+    echo "Active worktree symlink already exists: $WT_ACTIVE_WORKTREE"
+    echo "  -> $symlink_target"
+    if [[ "$symlink_target" != "$WT_MAIN_REPO_ROOT" ]]; then
+      _wt_update_context_main_repo "$context_name" "$symlink_target"
+      echo "  ✓ Updated config: WT_MAIN_REPO_ROOT=$symlink_target"
+    fi
+
+  elif [[ ! -e "$WT_ACTIVE_WORKTREE" ]]; then
+    if [[ -d "$WT_MAIN_REPO_ROOT" ]]; then
+      echo "Creating symlink $WT_ACTIVE_WORKTREE -> $WT_MAIN_REPO_ROOT ..."
+      ln -s "$WT_MAIN_REPO_ROOT" "$WT_ACTIVE_WORKTREE"
+      echo "  ✓ Symlink created!"
+    else
+      echo "Note: Neither $WT_ACTIVE_WORKTREE nor $WT_MAIN_REPO_ROOT exists."
+      echo "You'll need to clone your repository to $WT_MAIN_REPO_ROOT and create symbolic link manually."
+    fi
+  fi
+}
+
+# Sync project metadata from main repo to vault
+# Args: $1 = context name
+_wt_sync_metadata() {
+  local context_name="$1"
+
+  if [[ ! -d "$WT_MAIN_REPO_ROOT" ]]; then
+    echo "Skipping metadata sync: Main repository not found at $WT_MAIN_REPO_ROOT"
+    return 0
+  fi
+
+  if [[ -z "${WT_METADATA_PATTERNS:-}" ]]; then
+    echo "Skipping metadata sync: No patterns configured"
+    return 0
+  fi
+
+  echo "════════════════════════════════════════════════════════════════════════════════"
+  echo "  Project Metadata Export"
+  echo "════════════════════════════════════════════════════════════════════════════════"
+  echo
+  echo "Scanning for existing project metadata..."
+  echo "Patterns: $WT_METADATA_PATTERNS"
+  echo
+
+  local total_count=0
+  for pattern in $WT_METADATA_PATTERNS; do
+    local count
+    count=$(find -L "$WT_MAIN_REPO_ROOT" -maxdepth 5 -type d -name "$pattern" 2>/dev/null | wc -l | tr -d ' ')
+    if [[ $count -gt 0 ]]; then
+      echo "  Found $count '$pattern' directories"
+      total_count=$((total_count + count))
+    fi
+  done
+
+  if [[ $total_count -eq 0 ]]; then
+    echo "No project metadata directories found in $WT_MAIN_REPO_ROOT"
+    echo
+    echo "This is expected if you haven't set up any IDE projects yet."
+    echo "After setting up projects, run 'wt metadata-export' to export metadata."
+    return 0
+  fi
+
+  echo
+  echo "This step will:"
+  echo "  1. Link metadata directories from: $WT_MAIN_REPO_ROOT"
+  echo "  2. Store links in the vault:       $WT_IDEA_FILES_BASE"
+  echo
+  echo "The vault is a shared location where metadata is stored."
+  echo "When you create new worktrees, this metadata is automatically installed."
+  echo
+
+  if ! prompt_confirm "Export metadata to vault? [Y/n]" "y"; then
+    echo "Skipping. You can run 'wt metadata-export' manually later."
+    return 0
+  fi
+
+  echo
+  echo "Exporting metadata..."
+
+  # Find and run wt-metadata-export
+  local metadata_export=""
+  local script_dir="${SCRIPT_DIR:-}"
+  if [[ -n "$script_dir" && -x "$script_dir/wt-metadata-export" ]]; then
+    metadata_export="$script_dir/wt-metadata-export"
+  elif [[ -x "$HOME/.config/wt/bin/wt-metadata-export" ]]; then
+    metadata_export="$HOME/.config/wt/bin/wt-metadata-export"
+  elif command -v wt-metadata-export >/dev/null 2>&1; then
+    metadata_export="wt-metadata-export"
+  fi
+
+  if [[ -n "$metadata_export" ]]; then
+    "$metadata_export" -y "$WT_MAIN_REPO_ROOT" "$WT_IDEA_FILES_BASE"
+  else
+    warn "wt-metadata-export not found. Run 'wt metadata-export' manually after installation."
+  fi
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Main entry point: Full context setup flow
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Run the full context setup flow
+# Args: $1 = repo path (optional), $2 = context name (optional)
+# Returns: 0 on success, 1 on failure
+# Sets: CURRENT_CONTEXT_NAME on success
+wt_setup_context() {
+  local repo_path="${1:-}"
+  local context_name="${2:-}"
+  local repos_dir="$HOME/.config/wt/repos"
+  local current_file="$HOME/.config/wt/current"
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Step 1: Get repository path
+  # ─────────────────────────────────────────────────────────────────────────────
+  if [[ -z "$repo_path" ]]; then
+    echo "Which repository do you want to manage with worktrees?"
+    echo
+    echo "Enter the path to your existing git repository."
+    echo "Example: ~/Development/myrepo"
+    echo
+
+    while true; do
+      if ! read -rp "Repository path: " repo_path; then
+        echo
+        return 1
+      fi
+
+      if [[ -z "$repo_path" ]]; then
+        echo "Please enter a repository path."
+        continue
+      fi
+
+      repo_path=$(_wt_expand_path "$repo_path")
+
+      if [[ ! -d "$repo_path" ]]; then
+        error "Directory not found: $repo_path"
+        continue
+      fi
+
+      if ! git -C "$repo_path" rev-parse --git-dir &>/dev/null; then
+        error "Not a git repository: $repo_path"
+        continue
+      fi
+
+      break
+    done
+  else
+    repo_path=$(_wt_expand_path "$repo_path")
+
+    if [[ ! -d "$repo_path" ]]; then
+      error "Directory not found: $repo_path"
+      return 1
+    fi
+
+    if ! git -C "$repo_path" rev-parse --git-dir &>/dev/null; then
+      error "Not a git repository: $repo_path"
+      return 1
+    fi
+  fi
+
+  repo_path="$(cd "$repo_path" && pwd)"
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Step 2: Get context name
+  # ─────────────────────────────────────────────────────────────────────────────
+  local suggested_name
+  suggested_name="$(basename "$repo_path")"
+  suggested_name="${suggested_name%-master}"
+  suggested_name="${suggested_name%-main}"
+
+  if [[ -z "$context_name" ]]; then
+    echo
+    echo "What would you like to call this context?"
+    echo "(This name identifies the repo in 'wt context')"
+    echo
+
+    while true; do
+      if ! read -rp "Context name [$suggested_name]: " context_name; then
+        echo
+        return 1
+      fi
+
+      context_name="${context_name:-$suggested_name}"
+
+      if [[ ! "$context_name" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+        error "Context name must contain only letters, numbers, dashes, and underscores"
+        context_name=""
+        continue
+      fi
+
+      if [[ -f "$repos_dir/$context_name.conf" ]]; then
+        echo
+        warn "Context '$context_name' already exists."
+        local existing_repo
+        existing_repo=$(grep '^WT_MAIN_REPO_ROOT=' "$repos_dir/$context_name.conf" 2>/dev/null | cut -d'"' -f2)
+        if [[ -n "$existing_repo" ]]; then
+          echo "  Current config: $existing_repo"
+        fi
+        echo
+        echo "Options:"
+        echo "  1) Replace existing context with new configuration"
+        echo "  2) Choose a different name"
+        echo
+        local choice
+        if ! read -rp "Select [1-2]: " choice; then
+          echo
+          return 1
+        fi
+        case "$choice" in
+          1)
+            echo "Will replace existing '$context_name' context."
+            break
+            ;;
+          2)
+            echo "Please enter a different name."
+            context_name=""
+            continue
+            ;;
+          *)
+            echo "Invalid choice. Please enter a different name."
+            context_name=""
+            continue
+            ;;
+        esac
+      fi
+
+      break
+    done
+  else
+    if [[ ! "$context_name" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+      error "Context name must contain only letters, numbers, dashes, and underscores"
+      return 1
+    fi
+
+    if [[ -f "$repos_dir/$context_name.conf" ]]; then
+      echo
+      warn "Context '$context_name' already exists."
+      local existing_repo
+      existing_repo=$(grep '^WT_MAIN_REPO_ROOT=' "$repos_dir/$context_name.conf" 2>/dev/null | cut -d'"' -f2)
+      if [[ -n "$existing_repo" ]]; then
+        echo "  Current config: $existing_repo"
+      fi
+      echo
+      if ! prompt_confirm "Replace existing context? [y/N]" "n"; then
+        echo "Aborted."
+        return 1
+      fi
+      echo "Will replace existing '$context_name' context."
+    fi
+  fi
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Step 3: Show detected git info
+  # ─────────────────────────────────────────────────────────────────────────────
+  echo
+  echo "Detected repository:"
+  echo "  Path:   $repo_path"
+
+  local remote_url
+  remote_url=$(git -C "$repo_path" remote get-url origin 2>/dev/null || echo "(no remote)")
+  echo "  Remote: $remote_url"
+
+  WT_BASE_BRANCH=$(_wt_detect_default_branch "$repo_path")
+  echo "  Branch: $WT_BASE_BRANCH (default branch)"
+
+  echo
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Step 4: Derive and show configuration
+  # ─────────────────────────────────────────────────────────────────────────────
+  _wt_derive_paths "$repo_path" "$context_name"
+
+  echo "Derived configuration for context '$context_name':"
+  echo
+  echo "  The worktree toolkit will set up the following structure:"
+  echo
+  echo "  ${BOLD}Active symlink:${NC}      $WT_ACTIVE_WORKTREE"
+  echo "     Your IDE opens this path. It's a symlink that can point to any worktree."
+  echo
+  echo "  ${BOLD}Main repository:${NC}     $WT_MAIN_REPO_ROOT"
+  echo "     Your current repo will be moved here (the \"master\" worktree)."
+  echo
+  echo "  ${BOLD}Worktrees directory:${NC} $WT_WORKTREES_BASE"
+  echo "     New worktrees will be created here."
+  echo
+  echo "  ${BOLD}Metadata vault:${NC}      $WT_IDEA_FILES_BASE"
+  echo "     Shared project metadata for instant project switching."
+  echo
+  echo "  ${BOLD}Default branch:${NC}      $WT_BASE_BRANCH"
+  echo "     Used when creating new worktrees."
+  echo
+
+  if ! prompt_confirm "Use this configuration? [Y/n]" "y"; then
+    echo
+    echo "You can customize each value. Press Enter to keep the default."
+    echo
+
+    local input
+    read -rp "Active symlink path [$WT_ACTIVE_WORKTREE]: " input
+    WT_ACTIVE_WORKTREE="${input:-$WT_ACTIVE_WORKTREE}"
+
+    read -rp "Main repository path [$WT_MAIN_REPO_ROOT]: " input
+    WT_MAIN_REPO_ROOT="${input:-$WT_MAIN_REPO_ROOT}"
+
+    read -rp "Worktrees directory [$WT_WORKTREES_BASE]: " input
+    WT_WORKTREES_BASE="${input:-$WT_WORKTREES_BASE}"
+
+    read -rp "Metadata vault directory [$WT_IDEA_FILES_BASE]: " input
+    WT_IDEA_FILES_BASE="${input:-$WT_IDEA_FILES_BASE}"
+
+    read -rp "Default base branch [$WT_BASE_BRANCH]: " input
+    WT_BASE_BRANCH="${input:-$WT_BASE_BRANCH}"
+
+    echo
+    echo "Final configuration:"
+    echo "  WT_ACTIVE_WORKTREE:  $WT_ACTIVE_WORKTREE"
+    echo "  WT_MAIN_REPO_ROOT:   $WT_MAIN_REPO_ROOT"
+    echo "  WT_WORKTREES_BASE:   $WT_WORKTREES_BASE"
+    echo "  WT_IDEA_FILES_BASE:  $WT_IDEA_FILES_BASE"
+    echo "  WT_BASE_BRANCH:      $WT_BASE_BRANCH"
+    echo
+  fi
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Step 5: Detect and select metadata patterns
+  # ─────────────────────────────────────────────────────────────────────────────
+  echo
+  _wt_select_metadata_patterns "$repo_path"
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Step 6: Create context config file
+  # ─────────────────────────────────────────────────────────────────────────────
+  echo
+  echo "Saving configuration..."
+
+  mkdir -p "$repos_dir"
+
+  local config_path="$repos_dir/$context_name.conf"
+  cat > "$config_path" <<EOF
+# Repository configuration for: $context_name
+# Generated by wt
+
+WT_MAIN_REPO_ROOT="$WT_MAIN_REPO_ROOT"
+WT_WORKTREES_BASE="$WT_WORKTREES_BASE"
+WT_ACTIVE_WORKTREE="$WT_ACTIVE_WORKTREE"
+WT_IDEA_FILES_BASE="$WT_IDEA_FILES_BASE"
+WT_BASE_BRANCH="$WT_BASE_BRANCH"
+WT_METADATA_PATTERNS="$WT_METADATA_PATTERNS"
+EOF
+
+  echo "  ✓ Created context config: $config_path"
+
+  mkdir -p "$(dirname "$current_file")"
+  echo "$context_name" > "$current_file"
+  echo "  ✓ Set as current context: $context_name"
+
+  CURRENT_CONTEXT_NAME="$context_name"
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Step 7: Create directories
+  # ─────────────────────────────────────────────────────────────────────────────
+  echo
+  _wt_create_directories
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Step 8: Migrate repository
+  # ─────────────────────────────────────────────────────────────────────────────
+  echo
+  _wt_migrate_repo "$context_name"
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Step 9: Sync metadata
+  # ─────────────────────────────────────────────────────────────────────────────
+  echo
+  _wt_sync_metadata "$context_name"
+
+  echo
+  success "Context '$context_name' setup complete!"
+
+  return 0
+}

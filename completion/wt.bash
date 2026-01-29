@@ -260,8 +260,52 @@ _wt_cd_complete() {
   COMPREPLY+=( $(compgen -d -- "$cur") )
 }
 
+# --- Helper: get context list ---
+_wt_context_list() {
+  local repos_dir="$HOME/.config/wt/repos"
+
+  [[ ! -d "$repos_dir" ]] && return 0
+
+  for conf in "$repos_dir"/*.conf; do
+    [[ -f "$conf" ]] || continue
+    local name="${conf##*/}"
+    name="${name%.conf}"
+    printf '%s\n' "$name"
+  done
+}
+
+# --- Completion for wt-context ---
+_wt_context_complete() {
+  local cur prev cword
+  COMPREPLY=()
+  cur="${COMP_WORDS[COMP_CWORD]}"
+  prev="${COMP_WORDS[COMP_CWORD-1]}"
+  cword=$COMP_CWORD
+
+  # First argument after wt-context
+  if [[ $cword -eq 1 ]]; then
+    # Options and subcommands
+    if [[ "$cur" == -* ]]; then
+      COMPREPLY+=( $(compgen -W "-l --list -h --help" -- "$cur") )
+    else
+      # Context names and 'add' subcommand
+      local contexts
+      contexts="$(_wt_context_list)"
+      COMPREPLY+=( $(compgen -W "add $contexts" -- "$cur") )
+    fi
+    return 0
+  fi
+
+  # After 'add' subcommand
+  if [[ "${COMP_WORDS[1]}" == "add" ]]; then
+    COMPREPLY+=( $(compgen -d -- "$cur") )
+    return 0
+  fi
+}
+
 # --- Wire up completion functions (only if commands exist on PATH) ---
 type wt-add >/dev/null 2>&1 && complete -F _wt_add_complete wt-add
 type wt-switch >/dev/null 2>&1 && complete -F _wt_switch_complete wt-switch
 type wt-remove >/dev/null 2>&1 && complete -F _wt_remove_complete wt-remove
 type wt-cd >/dev/null 2>&1 && complete -F _wt_cd_complete wt-cd
+type wt-context >/dev/null 2>&1 && complete -F _wt_context_complete wt-context
