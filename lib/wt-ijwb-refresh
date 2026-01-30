@@ -28,7 +28,7 @@
 #
 # Cron Setup:
 #   # Run nightly at 2am with full shell environment, log output
-#   0 2 * * * /bin/zsh -lc '~/.config/wt/lib/wt-ijwb-refresh' >> ~/.config/wt/logs/ijwb-refresh.log 2>&1
+#   0 2 * * * /bin/zsh -lc '~/.wt/lib/wt-ijwb-refresh' >> ~/.wt/logs/ijwb-refresh.log 2>&1
 #
 # Note:
 #   The bazel query approach may include more targets than IntelliJ's native sync
@@ -47,8 +47,8 @@ BIN_DIR="$SCRIPT_DIR/../bin"
 # Bootstrap: source wt-common from lib/
 if [[ -f "$LIB_DIR/wt-common" ]]; then
   . "$LIB_DIR/wt-common"
-elif [[ -f "$HOME/.config/wt/lib/wt-common" ]]; then
-  . "$HOME/.config/wt/lib/wt-common"
+elif [[ -f "$HOME/.wt/lib/wt-common" ]]; then
+  . "$HOME/.wt/lib/wt-common"
 else
   echo "Error: Cannot find wt-common" >&2
   exit 1
@@ -59,7 +59,7 @@ fi
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # Log directory for cron runs
-LOG_DIR="${WT_LOG_DIR:-$HOME/.config/wt/logs}"
+LOG_DIR="${WT_LOG_DIR:-$HOME/.wt/logs}"
 
 # Exit codes
 EXIT_SUCCESS=0

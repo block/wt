@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 #
-# install.sh — Install worktree-toolkit to ~/.config/wt/
-# ======================================================
+# install.sh — Install worktree-toolkit to ~/.wt/
+# ================================================
 #
 # This script:
-#   1. Copies the toolkit to ~/.config/wt/
+#   1. Copies the toolkit to ~/.wt/
 #   2. Adds source line to ~/.zshrc or ~/.bashrc
 #   3. Optionally configures environment variables in lib/wt-common
 #   4. Creates required directories
@@ -20,7 +20,7 @@ set -euo pipefail
 # ═══════════════════════════════════════════════════════════════════════════════
 
 SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-INSTALL_DIR="$HOME/.config/wt"
+INSTALL_DIR="$HOME/.wt"
 
 # Source wt-common to get default values and color helpers
 . "$SOURCE_DIR/lib/wt-common"
@@ -106,22 +106,21 @@ detect_default_branch() {
 # Sets: WT_MAIN_REPO_ROOT, WT_WORKTREES_BASE, WT_ACTIVE_WORKTREE, WT_IDEA_FILES_BASE
 derive_paths_from_repo() {
   local repo="$1"
-  local repo_name repo_parent
+  local repo_name
 
   repo_name="$(basename "$repo")"
-  repo_parent="$(dirname "$repo")"
 
   # The current repo location becomes the symlink location
   WT_ACTIVE_WORKTREE="$repo"
 
-  # Main repo gets "-master" suffix
-  WT_MAIN_REPO_ROOT="${repo_parent}/${repo_name}-master"
+  # All worktree data goes to ~/.wt/repos/<name>/
+  WT_MAIN_REPO_ROOT="$HOME/.wt/repos/${repo_name}/base"
 
-  # Worktrees base gets "-worktrees" suffix
-  WT_WORKTREES_BASE="${repo_parent}/${repo_name}-worktrees"
+  # Worktrees directory
+  WT_WORKTREES_BASE="$HOME/.wt/repos/${repo_name}/worktrees"
 
-  # IntelliJ metadata goes to a central location in ~/.config/wt/
-  WT_IDEA_FILES_BASE="$HOME/.config/wt/idea-files/${repo_name}"
+  # IntelliJ metadata
+  WT_IDEA_FILES_BASE="$HOME/.wt/repos/${repo_name}/idea-files"
 }
 
 # Copy toolkit to installation directory
@@ -148,7 +147,7 @@ install_toolkit() {
 
 # Configure shell rc files to source wt.sh
 configure_shell_rc() {
-  local source_line='[[ -f "$HOME/.config/wt/wt.sh" ]] && source "$HOME/.config/wt/wt.sh"'
+  local source_line='[[ -f "$HOME/.wt/wt.sh" ]] && source "$HOME/.wt/wt.sh"'
 
   echo "Configuring shell..."
 
@@ -340,8 +339,17 @@ migrate_repo() {
       return 1
     fi
 
-    echo "Moving $WT_ACTIVE_WORKTREE -> $WT_MAIN_REPO_ROOT ..."
-    mv "$WT_ACTIVE_WORKTREE" "$WT_MAIN_REPO_ROOT"
+    # Use a temp directory to handle nested structures (e.g., moving ~/java to ~/java/base)
+    local temp_dir="${WT_ACTIVE_WORKTREE}.wt-migrate-$(uuidgen)"
+
+    echo "Moving $WT_ACTIVE_WORKTREE -> $temp_dir (temporary) ..."
+    mv "$WT_ACTIVE_WORKTREE" "$temp_dir"
+
+    # Create parent directory for destination if needed
+    mkdir -p "$(dirname "$WT_MAIN_REPO_ROOT")"
+
+    echo "Moving $temp_dir -> $WT_MAIN_REPO_ROOT ..."
+    mv "$temp_dir" "$WT_MAIN_REPO_ROOT"
 
     echo "Creating symlink $WT_ACTIVE_WORKTREE -> $WT_MAIN_REPO_ROOT ..."
     ln -s "$WT_MAIN_REPO_ROOT" "$WT_ACTIVE_WORKTREE"
@@ -367,7 +375,7 @@ migrate_repo() {
 # Set up cron job for .ijwb refresh
 setup_cron_job() {
   local refresh_script="$INSTALL_DIR/lib/wt-ijwb-refresh"
-  local log_dir="$HOME/.config/wt/logs"
+  local log_dir="$HOME/.wt/logs"
   local log_file="$log_dir/ijwb-refresh.log"
   local cron_entry="0 2 * * * /bin/zsh -lc '$refresh_script' >> $log_file 2>&1"
 
@@ -500,6 +508,28 @@ main() {
   echo "Source:      $SOURCE_DIR"
   echo "Install to:  $INSTALL_DIR"
   echo
+
+  # Clean up old installation location if present
+  if [[ -d "$HOME/.config/wt" ]]; then
+    echo "Found old installation at ~/.config/wt"
+    echo
+    echo "This version uses ~/.wt/ instead."
+    echo "Your existing worktrees and code are not affected."
+    echo
+    if prompt_confirm "Remove old installation? [Y/n]" "y"; then
+      rm -rf "$HOME/.config/wt"
+      # Update shell rc files to use new path
+      for rc_file in "$HOME/.zshrc" "$HOME/.bashrc"; do
+        if [[ -f "$rc_file" ]] && grep -q '\.config/wt' "$rc_file"; then
+          sed -i.bak 's|\.config/wt|.wt|g' "$rc_file"
+          rm -f "$rc_file.bak"
+          echo "  ✓ Updated $rc_file"
+        fi
+      done
+      echo "  ✓ Removed old installation"
+    fi
+    echo
+  fi
 
   install_toolkit
   echo
