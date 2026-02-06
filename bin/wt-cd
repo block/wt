@@ -46,15 +46,16 @@ wt_source wt-choose
 
 usage() {
   cat >&2 <<EOF
-Usage: $(basename "$0") [worktree-path]
+Usage: $(basename "$0") [worktree-path|branch-name]
 
 Modes:
-  $(basename "$0")              # Interactive: pick worktree from menu
-  $(basename "$0") <worktree>   # Output validated path directly
+  $(basename "$0")                          # Interactive: pick worktree from menu
+  $(basename "$0") <worktree-path|branch>   # Output validated path directly
 
 Typical Usage:
-  cd "\$(wt-cd)"          # Navigate to selected worktree
-  cd "\$(wt-cd /path)"    # Navigate with validation
+  cd "\$(wt-cd)"                  # Navigate to selected worktree
+  cd "\$(wt-cd /path)"            # Navigate with validation
+  cd "\$(wt-cd feature/branch)"   # Navigate by branch name
 
 Shell Integration:
   Add to your shell config:
@@ -87,18 +88,7 @@ fi
 if [[ -z "$TARGET_WORKTREE" ]]; then
   TARGET_WORKTREE="$(select_git_worktree)" || exit 1
 else
-  # Validate provided worktree path exists
-  if [[ ! -d "$TARGET_WORKTREE" ]]; then
-    error "Worktree path does not exist: $TARGET_WORKTREE"
-    exit 1
-  fi
-  # Normalize to absolute path
-  TARGET_WORKTREE="$(cd "$TARGET_WORKTREE" && pwd)"
-  # Validate it's a git worktree
-  if ! git -C "$TARGET_WORKTREE" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    error "$TARGET_WORKTREE is not a git repository or worktree"
-    exit 1
-  fi
+  TARGET_WORKTREE="$(wt_resolve_and_validate "$TARGET_WORKTREE")" || exit 1
 fi
 
 # Output the path (only thing that goes to stdout)
