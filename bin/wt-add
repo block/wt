@@ -78,6 +78,9 @@ else
   exit 1
 fi
 
+# Source wt-bazel-common for shared Bazel utilities
+wt_source wt-bazel-common
+
 usage() {
   echo "Usage: $(basename "$0") [git worktree add arguments...]"
   echo
@@ -161,49 +164,13 @@ install_ijwb_for_worktree() {
 }
 
 # Helper: install Bazel output symlinks (bazel-out, bazel-bin, etc.) for a created worktree
-# These symlinks point to Bazel's cached build artifacts in a temp directory.
-# Sharing them across worktrees significantly speeds up IntelliJ project sync.
+# Note: Uses wt_install_bazel_symlinks from lib/wt-bazel-common
 install_bazel_symlinks_for_worktree() {
   local worktree_path="$1"
-
-  # Normalize to absolute (worktree now exists)
-  local worktree_path_abs
-  worktree_path_abs="$(cd "$worktree_path" && pwd)"
-
-  # List of Bazel symlinks to copy from main repo
-  # These are the most important ones for IntelliJ sync performance
-  local bazel_symlinks=("bazel-out" "bazel-bin" "bazel-testlogs" "bazel-genfiles")
-  
   local main_repo_abs
   main_repo_abs="$(cd "$WT_MAIN_REPO_ROOT" && pwd)"
-
-  echo "Installing Bazel symlinks into worktree: $worktree_path_abs"
-
-  for symlink_name in "${bazel_symlinks[@]}"; do
-    local src_link="$main_repo_abs/$symlink_name"
-    local dst_link="$worktree_path_abs/$symlink_name"
-
-    # Check if source symlink exists in main repo
-    if [[ -L "$src_link" ]]; then
-      # Get the target of the symlink
-      local target
-      target="$(readlink "$src_link")"
-
-      # If the target is relative, make it absolute based on main repo location
-      if [[ "$target" != /* ]]; then
-        target="$main_repo_abs/$target"
-      fi
-
-      # Remove existing symlink/file in worktree if present
-      if [[ -L "$dst_link" || -e "$dst_link" ]]; then
-        rm -rf "$dst_link"
-      fi
-
-      # Create symlink pointing to the same target
-      ln -s "$target" "$dst_link"
-      echo "  ✓ $symlink_name -> $target"
-    fi
-  done
+  
+  wt_install_bazel_symlinks "$main_repo_abs" "$worktree_path" || true
 }
 
 ########################################
