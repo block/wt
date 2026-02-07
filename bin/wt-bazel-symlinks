@@ -1,0 +1,157 @@
+#!/usr/bin/env bash
+#
+# wt-bazel-symlinks — Install Bazel Output Symlinks Into a Worktree
+# ==================================================================
+#
+# This script copies Bazel output symlinks (bazel-out, bazel-bin, etc.) from
+# the main repository into a worktree, ensuring they point to the same
+# underlying Bazel cache directories.
+#
+# This allows all worktrees to share build artifacts, avoiding duplicate builds
+# and speeding up IntelliJ project sync.
+#
+# Behavior:
+# ---------
+# 1. Reads Bazel symlinks from the main repository
+# 2. Creates matching symlinks in the target worktree pointing to the same targets
+# 3. Handles both absolute and relative symlink targets
+#
+# Usage:
+# ------
+#   wt-bazel-symlinks [OPTIONS] [worktree-path]
+#
+# Options:
+#   --main-repo <path>    Path to main repository (overrides $WT_MAIN_REPO_ROOT)
+#   -h, --help            Show this help message
+#
+# Arguments:
+#   worktree-path         Target worktree directory (default: current directory)
+#
+# Examples:
+# ---------
+#   # Use current directory as worktree, $WT_MAIN_REPO_ROOT from environment
+#   wt-bazel-symlinks
+#
+#   # Explicit worktree path, $WT_MAIN_REPO_ROOT from environment
+#   wt-bazel-symlinks ~/Development/java-worktrees/feature-x
+#
+#   # Explicit main repo, current directory as worktree
+#   wt-bazel-symlinks --main-repo ~/Development/java-master
+#
+#   # Both paths explicit (no environment needed)
+#   wt-bazel-symlinks --main-repo ~/Development/java-master ~/Development/java-worktrees/feature-x
+#
+# Environment Variables:
+# ----------------------
+#   WT_MAIN_REPO_ROOT     Main repository root (used if --main-repo not provided)
+#
+# Notes:
+# ------
+# - The main repository must have Bazel symlinks already (created by running bazel commands)
+# - If symlinks don't exist in the main repo, they are skipped (not an error)
+# - Safe to run multiple times; existing symlinks are replaced
+#
+
+set -euo pipefail
+
+# Resolve script and lib directories
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIB_DIR="$SCRIPT_DIR/../lib"
+
+# Bootstrap: source wt-common from lib/ (optional - for defaults and helpers)
+if [[ -f "$LIB_DIR/wt-common" ]]; then
+  . "$LIB_DIR/wt-common"
+elif [[ -f "$HOME/.config/wt/lib/wt-common" ]]; then
+  . "$HOME/.config/wt/lib/wt-common"
+fi
+
+# Source wt-bazel-common for shared Bazel utilities
+wt_source wt-bazel-common
+
+usage() {
+  cat <<EOF
+Usage: $(basename "$0") [OPTIONS] [worktree-path]
+
+Install Bazel output symlinks from main repository into a worktree.
+
+Options:
+  --main-repo <path>    Path to main repository (overrides \$WT_MAIN_REPO_ROOT)
+  -h, --help            Show this help message
+
+Arguments:
+  worktree-path         Target worktree directory (default: current directory)
+
+Examples:
+  $(basename "$0")
+  $(basename "$0") ~/Development/java-worktrees/feature-x
+  $(basename "$0") --main-repo ~/Development/java-master
+  $(basename "$0") --main-repo ~/Development/java-master ~/Development/java-worktrees/feature-x
+
+Environment Variables:
+  WT_MAIN_REPO_ROOT     Main repository root (current: ${WT_MAIN_REPO_ROOT:-not set})
+
+The main repository must have Bazel symlinks (bazel-out, bazel-bin, etc.)
+created by running bazel commands. These symlinks will be copied to the worktree
+to share the Bazel build cache.
+EOF
+}
+
+# Note: install_bazel_symlinks_for_worktree is now wt_install_bazel_symlinks
+# defined in lib/wt-bazel-common
+
+# Parse arguments
+MAIN_REPO=""
+WORKTREE_PATH=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --main-repo)
+      if [[ -z "${2:-}" ]]; then
+        echo "Error: --main-repo requires a path argument" >&2
+        usage
+        exit 1
+      fi
+      MAIN_REPO="$2"
+      shift 2
+      ;;
+    -*)
+      echo "Error: Unknown option: $1" >&2
+      usage
+      exit 1
+      ;;
+    *)
+      if [[ -n "$WORKTREE_PATH" ]]; then
+        echo "Error: Too many arguments" >&2
+        usage
+        exit 1
+      fi
+      WORKTREE_PATH="$1"
+      shift
+      ;;
+  esac
+done
+
+# Determine main repo path
+if [[ -z "$MAIN_REPO" ]]; then
+  # Use environment variable
+  if [[ -z "${WT_MAIN_REPO_ROOT:-}" ]]; then
+    echo "Error: Main repository not specified." >&2
+    echo "Either set WT_MAIN_REPO_ROOT environment variable or use --main-repo option." >&2
+    echo >&2
+    usage
+    exit 1
+  fi
+  MAIN_REPO="$WT_MAIN_REPO_ROOT"
+fi
+
+# Determine worktree path
+if [[ -z "$WORKTREE_PATH" ]]; then
+  WORKTREE_PATH="$(pwd)"
+fi
+
+# Execute
+wt_install_bazel_symlinks "$MAIN_REPO" "$WORKTREE_PATH"

@@ -34,6 +34,12 @@ IntelliJ Metadata Commands:
                             - src: defaults to $WT_IDEA_FILES_BASE
                             - dst: interactive worktree selection if omitted
 
+Bazel Commands:
+  bazel-symlinks [OPTIONS] [worktree]
+                            Install Bazel output symlinks into a worktree
+                            - --main-repo <path>: specify main repository path
+                            - worktree: defaults to current directory
+
 Other:
   help                      Show this help message
 
@@ -50,6 +56,10 @@ Examples:
   wt ijwb-import                  # Interactive: pick worktree to import into
   wt ijwb-import ~/worktree       # Import into specific worktree
   wt ijwb-import ~/vault ~/wt     # Import from specific vault into worktree
+
+  wt bazel-symlinks               # Install Bazel symlinks in current directory
+  wt bazel-symlinks ~/worktree    # Install into specific worktree
+  wt bazel-symlinks --main-repo ~/repo ~/worktree  # Specify both paths
 
 EOF
   cat <<EOF
