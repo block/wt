@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+#
+# wt-bazel-common — Shared Bazel utilities for wt-* scripts
+# ===========================================================
+#
+# Provides common functions for managing Bazel artifacts in worktrees.
+#
+
+# Install Bazel output symlinks for a worktree
+# Args: $1 = main repo path, $2 = worktree path
+# Returns: 0 on success, 1 on error
+wt_install_bazel_symlinks() {
+  local main_repo="$1"
+  local worktree_path="$2"
+  
+  # Normalize to absolute paths
+  local main_repo_abs
+  local worktree_path_abs
+  
+  if [[ ! -d "$main_repo" ]]; then
+    error "Main repository does not exist: $main_repo"
+    return 1
+  fi
+  
+  if [[ ! -d "$worktree_path" ]]; then
+    error "Worktree directory does not exist: $worktree_path"
+    return 1
+  fi
+  
+  main_repo_abs="$(cd "$main_repo" && pwd)"
+  worktree_path_abs="$(cd "$worktree_path" && pwd)"
+  
+  # List of Bazel symlinks to copy from main repo
+  local bazel_symlinks=("bazel-out" "bazel-bin" "bazel-testlogs" "bazel-genfiles")
+  
+  echo "Installing Bazel symlinks into worktree: $worktree_path_abs"
+  echo "Reading symlinks from main repo: $main_repo_abs"
+  echo
+  
+  local installed_count=0
+  
+  for symlink_name in "${bazel_symlinks[@]}"; do
+    local src_link="$main_repo_abs/$symlink_name"
+    local dst_link="$worktree_path_abs/$symlink_name"
+    
+    # Check if source symlink exists in main repo
+    if [[ -L "$src_link" ]]; then
+      # Get the target of the symlink
+      local target
+      target="$(readlink "$src_link")"
+      
+      # If the target is relative, make it absolute based on main repo location
+      if [[ "$target" != /* ]]; then
+        target="$main_repo_abs/$target"
+      fi
+      
+      # Remove existing symlink/file in worktree if present
+      if [[ -L "$dst_link" || -e "$dst_link" ]]; then
+        rm -rf "$dst_link"
+      fi
+      
+      # Create symlink pointing to the same target
+      ln -s "$target" "$dst_link"
+      echo "  ✓ $symlink_name -> $target"
+      installed_count=$((installed_count + 1))
+    else
+      echo "  ⊘ $symlink_name (not found in main repo, skipping)"
+    fi
+  done
+  
+  echo
+  if [[ $installed_count -eq 0 ]]; then
+    warn "No Bazel symlinks found in main repository."
+    echo "Run a bazel command in the main repo first to create them."
+    return 1
+  else
+    success "Installed $installed_count Bazel symlink(s)."
+  fi
+  
+  return 0
+}
