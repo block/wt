@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+#
+# wt-print-post-checkout-hook — Print post-checkout hook template to stdout
+# ===========================================================================
+#
+# This script prints a post-checkout Git hook that automatically installs
+# Bazel output symlinks when checking out branches in worktrees.
+#
+# Usage:
+#   wt-print-post-checkout-hook > /path/to/hooks/post-checkout-bazel-symlinks
+#   wt-print-post-checkout-hook > .hooks/post-checkout-bazel-symlinks
+#   wt-print-post-checkout-hook > .git/hooks/post-checkout
+#
+# After redirecting to a file, remember to make it executable:
+#   chmod +x /path/to/hooks/post-checkout-bazel-symlinks
+#
+
+cat <<'EOF'
+#!/bin/bash
+#
+# post-checkout-bazel-symlinks — Install Bazel symlinks in worktrees
+# ===================================================================
+#
+# This hook automatically installs Bazel output symlinks (bazel-out, bazel-bin, etc.)
+# whenever checking out a branch in a Git worktree.
+#
+# Arguments (provided by Git via post-checkout):
+#   $1 = ref of previous HEAD
+#   $2 = ref of new HEAD
+#   $3 = flag (1 = branch checkout, 0 = file checkout)
+#
+
+PREV_HEAD=$1
+NEW_HEAD=$2
+BRANCH_CHECKOUT=$3
+
+# Only run for branch checkouts
+if [ "$BRANCH_CHECKOUT" != "1" ]; then
+  exit 0
+fi
+
+# Detect if we're in a worktree
+GIT_DIR="$(git rev-parse --git-dir 2>/dev/null)" || exit 0
+
+# Check if this is a worktree (path contains .git/worktrees/)
+if [[ "$GIT_DIR" != */.git/worktrees/* ]]; then
+  # Not a worktree, skip
+  exit 0
+fi
+
+# Find the main repository root
+# GIT_DIR looks like: /path/to/repo/.git/worktrees/worktree-name
+MAIN_REPO_GIT_DIR="${GIT_DIR%%/worktrees/*}"
+MAIN_REPO_ROOT="$(dirname "$MAIN_REPO_GIT_DIR")"
+WORKTREE_PATH="$(pwd)"
+
+# Try to find wt-bazel-symlinks
+if command -v wt >/dev/null 2>&1; then
+  echo "Installing Bazel symlinks..." >&2
+  wt bazel-symlinks --main-repo "$MAIN_REPO_ROOT" "$WORKTREE_PATH" 2>&1 || true
+else
+  echo "Warning: wt-bazel-symlinks not found in PATH, skipping Bazel symlink installation" >&2
+fi
+
+exit 0
+EOF

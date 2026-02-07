@@ -127,6 +127,7 @@ wt() {
     ijwb-export) _wt_run wt-ijwb-export "$@" ;;
     ijwb-import) _wt_run wt-ijwb-import "$@" ;;
     bazel-symlinks) _wt_run wt-bazel-symlinks "$@" ;;
+    print-post-checkout-hook) _wt_run wt-print-post-checkout-hook "$@" ;;
     cd)          __wt_do_cd "$@" ;;
     help|--help|-h|"")
       wt_show_help          # helper for showing help, defined in wt-help library
