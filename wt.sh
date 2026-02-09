@@ -61,12 +61,12 @@ _wt_resolve_root() {
   local source="$(_wt_get_script_path)"
   # Resolve symlinks to find the real location
   while [[ -L "$source" ]]; do
-    local dir="$(cd -P "$(dirname "$source")" && pwd)"
+    local dir="$(command cd -P "$(dirname "$source")" && pwd)"
     source="$(readlink "$source")"
     # If source is relative, resolve it relative to the symlink's directory
     [[ "$source" != /* ]] && source="$dir/$source"
   done
-  cd -P "$(dirname "$source")" && pwd
+  command cd -P "$(dirname "$source")" && pwd
 }
 
 # helper for sourcing a library file from lib/ directory
