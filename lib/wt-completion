@@ -41,13 +41,15 @@ if [[ -n "$ZSH_VERSION" ]]; then
           branches=($(git branch -a 2>/dev/null | sed 's/^[* ]*//' | sed 's|remotes/origin/||'))
           _describe 'branch' branches
           ;;
-        switch|remove|cd)
-          # Complete worktree paths
-          local worktrees
-          if [[ -n "$WT_MAIN_REPO_ROOT" ]] && [[ -d "$WT_MAIN_REPO_ROOT" ]]; then
-            worktrees=($(git -C "$WT_MAIN_REPO_ROOT" worktree list --porcelain 2>/dev/null | grep '^worktree ' | cut -d' ' -f2-))
-            _describe 'worktree' worktrees
-          fi
+        switch|cd)
+          local -a branches
+          branches=("${(f)$(wt_worktree_branch_list)}")
+          (( ${#branches[@]} > 0 )) && _describe 'branch names' branches
+          ;;
+        remove)
+          local -a branches
+          branches=("${(f)$(wt_worktree_branch_list exclude_main)}")
+          (( ${#branches[@]} > 0 )) && _describe 'branch names' branches
           ;;
         context)
           # Complete context names and 'add' subcommand
@@ -115,11 +117,20 @@ if [[ -n "$BASH_VERSION" ]]; then
           branches=$(git branch -a 2>/dev/null | sed 's/^[* ]*//' | sed 's|remotes/origin/||')
           COMPREPLY=($(compgen -W "$branches" -- "$cur"))
           ;;
-        switch|remove|cd)
-          local worktrees
-          if [[ -n "$WT_MAIN_REPO_ROOT" ]] && [[ -d "$WT_MAIN_REPO_ROOT" ]]; then
-            worktrees=$(git -C "$WT_MAIN_REPO_ROOT" worktree list --porcelain 2>/dev/null | grep '^worktree ' | cut -d' ' -f2-)
-            COMPREPLY=($(compgen -W "$worktrees" -- "$cur"))
+        switch|cd)
+          local branches
+          branches="$(wt_worktree_branch_list)"
+          if [[ -n "$branches" ]]; then
+            local IFS=$'\n'
+            COMPREPLY+=($(compgen -W "$branches" -- "$cur"))
+          fi
+          ;;
+        remove)
+          local branches
+          branches="$(wt_worktree_branch_list exclude_main)"
+          if [[ -n "$branches" ]]; then
+            local IFS=$'\n'
+            COMPREPLY+=($(compgen -W "$branches" -- "$cur"))
           fi
           ;;
         context)

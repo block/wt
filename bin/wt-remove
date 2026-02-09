@@ -51,16 +51,16 @@ fi
 wt_source wt-choose
 
 usage() {
-  echo "Usage: $(basename "$0") [-y|--yes] [--merged] [worktree-path]"
+  echo "Usage: $(basename "$0") [-y|--yes] [--merged] [worktree-path|branch-name]"
   echo
   echo "Options:"
   echo "  -y, --yes           Skip confirmation prompt (unless uncommitted changes exist)"
   echo "  --merged            Remove all worktrees whose branches are merged into $WT_BASE_BRANCH"
   echo
   echo "Modes:"
-  echo "  $(basename "$0")                     # Interactive: pick worktree to remove"
-  echo "  $(basename "$0") <worktree-path>     # Remove specified worktree (with confirmation)"
-  echo "  $(basename "$0") --merged            # Remove all worktrees with merged branches"
+  echo "  $(basename "$0")                          # Interactive: pick worktree to remove"
+  echo "  $(basename "$0") <worktree-path|branch>   # Remove specified worktree (with confirmation)"
+  echo "  $(basename "$0") --merged                 # Remove all worktrees with merged branches"
 }
 
 TARGET_WORKTREE=""
@@ -216,13 +216,7 @@ if [[ -z "$TARGET_WORKTREE" ]]; then
   echo
   TARGET_WORKTREE="$(select_git_worktree exclude_main)" || exit 1
 else
-  # Validate provided worktree path exists
-  if [[ ! -d "$TARGET_WORKTREE" ]]; then
-    error "Worktree path does not exist: $TARGET_WORKTREE"
-    exit 1
-  fi
-  # Normalize to absolute path
-  TARGET_WORKTREE="$(cd "$TARGET_WORKTREE" && pwd)"
+  TARGET_WORKTREE="$(wt_resolve_and_validate "$TARGET_WORKTREE")" || exit 1
 fi
 
 # Safety check: don't remove the main repo

@@ -66,34 +66,6 @@ _wt_branch_list() {
   git -C "$repo" branch --format='%(refname:short)' 2>/dev/null
 }
 
-# --- Helper: get worktree list from resolved repo (excluding main repo) ---
-_wt_worktree_list() {
-  local repo main_repo_abs
-  repo="$(_wt_resolve_repo)"
-
-  [[ -z "$repo" ]] && return 0
-
-  # Get absolute path of main repo for exclusion
-  if [[ -n "${WT_MAIN_REPO_ROOT:-}" ]]; then
-    main_repo_abs="$(cd "$WT_MAIN_REPO_ROOT" 2>/dev/null && pwd)"
-  else
-    main_repo_abs=""
-  fi
-
-  git -C "$repo" worktree list --porcelain 2>/dev/null | while IFS= read -r line; do
-    case "$line" in
-      worktree\ *)
-        local wt="${line#worktree }"
-        local wt_abs
-        wt_abs="$(cd "$wt" 2>/dev/null && pwd)"
-        # Exclude main repo from list
-        if [[ -z "$main_repo_abs" || "$wt_abs" != "$main_repo_abs" ]]; then
-          printf '%s\n' "$wt_abs"
-        fi
-        ;;
-    esac
-  done
-}
 
 # ====================================================================================
 #  PATH 1: FZF is available → FZF-powered completion for wt-add first argument
@@ -206,58 +178,43 @@ else
 
 fi
 
-# --- Completion for wt-switch: worktree paths only ---
 _wt_switch_complete() {
   local cur
   COMPREPLY=()
   cur="${COMP_WORDS[COMP_CWORD]}"
 
-  local worktrees
-  worktrees="$(_wt_worktree_list)"
-
-  # Handle paths with spaces correctly
-  if [[ -n "$worktrees" ]]; then
+  local branches
+  branches="$(wt_worktree_branch_list)"
+  if [[ -n "$branches" ]]; then
     local IFS=$'\n'
-    compopt -o filenames 2>/dev/null
-    COMPREPLY+=( $(compgen -W "$worktrees" -- "$cur") )
+    COMPREPLY+=( $(compgen -W "$branches" -- "$cur") )
   fi
-  COMPREPLY+=( $(compgen -d -- "$cur") )
 }
 
-# --- Completion for wt-remove: worktree paths only (main repo excluded) ---
 _wt_remove_complete() {
   local cur
   COMPREPLY=()
   cur="${COMP_WORDS[COMP_CWORD]}"
 
-  local worktrees
-  worktrees="$(_wt_worktree_list)"
-
-  # Handle paths with spaces correctly
-  if [[ -n "$worktrees" ]]; then
+  local branches
+  branches="$(wt_worktree_branch_list exclude_main)"
+  if [[ -n "$branches" ]]; then
     local IFS=$'\n'
-    compopt -o filenames 2>/dev/null
-    COMPREPLY+=( $(compgen -W "$worktrees" -- "$cur") )
+    COMPREPLY+=( $(compgen -W "$branches" -- "$cur") )
   fi
-  COMPREPLY+=( $(compgen -d -- "$cur") )
 }
 
-# --- Completion for wt-cd: worktree paths only ---
 _wt_cd_complete() {
   local cur
   COMPREPLY=()
   cur="${COMP_WORDS[COMP_CWORD]}"
 
-  local worktrees
-  worktrees="$(_wt_worktree_list)"
-
-  # Handle paths with spaces correctly
-  if [[ -n "$worktrees" ]]; then
+  local branches
+  branches="$(wt_worktree_branch_list)"
+  if [[ -n "$branches" ]]; then
     local IFS=$'\n'
-    compopt -o filenames 2>/dev/null
-    COMPREPLY+=( $(compgen -W "$worktrees" -- "$cur") )
+    COMPREPLY+=( $(compgen -W "$branches" -- "$cur") )
   fi
-  COMPREPLY+=( $(compgen -d -- "$cur") )
 }
 
 # --- Helper: get context list ---

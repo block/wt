@@ -53,11 +53,11 @@ fi
 wt_source wt-choose
 
 usage() {
-  echo "Usage: $(basename "$0") [worktree_path]"
+  echo "Usage: $(basename "$0") [worktree-path|branch-name]"
   echo
   echo "Modes:"
-  echo "  $(basename "$0")              # Interactive: pick worktree from menu"
-  echo "  $(basename "$0") <worktree>   # Non-interactive: switch to specified worktree"
+  echo "  $(basename "$0")                          # Interactive: pick worktree from menu"
+  echo "  $(basename "$0") <worktree-path|branch>   # Non-interactive: switch to specified worktree"
 }
 
 TARGET_WORKTREE=""
@@ -105,18 +105,7 @@ fi
 if [[ -z "$TARGET_WORKTREE" ]]; then
   TARGET_WORKTREE="$(select_git_worktree)" || exit 1
 else
-  # Validate provided worktree path exists
-  if [[ ! -d "$TARGET_WORKTREE" ]]; then
-    error "Worktree path does not exist: $TARGET_WORKTREE"
-    exit 1
-  fi
-  # Normalize to absolute path
-  TARGET_WORKTREE="$(cd "$TARGET_WORKTREE" && pwd)"
-  # Validate it's a git worktree
-  if ! git -C "$TARGET_WORKTREE" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    error "$TARGET_WORKTREE is not a git repository or worktree"
-    exit 1
-  fi
+  TARGET_WORKTREE="$(wt_resolve_and_validate "$TARGET_WORKTREE")" || exit 1
 fi
 
 mkdir -p "$(dirname "$LINK_PATH")"

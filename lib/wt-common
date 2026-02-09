@@ -237,6 +237,90 @@ wt_source() {
 # Git helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Resolve a worktree identifier (path or branch name) to an absolute worktree path.
+# Tries:
+#   1. Filesystem path (directory must exist) — preserves existing behavior
+#   2. Exact branch name match via `git worktree list --porcelain`
+# Note: Detached HEAD worktrees cannot be resolved by branch name; use the path instead.
+# Usage: wt_resolve_worktree <identifier>
+# Outputs: absolute path on stdout
+# Returns: 0 on success, 1 if not found
+wt_resolve_worktree() {
+  local identifier="$1"
+
+  # 1) Try as filesystem path
+  if [[ -d "$identifier" ]]; then
+    (cd "$identifier" && pwd)
+    return 0
+  fi
+
+  # 2) Try as exact branch name
+  local wt_path="" branch=""
+  while IFS= read -r line; do
+    case "$line" in
+      worktree\ *)
+        wt_path="${line#worktree }"
+        ;;
+      branch\ *)
+        branch="${line#branch refs/heads/}"
+        if [[ "$branch" == "$identifier" ]]; then
+          (cd "$wt_path" 2>/dev/null && pwd) && return 0
+        fi
+        ;;
+    esac
+  done < <(git -C "$WT_MAIN_REPO_ROOT" worktree list --porcelain 2>/dev/null)
+
+  return 1
+}
+
+# Resolve a worktree identifier and validate it's a git worktree.
+# Combines wt_resolve_worktree + git-worktree validation.
+# Usage: wt_resolve_and_validate <identifier>
+# Outputs: absolute path on stdout
+# Returns: 0 on success, 1 on failure (with error message on stderr)
+wt_resolve_and_validate() {
+  local identifier="$1"
+  local resolved
+  if ! resolved="$(wt_resolve_worktree "$identifier")"; then
+    error "Worktree not found (not a valid path or branch name): $identifier"
+    return 1
+  fi
+  if ! git -C "$resolved" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    error "$resolved is not a git repository or worktree"
+    return 1
+  fi
+  printf '%s\n' "$resolved"
+}
+
+# List branch names of active worktrees.
+# Usage: wt_worktree_branch_list [exclude_main]
+# Outputs: one branch name per line to stdout
+# Note: Detached HEAD worktrees are excluded (no branch name to emit).
+wt_worktree_branch_list() {
+  local exclude_main="${1:-}"
+  local main_repo_abs=""
+
+  if [[ "$exclude_main" == "exclude_main" && -n "${WT_MAIN_REPO_ROOT:-}" ]]; then
+    main_repo_abs="$(cd "$WT_MAIN_REPO_ROOT" 2>/dev/null && pwd)"
+  fi
+
+  local wt_path="" wt_abs="" branch=""
+  while IFS= read -r line; do
+    case "$line" in
+      worktree\ *)
+        wt_path="${line#worktree }"
+        ;;
+      branch\ *)
+        wt_abs="$(cd "$wt_path" 2>/dev/null && pwd)" || continue
+        if [[ -z "$main_repo_abs" || "$wt_abs" != "$main_repo_abs" ]]; then
+          branch="${line#branch refs/heads/}"
+          printf '%s\n' "$branch"
+        fi
+        ;;
+    esac
+  done < <(git -C "$WT_MAIN_REPO_ROOT" worktree list --porcelain 2>/dev/null)
+}
+
 # Get the currently linked worktree path (resolves symlink)
 # Usage: wt_get_linked_worktree
 # Outputs: absolute physical path to linked worktree, or empty if none

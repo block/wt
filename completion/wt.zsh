@@ -55,32 +55,6 @@ _wt_branch_list() {
   git -C "$repo" branch --format='%(refname:short)' 2>/dev/null
 }
 
-# --- Helper: get worktree paths from resolved repo (excluding main repo) ---
-_wt_worktree_list() {
-  local repo main_repo_abs
-  repo=$(_wt_resolve_repo) || return
-
-  # Get absolute path of main repo for exclusion
-  if [[ -n ${WT_MAIN_REPO_ROOT:-} ]]; then
-    main_repo_abs="$(cd "$WT_MAIN_REPO_ROOT" 2>/dev/null && pwd)"
-  else
-    main_repo_abs=""
-  fi
-
-  git -C "$repo" worktree list --porcelain 2>/dev/null | while IFS= read -r line; do
-    case "$line" in
-      worktree\ *)
-        local wt="${line#worktree }"
-        local wt_abs="$(cd "$wt" 2>/dev/null && pwd)"
-        # Exclude main repo from list
-        if [[ -z "$main_repo_abs" || "$wt_abs" != "$main_repo_abs" ]]; then
-          print -r -- "$wt_abs"
-        fi
-        ;;
-    esac
-  done
-}
-
 # -------------------------------------------------------------------
 #  PATH 1: FZF is available → use FZF-powered completion for wt-add
 # -------------------------------------------------------------------
@@ -148,7 +122,7 @@ if (( $+commands[fzf] )); then
   # Bind Ctrl+X Ctrl+A to always trigger FZF-based branch picker
   bindkey '^X^A' wt_fzf_branch_complete
 
-  # Completion for wt-switch: worktree paths only
+  # Completion for wt-switch: branch names
   _wt_switch() {
     local context state
     typeset -A opt_args
@@ -158,19 +132,17 @@ if (( $+commands[fzf] )); then
 
     case "$state" in
       worktree)
-        local -a worktrees
-        worktrees=(${(f)$(_wt_worktree_list)})
+        local -a branches
+        branches=("${(f)$(wt_worktree_branch_list)}")
 
-        if (( ${#worktrees[@]} > 0 )); then
-          _describe 'worktrees' worktrees || _files -/
-        else
-          _files -/
+        if (( ${#branches[@]} > 0 )); then
+          _describe 'branch names' branches
         fi
         ;;
     esac
   }
 
-  # Completion for wt-remove: worktree paths only (main repo excluded)
+  # Completion for wt-remove: branch names (main repo excluded)
   _wt_remove() {
     local context state
     typeset -A opt_args
@@ -180,19 +152,17 @@ if (( $+commands[fzf] )); then
 
     case "$state" in
       worktree)
-        local -a worktrees
-        worktrees=(${(f)$(_wt_worktree_list)})
+        local -a branches
+        branches=("${(f)$(wt_worktree_branch_list exclude_main)}")
 
-        if (( ${#worktrees[@]} > 0 )); then
-          _describe 'worktrees' worktrees || _files -/
-        else
-          _files -/
+        if (( ${#branches[@]} > 0 )); then
+          _describe 'branch names' branches
         fi
         ;;
     esac
   }
 
-  # Completion for wt-cd: worktree paths only
+  # Completion for wt-cd: branch names
   _wt_cd() {
     local context state
     typeset -A opt_args
@@ -202,13 +172,11 @@ if (( $+commands[fzf] )); then
 
     case "$state" in
       worktree)
-        local -a worktrees
-        worktrees=(${(f)$(_wt_worktree_list)})
+        local -a branches
+        branches=("${(f)$(wt_worktree_branch_list)}")
 
-        if (( ${#worktrees[@]} > 0 )); then
-          _describe 'worktrees' worktrees || _files -/
-        else
-          _files -/
+        if (( ${#branches[@]} > 0 )); then
+          _describe 'branch names' branches
         fi
         ;;
     esac
@@ -324,7 +292,7 @@ else
     case "$state" in
       branch|first)
         local -a branches
-        branches=(${(f)$(_wt_branch_list)})
+        branches=("${(f)$(_wt_branch_list)}")
 
         if (( ${#branches[@]} > 0 )); then
           _describe 'branches' branches || _files
@@ -335,7 +303,7 @@ else
     esac
   }
 
-  # Completion for wt-switch: worktree paths only
+  # Completion for wt-switch: branch names
   _wt_switch() {
     local context state
     typeset -A opt_args
@@ -345,19 +313,17 @@ else
 
     case "$state" in
       worktree)
-        local -a worktrees
-        worktrees=(${(f)$(_wt_worktree_list)})
+        local -a branches
+        branches=("${(f)$(wt_worktree_branch_list)}")
 
-        if (( ${#worktrees[@]} > 0 )); then
-          _describe 'worktrees' worktrees || _files -/
-        else
-          _files -/
+        if (( ${#branches[@]} > 0 )); then
+          _describe 'branch names' branches
         fi
         ;;
     esac
   }
 
-  # Completion for wt-remove: worktree paths only (main repo excluded)
+  # Completion for wt-remove: branch names (main repo excluded)
   _wt_remove() {
     local context state
     typeset -A opt_args
@@ -367,19 +333,17 @@ else
 
     case "$state" in
       worktree)
-        local -a worktrees
-        worktrees=(${(f)$(_wt_worktree_list)})
+        local -a branches
+        branches=("${(f)$(wt_worktree_branch_list exclude_main)}")
 
-        if (( ${#worktrees[@]} > 0 )); then
-          _describe 'worktrees' worktrees || _files -/
-        else
-          _files -/
+        if (( ${#branches[@]} > 0 )); then
+          _describe 'branch names' branches
         fi
         ;;
     esac
   }
 
-  # Completion for wt-cd: worktree paths only
+  # Completion for wt-cd: branch names
   _wt_cd() {
     local context state
     typeset -A opt_args
@@ -389,13 +353,11 @@ else
 
     case "$state" in
       worktree)
-        local -a worktrees
-        worktrees=(${(f)$(_wt_worktree_list)})
+        local -a branches
+        branches=("${(f)$(wt_worktree_branch_list)}")
 
-        if (( ${#worktrees[@]} > 0 )); then
-          _describe 'worktrees' worktrees || _files -/
-        else
-          _files -/
+        if (( ${#branches[@]} > 0 )); then
+          _describe 'branch names' branches
         fi
         ;;
     esac
