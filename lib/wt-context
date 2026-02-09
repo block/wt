@@ -136,30 +136,6 @@ wt_load_context_config() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Context banner (for display in commands)
-# ─────────────────────────────────────────────────────────────────────────────
-
-# Show the context banner if contexts are configured
-# Output goes to stderr so it doesn't interfere with command output
-wt_show_context_banner() {
-  local current_context repos_dir
-  repos_dir="$(wt_get_repos_dir)"
-
-  # Only show banner if contexts are configured
-  if [[ ! -d "$repos_dir" ]] || ! compgen -G "$repos_dir/*.conf" >/dev/null 2>&1; then
-    return 0
-  fi
-
-  current_context="$(wt_get_current_context)"
-
-  if [[ -n "$current_context" ]]; then
-    printf "${BLUE}[Context: %s]${NC} ${YELLOW}(wt context to switch)${NC}\n" "$current_context" >&2
-  else
-    printf "${YELLOW}[No context set]${NC} ${YELLOW}(wt context to switch)${NC}\n" >&2
-  fi
-}
-
-# ─────────────────────────────────────────────────────────────────────────────
 # Interactive selection helper
 # ─────────────────────────────────────────────────────────────────────────────
 
