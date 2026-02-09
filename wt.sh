@@ -124,7 +124,13 @@ wt() {
     switch)          _wt_run wt-switch "$@" ;;
     remove)          _wt_run wt-remove "$@" ;;
     list)            _wt_run wt-list "$@" ;;
-    context)         _wt_run wt-context "$@" ;;
+    context)
+      _wt_run wt-context "$@"
+      local rc=$?
+      # Reload config to pick up new context variables in parent shell
+      [[ $rc -eq 0 ]] && _wt_source_lib wt-common
+      return $rc
+      ;;
     metadata-export) _wt_run wt-metadata-export "$@" ;;
     metadata-import) _wt_run wt-metadata-import "$@" ;;
     # Legacy aliases (kept for backward compatibility)
