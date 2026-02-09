@@ -13,13 +13,14 @@
 #
 
 # Main monorepo root (where `git worktree` is managed)
-: "${WT_MAIN_REPO_ROOT:="$HOME/Development/java-master"}"
+# Default assumes a repo named "repo" - install.sh will configure the actual name
+: "${WT_MAIN_REPO_ROOT:="$HOME/.wt/repos/repo/base"}"
 
 # Base directory where new worktrees will be created by default
-: "${WT_WORKTREES_BASE:="$HOME/Development/java-worktrees"}"
+: "${WT_WORKTREES_BASE:="$HOME/.wt/repos/repo/worktrees"}"
 
 # Base directory for IntelliJ / Bazel project metadata (e.g. canonical .ijwb)
-: "${WT_IDEA_FILES_BASE:="$HOME/Development/idea-project-files"}"
+: "${WT_IDEA_FILES_BASE:="$HOME/.wt/repos/repo/idea-files"}"
 
 # Symlink path that points to the currently active worktree (for IDE integration)
 : "${WT_ACTIVE_WORKTREE:="$HOME/Development/java"}"
@@ -124,10 +125,10 @@ wt_source() {
 
   if [[ -f "$lib_dir/$script" ]]; then
     . "$lib_dir/$script"
-  elif [[ -f "$HOME/.config/wt/lib/$script" ]]; then
-    . "$HOME/.config/wt/lib/$script"
+  elif [[ -f "$HOME/.wt/lib/$script" ]]; then
+    . "$HOME/.wt/lib/$script"
   else
-    echo "Error: Cannot find $script in $lib_dir or ~/.config/wt/lib/" >&2
+    echo "Error: Cannot find $script in $lib_dir or ~/.wt/lib/" >&2
     return 1
   fi
 }

@@ -31,7 +31,7 @@ wt help
 ```
 
 The installer will:
-1. Copy the toolkit to `~/.config/wt/`
+1. Copy the toolkit to `~/.wt/`
 2. Add sourcing to your shell rc file
 3. Prompt for workspace paths (main repo, worktrees, metadata vault)
 4. Create required directories
@@ -196,26 +196,26 @@ To set it up manually:
 
 ```bash
 # Create log directory
-mkdir -p ~/.config/wt/logs
+mkdir -p ~/.wt/logs
 
 # Edit crontab
 crontab -e
 
 # Add this line to run nightly at 2am (uses login shell for full PATH):
-0 2 * * * /bin/zsh -lc '~/.config/wt/lib/wt-ijwb-refresh' >> ~/.config/wt/logs/ijwb-refresh.log 2>&1
+0 2 * * * /bin/zsh -lc '~/.wt/lib/wt-ijwb-refresh' >> ~/.wt/logs/ijwb-refresh.log 2>&1
 ```
 
 You can also run the script manually:
 
 ```bash
 # Refresh all .ijwb directories and re-export to vault
-~/.config/wt/lib/wt-ijwb-refresh
+~/.wt/lib/wt-ijwb-refresh
 
 # Preview what would be refreshed (dry run)
-~/.config/wt/lib/wt-ijwb-refresh --dry-run
+~/.wt/lib/wt-ijwb-refresh --dry-run
 
 # Refresh targets files only (skip re-export step)
-~/.config/wt/lib/wt-ijwb-refresh --no-export
+~/.wt/lib/wt-ijwb-refresh --no-export
 ```
 
 The refresh script:

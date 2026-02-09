@@ -71,8 +71,8 @@ LIB_DIR="$SCRIPT_DIR/../lib"
 # Bootstrap: source wt-common from lib/
 if [[ -f "$LIB_DIR/wt-common" ]]; then
   . "$LIB_DIR/wt-common"
-elif [[ -f "$HOME/.config/wt/lib/wt-common" ]]; then
-  . "$HOME/.config/wt/lib/wt-common"
+elif [[ -f "$HOME/.wt/lib/wt-common" ]]; then
+  . "$HOME/.wt/lib/wt-common"
 else
   echo "Error: Cannot find wt-common" >&2
   exit 1
