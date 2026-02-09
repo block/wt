@@ -698,6 +698,7 @@ EOF
 
   echo "  ✓ Created context config: $config_path"
 
+  # Write context name to current file - config is read from .conf at runtime
   mkdir -p "$(dirname "$current_file")"
   echo "$context_name" > "$current_file"
   echo "  ✓ Set as current context: $context_name"

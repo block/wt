@@ -65,7 +65,7 @@ wt_get_current_context() {
   current_file="$(wt_get_current_file)"
 
   if [[ -f "$current_file" ]]; then
-    cat "$current_file"
+    head -1 "$current_file" | tr -d '[:space:]'
   fi
 }
 
@@ -122,6 +122,8 @@ wt_set_current_context() {
 
   # Ensure parent directory exists
   mkdir -p "$(dirname "$current_file")"
+
+  # Write just the context name - config is read from .conf file at runtime
   echo "$name" > "$current_file"
 }
 
