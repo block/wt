@@ -23,8 +23,6 @@ if [[ -n "$ZSH_VERSION" ]]; then
       'cd:Change directory to a worktree'
       'metadata-export:Export project metadata to vault'
       'metadata-import:Import project metadata into worktree'
-      'ijwb-export:Alias for metadata-export'
-      'ijwb-import:Alias for metadata-import'
       'help:Show help message'
     )
 
@@ -46,7 +44,7 @@ if [[ -n "$ZSH_VERSION" ]]; then
             _describe 'worktree' worktrees
           fi
           ;;
-        metadata-import|ijwb-import)
+        metadata-import)
           # First arg: source directory or target worktree
           # Second arg: target worktree
           if (( CURRENT == 3 )); then
@@ -66,7 +64,7 @@ if [[ -n "$ZSH_VERSION" ]]; then
             fi
           fi
           ;;
-        metadata-export|ijwb-export)
+        metadata-export)
           # Complete directories
           _files -/
           ;;
@@ -82,7 +80,7 @@ if [[ -n "$BASH_VERSION" ]]; then
     local cur commands
     COMPREPLY=()
     cur="${COMP_WORDS[COMP_CWORD]}"
-    commands="add switch remove list cd metadata-export metadata-import ijwb-export ijwb-import help"
+    commands="add switch remove list cd metadata-export metadata-import help"
 
     if [[ ${COMP_CWORD} -eq 1 ]]; then
       COMPREPLY=($(compgen -W "$commands" -- "$cur"))
@@ -100,7 +98,7 @@ if [[ -n "$BASH_VERSION" ]]; then
             COMPREPLY=($(compgen -W "$worktrees" -- "$cur"))
           fi
           ;;
-        metadata-import|ijwb-import)
+        metadata-import)
           # First arg: source directory or target worktree
           # Second arg: target worktree
           if [[ ${COMP_CWORD} -eq 2 ]]; then
@@ -120,7 +118,7 @@ if [[ -n "$BASH_VERSION" ]]; then
             fi
           fi
           ;;
-        metadata-export|ijwb-export)
+        metadata-export)
           # Complete directories
           COMPREPLY=($(compgen -d -- "$cur"))
           ;;

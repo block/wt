@@ -180,10 +180,6 @@ wt metadata-import ~/Development/java-worktrees/feature/foo
 # Skip confirmation prompts (useful in scripts)
 wt metadata-export -y
 wt metadata-import -y ~/Development/java-worktrees/feature/foo
-
-# Legacy aliases (backward compatibility)
-wt ijwb-export   # same as wt metadata-export
-wt ijwb-import   # same as wt metadata-import
 ```
 
 ### Refreshing Stale Bazel IDE Metadata (Cron Job)

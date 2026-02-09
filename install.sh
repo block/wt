@@ -174,7 +174,7 @@ detect_metadata_patterns() {
     pattern="$(basename "$path")"
     # Add to patterns if not already present
     local found=false
-    for p in "${patterns[@]}"; do
+    for p in ${patterns[@]+"${patterns[@]}"}; do
       [[ "$p" == "$pattern" ]] && found=true && break
     done
     [[ "$found" == "false" ]] && patterns+=("$pattern")
@@ -278,7 +278,6 @@ select_metadata_patterns() {
             # Check if already selected
             local found=0
             local new_selected=()
-            # Use ${arr[@]+"${arr[@]}"} pattern for empty array safety in older bash
             for s in ${selected[@]+"${selected[@]}"}; do
               if [[ "$s" == "$pattern" ]]; then
                 found=1
@@ -308,7 +307,6 @@ select_metadata_patterns() {
       local desc
       desc=$(get_pattern_description "$pattern")
       local mark=" "
-      # Use ${arr[@]+"${arr[@]}"} pattern for empty array safety in older bash
       for s in ${selected[@]+"${selected[@]}"}; do
         [[ "$s" == "$pattern" ]] && mark="x"
       done

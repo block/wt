@@ -31,12 +31,9 @@ Metadata Commands:
                                 - src: source repo (default: $WT_MAIN_REPO_ROOT)
                                 - vault: metadata vault (default: $WT_IDEA_FILES_BASE)
 
-  metadata-import [vault] [wt]  Import project metadata into a worktree
+  metadata-import [wt]          Import project metadata into a worktree
+  metadata-import [vault] [wt]  - wt: target worktree (interactive if omitted)
                                 - vault: metadata vault (default: $WT_IDEA_FILES_BASE)
-                                - wt: target worktree (interactive if omitted)
-
-  ijwb-export                   Alias for metadata-export (backward compat)
-  ijwb-import                   Alias for metadata-import (backward compat)
 
 Other:
   help                      Show this help message
