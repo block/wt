@@ -203,43 +203,43 @@ import_pattern() {
 
   # Find all matching directories (symlinks or real directories) under the source directory
   # Use -L to follow symlinks (source path might be a symlink)
-  find -L "$SOURCE_DIR" \( -type l -o -type d \) -name "$pattern" -print0 2>/dev/null |
-    while IFS= read -r -d '' META_SRC; do
-      # Parent dir relative to SOURCE_DIR
-      PARENT_SRC="$(dirname "$META_SRC")"
+  # Note: Use process substitution (< <(...)) instead of pipe to avoid subshell variable scope issues
+  while IFS= read -r -d '' META_SRC; do
+    # Parent dir relative to SOURCE_DIR
+    PARENT_SRC="$(dirname "$META_SRC")"
 
-      # Handle pattern at root (PARENT_SRC == SOURCE_DIR)
-      if [[ "$PARENT_SRC" == "$SOURCE_DIR" ]]; then
-        REL_PATH=""
-      else
-        REL_PATH="${PARENT_SRC#"$SOURCE_DIR"/}"
-      fi
+    # Handle pattern at root (PARENT_SRC == SOURCE_DIR)
+    if [[ "$PARENT_SRC" == "$SOURCE_DIR" ]]; then
+      REL_PATH=""
+    else
+      REL_PATH="${PARENT_SRC#"$SOURCE_DIR"/}"
+    fi
 
-      # Corresponding target parent
-      if [[ -z "$REL_PATH" ]]; then
-        TARGET_PARENT="$TARGET_DIR"
-      else
-        TARGET_PARENT="$TARGET_DIR/$REL_PATH"
-      fi
-      TARGET_META="$TARGET_PARENT/$pattern"
+    # Corresponding target parent
+    if [[ -z "$REL_PATH" ]]; then
+      TARGET_PARENT="$TARGET_DIR"
+    else
+      TARGET_PARENT="$TARGET_DIR/$REL_PATH"
+    fi
+    TARGET_META="$TARGET_PARENT/$pattern"
 
-      echo "  Found source: $META_SRC"
-      echo "  -> Installing to: $TARGET_META"
+    echo "  Found source: $META_SRC"
+    echo "  -> Installing to: $TARGET_META"
 
-      mkdir -p "$TARGET_PARENT"
+    mkdir -p "$TARGET_PARENT"
 
-      if [[ -e "$TARGET_META" || -L "$TARGET_META" ]]; then
-        rm -rf "$TARGET_META"
-      fi
+    if [[ -e "$TARGET_META" || -L "$TARGET_META" ]]; then
+      rm -rf "$TARGET_META"
+    fi
 
-      if ! copy_real_metadata "$META_SRC" "$TARGET_META"; then
-        echo "     Skipping due to broken symlink"
-        echo "     Removing broken symlink from vault: $META_SRC"
-        rm -f "$META_SRC"
-      fi
+    if ! copy_real_metadata "$META_SRC" "$TARGET_META"; then
+      echo "     Skipping due to broken symlink"
+      echo "     Removing broken symlink from vault: $META_SRC"
+      rm -f "$META_SRC"
+    fi
 
-      count=$((count + 1))
-    done
+    count=$((count + 1))
+  done < <(find -L "$SOURCE_DIR" \( -type l -o -type d \) -name "$pattern" -print0 2>/dev/null)
 
   if [[ $count -eq 0 ]]; then
     echo "  (no '$pattern' directories found in vault)"

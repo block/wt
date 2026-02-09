@@ -182,11 +182,11 @@ wt ijwb-export -y
 wt ijwb-import -y ~/Development/java-worktrees/feature/foo
 ```
 
-### Refreshing Stale .ijwb Metadata (Cron Job)
+### Refreshing Stale Bazel IDE Metadata (Cron Job)
 
-When most development work is done in worktrees, the `.ijwb` directories in the main repository can become stale (targets files don't reflect new Bazel targets).
+When most development work is done in worktrees, the Bazel IDE directories (`.ijwb`, `.aswb`, `.clwb`) in the main repository can become stale (targets files don't reflect new Bazel targets).
 
-The `lib/wt-ijwb-refresh` script is designed to run as a cron job to keep metadata current.
+The `lib/wt-metadata-refresh` script is designed to run as a cron job to keep metadata current.
 
 **Note:** When IntelliJ has `derive_targets_from_directories: true` in `.bazelproject` (the default), it queries Bazel fresh on every sync. The `targets-*` file serves as a cache for initial project imports and may improve import speed.
 
@@ -202,27 +202,28 @@ mkdir -p ~/.wt/logs
 crontab -e
 
 # Add this line to run nightly at 2am (uses login shell for full PATH):
-0 2 * * * /bin/zsh -lc '~/.wt/lib/wt-ijwb-refresh' >> ~/.wt/logs/ijwb-refresh.log 2>&1
+0 2 * * * /bin/zsh -lc '~/.wt/lib/wt-metadata-refresh' >> ~/.wt/logs/metadata-refresh.log 2>&1
 ```
 
 You can also run the script manually:
 
 ```bash
-# Refresh all .ijwb directories and re-export to vault
-~/.wt/lib/wt-ijwb-refresh
+# Refresh all Bazel IDE directories and re-export to vault
+~/.wt/lib/wt-metadata-refresh
 
 # Preview what would be refreshed (dry run)
-~/.wt/lib/wt-ijwb-refresh --dry-run
+~/.wt/lib/wt-metadata-refresh --dry-run
 
 # Refresh targets files only (skip re-export step)
-~/.wt/lib/wt-ijwb-refresh --no-export
+~/.wt/lib/wt-metadata-refresh --no-export
 ```
 
 The refresh script:
-- Uses `bazel query` to regenerate `targets/targets-*` files in each `.ijwb` directory
+- Uses `bazel query` to regenerate `targets/targets-*` files in each Bazel IDE directory
+- Supports all Bazel patterns configured in WT_METADATA_PATTERNS (`.ijwb`, `.aswb`, `.clwb`)
 - Parses `.bazelproject` to determine which directories to include in the query
 - Preserves existing targets file hashes (IntelliJ may reference them)
-- Re-exports refreshed metadata to the vault
+- Re-exports all metadata to the vault (including non-Bazel patterns)
 - Logs timestamped output for monitoring
 - Returns exit codes: 0=success, 1=error, 2=partial success
 
@@ -278,9 +279,9 @@ export WT_IDEA_FILES_BASE="$HOME/Development/idea-project-files"
 ```
 
 Used by:
-- wt-ijwb-import
-- wt-ijwb-export
-- wt-ijwb-refresh
+- wt-metadata-import
+- wt-metadata-export
+- wt-metadata-refresh
 - wt-add (when installing metadata)
 
 
@@ -332,14 +333,14 @@ wt/
 │   ├── wt-list
 │   ├── wt-remove
 │   ├── wt-switch
-│   ├── wt-ijwb-import
-│   └── wt-ijwb-export
+│   ├── wt-metadata-import
+│   └── wt-metadata-export
 ├── lib/                     # Shared libraries
 │   ├── wt-common            # Configuration and helpers
 │   ├── wt-choose            # Interactive worktree selection
 │   ├── wt-help              # Help text for wt command
 │   ├── wt-completion        # Shell completion for wt command
-│   └── wt-ijwb-refresh      # Cron script to refresh .ijwb metadata
+│   └── wt-metadata-refresh  # Cron script to refresh Bazel IDE metadata
 ├── completion/              # Shell completions for wt-* scripts
 │   ├── wt.zsh
 │   └── wt.bash
@@ -352,12 +353,12 @@ wt/
 You can also run the underlying scripts directly:
 
 ```bash
-wt-add, wt-switch, wt-remove, wt-list, wt-cd, wt-ijwb-export, wt-ijwb-import
+wt-add, wt-switch, wt-remove, wt-list, wt-cd, wt-metadata-export, wt-metadata-import
 ```
 
 These are located in `bin/` and work identically to the `wt` subcommands.
 
-The `lib/wt-ijwb-refresh` script is designed for cron jobs and can be run directly from its location.
+The `lib/wt-metadata-refresh` script is designed for cron jobs and can be run directly from its location.
 
 ## Project Resources
 

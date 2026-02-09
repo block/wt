@@ -338,8 +338,8 @@ install_toolkit() {
   # Make bin scripts executable
   chmod +x "$INSTALL_DIR"/bin/wt-*
 
-  # Make lib/wt-ijwb-refresh executable (for cron job)
-  chmod +x "$INSTALL_DIR"/lib/wt-ijwb-refresh
+  # Make lib/wt-metadata-refresh executable (for cron job)
+  chmod +x "$INSTALL_DIR"/lib/wt-metadata-refresh
 
   echo "  ✓ Installed to $INSTALL_DIR"
 }
@@ -579,24 +579,24 @@ migrate_repo() {
   fi
 }
 
-# Set up cron job for .ijwb refresh
+# Set up cron job for metadata refresh
 setup_cron_job() {
-  local refresh_script="$INSTALL_DIR/lib/wt-ijwb-refresh"
+  local refresh_script="$INSTALL_DIR/lib/wt-metadata-refresh"
   local log_dir="$HOME/.wt/logs"
-  local log_file="$log_dir/ijwb-refresh.log"
+  local log_file="$log_dir/metadata-refresh.log"
   local cron_entry="0 2 * * * /bin/zsh -lc '$refresh_script' >> $log_file 2>&1"
 
   echo "════════════════════════════════════════════════════════════════════════════════"
-  echo "  Nightly .ijwb Refresh Cron Job"
+  echo "  Nightly Metadata Refresh Cron Job"
   echo "════════════════════════════════════════════════════════════════════════════════"
   echo
-  echo "When most development happens in worktrees, the .ijwb metadata in the main"
+  echo "When most development happens in worktrees, the Bazel IDE metadata in the main"
   echo "repository can become stale (missing new Bazel targets)."
   echo
   echo "This cron job will:"
   echo "  1. Run nightly at 2am"
-  echo "  2. Use 'bazel query' to regenerate targets files in each .ijwb directory"
-  echo "  3. Re-export refreshed metadata to the vault"
+  echo "  2. Use 'bazel query' to regenerate targets files in Bazel IDE directories"
+  echo "  3. Re-export all metadata to the vault"
   echo
   echo "Cron entry:"
   echo "  $cron_entry"
@@ -614,7 +614,7 @@ setup_cron_job() {
   echo "  ✓ Created log directory: $log_dir"
 
   # Check if cron job already exists
-  if crontab -l 2>/dev/null | grep -qF "wt-ijwb-refresh"; then
+  if crontab -l 2>/dev/null | grep -qF "wt-metadata-refresh"; then
     echo "  Cron job already exists. Skipping."
   else
     # Add cron job
