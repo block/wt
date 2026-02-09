@@ -11,7 +11,7 @@ Git worktrees let you work on multiple branches in parallel, but IntelliJ treats
 This toolkit makes IntelliJ context switching **instant** by:
 
 - **Symlink trick**: IntelliJ always opens the same path; switching worktrees looks like a branch checkout → incremental refresh in seconds, not minutes
-- **Metadata vault**: `.ijwb` directories are stored externally and automatically installed into every new worktree—no manual Bazel import needed
+- **Metadata vault**: IDE project metadata (`.ijwb`, `.idea`, `.vscode`, etc.) is stored externally and automatically installed into every new worktree—no manual IDE setup needed
 - **Safe worktree management**: Automatic stash/restore, branch creation, and cleanup of merged branches
 - **Parallel development at scale**: Works for humans and AI agents alike
 
@@ -36,8 +36,8 @@ The installer will:
 3. Prompt for workspace paths (main repo, worktrees, metadata vault)
 4. Create required directories
 5. Optionally migrate existing repo to worktree structure
-6. Optionally export `.ijwb` metadata to the vault
-7. Optionally set up a nightly cron job to refresh `.ijwb` metadata
+6. Optionally export project metadata to the vault
+7. Optionally set up a nightly cron job to refresh Bazel IDE metadata
 
 ## Workflow
 
@@ -50,26 +50,26 @@ The directory structure expected (controlled by environment variables, can be ov
 ├── java -> java-master          # Symlink (IntelliJ opens this)
 ├── java-master/                 # Main repository
 ├── java-worktrees/              # Worktrees go here
-└── idea-project-files/          # .ijwb metadata vault
+└── idea-project-files/          # Project metadata vault
 ```
 
 ### Full Workflow Diagram
 
 ```
                       ┌─────────────────────────────────────────────┐
-                      │   External IntelliJ Metadata Vault          │
+                      │   External Project Metadata Vault           │
                       │  ~/Development/idea-project-files           │
-                      │    (canonical .ijwb directories)            │
+                      │    (IDE configs: .ijwb, .idea, etc.)        │
                       └──────────▲───────────────┬──────────────────┘
-                                 │               │ 
                                  │               │
-           ┌────wt ijwb-export───┘               └───wt ijwb-import──┐
-           │                                                         │
-┌──────────┴───────────────────────┐                     ┌───────────▼────────────────────────┐
+                                 │               │
+           ┌──wt metadata-export─┘               └──wt metadata-import─┐
+           │                                                           │
+┌──────────┴───────────────────────┐                     ┌─────────────▼──────────────────────┐
 │   Main Repository                │                     │    Worktrees                       │
 │ ~/Development/java-master        │       wt add        │ ~/Development/java-worktrees/...   │
 │  • master branch                 │ ──────────────────► │  • feature/foo                     │
-│  • safe stash/pull/restore       │ (calls ijwb-import) │  • bugfix/bar                      │
+│  • safe stash/pull/restore       │(calls metadata-imp) │  • bugfix/bar                      │
 │  • never removed                 │                     │  • agent-task-123                  │
 └───────────────┬──────────────────┘                     └─────────┬──────────────────────────┘
                 │                                                  │
@@ -167,19 +167,23 @@ Safety features:
 - Always prompts for confirmation if uncommitted changes exist, even with `-y`
 - `--merged` mode: automatically finds and removes all worktrees whose branches are merged
 
-### Managing IntelliJ Metadata
+### Managing Project Metadata
 
 ```bash
-# Export .ijwb from main repo to vault (run after importing new Bazel projects)
-wt ijwb-export
+# Export metadata from main repo to vault (run after setting up new IDE projects)
+wt metadata-export
 
-# Import .ijwb into a worktree (interactive selection if target omitted)
-wt ijwb-import
-wt ijwb-import ~/Development/java-worktrees/feature/foo
+# Import metadata into a worktree (interactive selection if target omitted)
+wt metadata-import
+wt metadata-import ~/Development/java-worktrees/feature/foo
 
 # Skip confirmation prompts (useful in scripts)
-wt ijwb-export -y
-wt ijwb-import -y ~/Development/java-worktrees/feature/foo
+wt metadata-export -y
+wt metadata-import -y ~/Development/java-worktrees/feature/foo
+
+# Legacy aliases (backward compatibility)
+wt ijwb-export   # same as wt metadata-export
+wt ijwb-import   # same as wt metadata-import
 ```
 
 ### Refreshing Stale Bazel IDE Metadata (Cron Job)

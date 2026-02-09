@@ -165,6 +165,11 @@ find_all_metadata_dirs() {
     done < <(find -L "$SOURCE_DIR" -maxdepth 5 -type d -name "$pattern" 2>/dev/null)
   done
 
+  # No metadata found
+  if [[ ${#all_paths[@]} -eq 0 ]]; then
+    return
+  fi
+
   # Sort paths (shorter paths come first)
   local sorted_paths
   sorted_paths=$(printf '%s\n' "${all_paths[@]}" | sort)
@@ -195,7 +200,7 @@ echo
 
 # Clean up existing symlinks in vault for all patterns
 for pattern in $WT_METADATA_PATTERNS; do
-  find -L "$TARGET_DIR" -type l -name "$pattern" -print0 2>/dev/null | while IFS= read -r -d '' OLD_LINK; do
+  find "$TARGET_DIR" -type l -name "$pattern" -print0 2>/dev/null | while IFS= read -r -d '' OLD_LINK; do
     rm -f "$OLD_LINK"
   done
 done

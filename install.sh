@@ -625,8 +625,15 @@ setup_cron_job() {
   mkdir -p "$log_dir"
   echo "  ✓ Created log directory: $log_dir"
 
-  # Check if cron job already exists
-  if crontab -l 2>/dev/null | grep -qF "wt-metadata-refresh"; then
+  # Check for old cron job (wt-ijwb-refresh) and offer to migrate
+  if crontab -l 2>/dev/null | grep -qF "wt-ijwb-refresh"; then
+    echo "  Found old cron job (wt-ijwb-refresh)."
+    echo "  Replacing with new cron job (wt-metadata-refresh)..."
+    # Remove old entry and add new one
+    (crontab -l 2>/dev/null | grep -vF "wt-ijwb-refresh"; echo "$cron_entry") | crontab -
+    echo "  ✓ Cron job migrated to wt-metadata-refresh"
+    echo "  ✓ Logs will be written to: $log_file"
+  elif crontab -l 2>/dev/null | grep -qF "wt-metadata-refresh"; then
     echo "  Cron job already exists. Skipping."
   else
     # Add cron job

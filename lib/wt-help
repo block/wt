@@ -27,13 +27,13 @@ Worktree Commands:
                             - interactive worktree selection if omitted
 
 Metadata Commands:
-  metadata-export [src] [dst]   Export project metadata to vault
-                                - src: defaults to $WT_MAIN_REPO_ROOT
-                                - dst: defaults to $WT_IDEA_FILES_BASE
+  metadata-export [src] [vault] Export project metadata to vault
+                                - src: source repo (default: $WT_MAIN_REPO_ROOT)
+                                - vault: metadata vault (default: $WT_IDEA_FILES_BASE)
 
-  metadata-import [src] [dst]   Import project metadata into a worktree
-                                - src: defaults to $WT_IDEA_FILES_BASE
-                                - dst: interactive worktree selection if omitted
+  metadata-import [vault] [wt]  Import project metadata into a worktree
+                                - vault: metadata vault (default: $WT_IDEA_FILES_BASE)
+                                - wt: target worktree (interactive if omitted)
 
   ijwb-export                   Alias for metadata-export (backward compat)
   ijwb-import                   Alias for metadata-import (backward compat)
