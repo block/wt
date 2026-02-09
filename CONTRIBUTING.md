@@ -38,7 +38,18 @@ Thanks for your interest in contributing!
 
 ## Testing
 
-Tests are not yet implemented. Contributions to add [bats-core](https://github.com/bats-core/bats-core) tests are welcome!
+Tests use [BATS](https://github.com/bats-core/bats-core) (Bash Automated Testing System). See [`test/README.md`](test/README.md) for full details on the test architecture, how to write new tests, and tips.
+
+```bash
+# Initialize submodules (first time only)
+git submodule update --init --recursive
+
+# Run all tests
+./test/bats/bin/bats test/unit/ test/integration/ test/e2e/
+
+# Run a single test file
+./test/bats/bin/bats test/integration/wt-add.bats
+```
 
 ## Submitting Changes
 

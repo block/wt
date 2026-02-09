@@ -239,21 +239,27 @@ wt_source() {
 
 # Get the currently linked worktree path (resolves symlink)
 # Usage: wt_get_linked_worktree
-# Outputs: absolute path to linked worktree, or empty if none
+# Outputs: absolute physical path to linked worktree, or empty if none
+#
+# Returns physical paths (pwd -P) to ensure consistent comparison with
+# git worktree list output, which also uses physical paths. This handles
+# macOS symlink quirks like /var -> /private/var.
 wt_get_linked_worktree() {
   local link_path="$WT_ACTIVE_WORKTREE"
 
-  # Normalize link path
+  # Normalize link path to physical path for consistent comparison
   if [[ -d "$(dirname "$link_path")" ]]; then
-    link_path="$(cd "$(dirname "$link_path")" && pwd)/$(basename "$link_path")"
+    link_path="$(cd "$(dirname "$link_path")" && pwd -P)/$(basename "$link_path")"
   fi
 
   if [[ -L "$link_path" ]]; then
     local target
     target="$(readlink "$link_path")"
-    # Normalize relative symlinks to absolute
+    # Resolve to physical path whether target is relative or absolute
     if [[ "$target" != /* ]]; then
-      target="$(cd "$(dirname "$link_path")" && cd "$(dirname "$target")" && pwd)/$(basename "$target")"
+      target="$(cd "$(dirname "$link_path")" && cd "$(dirname "$target")" && pwd -P)/$(basename "$target")"
+    else
+      target="$(cd "$(dirname "$target")" && pwd -P)/$(basename "$target")"
     fi
     echo "$target"
   fi

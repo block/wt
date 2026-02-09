@@ -43,6 +43,18 @@ else
   exit 1
 fi
 
+usage() {
+  cat <<EOF
+Usage: $(basename "$0") [-v|--verbose]
+
+List all git worktrees with status indicators.
+
+Options:
+  -v, --verbose   Show dirty/ahead/behind status (slower)
+  -h, --help      Show this help message
+EOF
+}
+
 # Parse arguments
 VERBOSE=false
 while [[ $# -gt 0 ]]; do
@@ -51,8 +63,13 @@ while [[ $# -gt 0 ]]; do
       VERBOSE=true
       shift
       ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
     *)
-      echo "Usage: wt-list [-v|--verbose]" >&2
+      echo "Unknown option: $1" >&2
+      usage >&2
       exit 1
       ;;
   esac
@@ -67,8 +84,9 @@ if [[ ! -d "$WT_MAIN_REPO_ROOT" ]]; then
   exit 1
 fi
 
-# Get absolute path of main repo
-MAIN_REPO_ABS="$(cd "$WT_MAIN_REPO_ROOT" && pwd)"
+# Get absolute path of main repo (use pwd -P to resolve symlinks for consistent comparison)
+# Note: git worktree list stores physical paths, so we need to match that behavior
+MAIN_REPO_ABS="$(cd "$WT_MAIN_REPO_ROOT" && pwd -P)"
 
 # Get currently linked worktree (if any)
 LINKED_WORKTREE="$(wt_get_linked_worktree)"
@@ -88,7 +106,7 @@ LINKED_WORKTREE="$(wt_get_linked_worktree)"
     case "$line" in
       worktree\ *)
         wt="${line#worktree }"
-        wt_abs="$(cd "$wt" 2>/dev/null && pwd)" || continue
+        wt_abs="$(cd "$wt" 2>/dev/null && pwd -P)" || continue
 
         # Determine prefix (linked indicator)
         prefix="  "
