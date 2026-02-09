@@ -141,7 +141,7 @@ create_removable_worktree() {
 @test "wt-remove fails for non-existent path" {
     run "$TEST_HOME/.wt/bin/wt-remove" -y "/nonexistent/worktree/path"
     assert_failure
-    assert_output --partial "does not exist"
+    assert_output --partial "not found"
 }
 
 @test "wt-remove fails for path that is not a worktree" {
@@ -150,7 +150,7 @@ create_removable_worktree() {
 
     run "$TEST_HOME/.wt/bin/wt-remove" -y "$not_worktree"
     assert_failure
-    assert_output --partial "not a working tree"
+    assert_output --partial "not a git repository or worktree"
     # Directory should not have been deleted
     assert [ -d "$not_worktree" ]
 }
