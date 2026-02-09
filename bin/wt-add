@@ -164,8 +164,13 @@ install_metadata_for_worktree() {
 }
 
 # Helper: install Bazel output symlinks (bazel-out, bazel-bin, etc.) for a created worktree
-# These symlinks point to Bazel's cached build artifacts in a temp directory.
-# Sharing them across worktrees significantly speeds up IntelliJ project sync.
+#
+# Bazel stores build outputs in a central cache directory (typically under /private/var/tmp).
+# The symlinks (bazel-out, bazel-bin, etc.) in the repo root point to this shared cache.
+# By copying these symlinks to new worktrees, we enable:
+#   1. Faster IntelliJ/IDE sync (no rebuild required)
+#   2. Shared build cache across worktrees
+#   3. Immediate access to compiled artifacts
 install_bazel_symlinks_for_worktree() {
   local worktree_path="$1"
 
