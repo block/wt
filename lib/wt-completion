@@ -21,8 +21,11 @@ if [[ -n "$ZSH_VERSION" ]]; then
       'remove:Remove a worktree'
       'list:List all worktrees with status'
       'cd:Change directory to a worktree'
+      'context:Switch repository context'
       'metadata-export:Export project metadata to vault'
       'metadata-import:Import project metadata into worktree'
+      'ijwb-export:Export .ijwb metadata to vault (legacy alias)'
+      'ijwb-import:Import .ijwb metadata into worktree (legacy alias)'
       'help:Show help message'
     )
 
@@ -44,7 +47,24 @@ if [[ -n "$ZSH_VERSION" ]]; then
             _describe 'worktree' worktrees
           fi
           ;;
-        metadata-import)
+        context)
+          # Complete context names and 'add' subcommand
+          local repos_dir="$HOME/.wt/repos"
+          local -a contexts subcommands
+          subcommands=('add:Add a new repository context' '--list:List all contexts')
+          if [[ -d "$repos_dir" ]]; then
+            for conf in "$repos_dir"/*.conf(N); do
+              [[ -f "$conf" ]] || continue
+              local name="${conf:t:r}"
+              contexts+=("$name")
+            done
+          fi
+          _describe 'subcommand' subcommands
+          if (( ${#contexts[@]} > 0 )); then
+            _describe 'context' contexts
+          fi
+          ;;
+        metadata-import|ijwb-import)
           # First arg: source directory or target worktree
           # Second arg: target worktree
           if (( CURRENT == 3 )); then
@@ -64,7 +84,7 @@ if [[ -n "$ZSH_VERSION" ]]; then
             fi
           fi
           ;;
-        metadata-export)
+        metadata-export|ijwb-export)
           # Complete directories
           _files -/
           ;;
@@ -80,7 +100,7 @@ if [[ -n "$BASH_VERSION" ]]; then
     local cur commands
     COMPREPLY=()
     cur="${COMP_WORDS[COMP_CWORD]}"
-    commands="add switch remove list cd metadata-export metadata-import help"
+    commands="add switch remove list cd context metadata-export metadata-import ijwb-export ijwb-import help"
 
     if [[ ${COMP_CWORD} -eq 1 ]]; then
       COMPREPLY=($(compgen -W "$commands" -- "$cur"))
@@ -98,7 +118,21 @@ if [[ -n "$BASH_VERSION" ]]; then
             COMPREPLY=($(compgen -W "$worktrees" -- "$cur"))
           fi
           ;;
-        metadata-import)
+        context)
+          # Complete context names and 'add' subcommand
+          local repos_dir="$HOME/.wt/repos"
+          local contexts=""
+          if [[ -d "$repos_dir" ]]; then
+            for conf in "$repos_dir"/*.conf; do
+              [[ -f "$conf" ]] || continue
+              local name="${conf##*/}"
+              name="${name%.conf}"
+              contexts="$contexts $name"
+            done
+          fi
+          COMPREPLY=($(compgen -W "add --list $contexts" -- "$cur"))
+          ;;
+        metadata-import|ijwb-import)
           # First arg: source directory or target worktree
           # Second arg: target worktree
           if [[ ${COMP_CWORD} -eq 2 ]]; then
@@ -118,7 +152,7 @@ if [[ -n "$BASH_VERSION" ]]; then
             fi
           fi
           ;;
-        metadata-export)
+        metadata-export|ijwb-export)
           # Complete directories
           COMPREPLY=($(compgen -d -- "$cur"))
           ;;

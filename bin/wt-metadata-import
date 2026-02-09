@@ -32,7 +32,6 @@
 #   wt-metadata-import                              # Interactive: pick target worktree
 #   wt-metadata-import ~/dev/worktrees/feature-x    # Import to specific worktree
 #   wt-metadata-import ~/dev/vault ~/dev/worktree   # Explicit source and target
-#
 
 set -euo pipefail
 
@@ -136,6 +135,9 @@ esac
 # Resolve absolute paths
 SOURCE_DIR="$(cd "$SOURCE_DIR" && pwd)"
 TARGET_DIR="$(cd "$TARGET_DIR" && pwd)"
+
+# Show context banner if contexts are configured
+wt_show_context_banner
 
 # Check if any patterns are configured
 if [[ -z "${WT_METADATA_PATTERNS:-}" ]]; then

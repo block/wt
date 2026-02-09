@@ -127,6 +127,9 @@ if [[ ! -d "$TARGET_DIR" ]]; then
   exit 1
 fi
 
+# Show context banner if contexts are configured
+wt_show_context_banner
+
 # Check if any patterns are configured
 if [[ -z "${WT_METADATA_PATTERNS:-}" ]]; then
   warn "No metadata patterns configured (WT_METADATA_PATTERNS is empty)"
@@ -180,7 +183,7 @@ find_all_metadata_dirs() {
     [[ -z "$path" ]] && continue
     local dominated=false
 
-    for kept in "${kept_paths[@]}"; do
+    for kept in ${kept_paths[@]+"${kept_paths[@]}"}; do
       # Check if $path is inside $kept (kept is a prefix of path)
       if [[ "$path" == "$kept/"* ]]; then
         dominated=true
