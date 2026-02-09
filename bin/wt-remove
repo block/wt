@@ -17,7 +17,7 @@
 # 3. Shows confirmation prompt before removing.
 #
 # 4. Uses `git worktree remove --force` because worktrees contain
-#    copied .ijwb metadata that git considers "untracked changes".
+#    copied project metadata that git considers "untracked changes".
 #
 # 5. Checks if the worktree being removed is the currently linked worktree
 #    and warns the user.

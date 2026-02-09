@@ -10,7 +10,7 @@
 #   4. Creates required directories
 #   5. Optionally migrates existing repo to worktree structure
 #   6. Optionally syncs project metadata to the vault
-#   7. Optionally sets up nightly cron job to refresh .ijwb metadata
+#   7. Optionally sets up nightly cron job to refresh Bazel IDE metadata
 #
 
 set -euo pipefail

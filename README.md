@@ -104,7 +104,7 @@ When creating with `-b`, the script:
 1. Stashes uncommitted changes
 2. Switches to master, pulls latest
 3. Creates branch + worktree
-4. Imports .ijwb metadata
+4. Imports project metadata from vault
 5. Restores original state
 
 ### Switching Worktrees
@@ -270,7 +270,7 @@ export WT_WORKTREES_BASE="$HOME/Development/java-worktrees"
 
 
 ### WT_IDEA_FILES_BASE
-Canonical metadata vault storing `.ijwb` directories.
+Canonical metadata vault storing project metadata (IDE configs, etc.).
 
 **Default:** `~/Development/idea-project-files`
 

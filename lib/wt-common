@@ -19,7 +19,7 @@
 # Base directory where new worktrees will be created by default
 : "${WT_WORKTREES_BASE:="$HOME/.wt/repos/repo/worktrees"}"
 
-# Base directory for IntelliJ / Bazel project metadata (e.g. canonical .ijwb)
+# Base directory for project metadata vault (IDE configs: .ijwb, .idea, .vscode, etc.)
 : "${WT_IDEA_FILES_BASE:="$HOME/.wt/repos/repo/idea-files"}"
 
 # Symlink path that points to the currently active worktree (for IDE integration)
