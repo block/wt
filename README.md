@@ -1,5 +1,7 @@
 # Worktree Toolkit
 
+[![Tests](https://github.com/block/wt/actions/workflows/test.yml/badge.svg)](https://github.com/block/wt/actions/workflows/test.yml)
+
 A streamlined workflow for developing in large Bazel + IntelliJ monorepos using Git worktrees.
 
 Enables instant IntelliJ context switching between worktrees—no re-imports, no re-indexing—and scales to support parallel development by humans and AI agents alike.
