@@ -77,8 +77,8 @@ _wt_source_lib() {
   
   if [[ -f "$_WT_ROOT/lib/$lib" ]]; then
     . "$_WT_ROOT/lib/$lib"
-  elif [[ -f "$HOME/.config/wt/lib/$lib" ]]; then
-    . "$HOME/.config/wt/lib/$lib"
+  elif [[ -f "$HOME/.wt/lib/$lib" ]]; then
+    . "$HOME/.wt/lib/$lib"
   elif [[ "$required" != "optional" ]]; then
     echo "wt: cannot find required library: $lib" >&2
     return 1
