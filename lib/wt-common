@@ -22,14 +22,35 @@
 # switches take effect immediately without requiring shell reload.
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Clear all WT_* config variables to allow fresh reload
+# Used before wt_read_config() when we need to pick up context changes
+# in the current shell (e.g., completions, help)
+wt_clear_config_vars() {
+  unset WT_MAIN_REPO_ROOT
+  unset WT_WORKTREES_BASE
+  unset WT_IDEA_FILES_BASE
+  unset WT_ACTIVE_WORKTREE
+  unset WT_BASE_BRANCH
+  unset WT_METADATA_PATTERNS
+  unset WT_CONTEXT_NAME
+}
+
 # Parse config file into shell variables (no sourcing)
 # Only sets variables that aren't already set in the environment
 # Args: $1 = config file path (default: ~/.wt/current)
+#       $2 = "force" to clear existing variables first (for in-shell reload)
 #
 # When reading ~/.wt/current, it contains just the context name.
 # The actual config is then loaded from ~/.wt/repos/<name>.conf
 wt_read_config() {
   local config_file="${1:-$HOME/.wt/current}"
+  local force="${2:-}"
+
+  # If force mode, clear existing variables first (for in-shell reload after context switch)
+  if [[ "$force" == "force" ]]; then
+    wt_clear_config_vars
+  fi
+
   [[ ! -f "$config_file" ]] && return 1
 
   # If this is the current context file, read context name and load from .conf
@@ -167,10 +188,28 @@ info() {
   printf "${BLUE}ℹ${NC}  %s\n" "$*"
 }
 
-# Fallback if wt-context failed to load
-if ! declare -f wt_show_context_banner >/dev/null 2>&1; then
-  wt_show_context_banner() { :; }
-fi
+# Show the context banner if contexts are configured
+# Output goes to stderr so it doesn't interfere with command output
+wt_show_context_banner() {
+  local repos_dir="$HOME/.wt/repos"
+  local current_context=""
+
+  # Only show banner if contexts are configured
+  if [[ ! -d "$repos_dir" ]] || ! compgen -G "$repos_dir/*.conf" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  # Read current context name from ~/.wt/current
+  if [[ -f "$HOME/.wt/current" ]]; then
+    current_context="$(head -1 "$HOME/.wt/current" | tr -d '[:space:]')"
+  fi
+
+  if [[ -n "$current_context" ]]; then
+    printf "${BLUE}[Context: %s]${NC} ${YELLOW}(wt context to switch)${NC}\n" "$current_context" >&2
+  else
+    printf "${YELLOW}[No context set]${NC} ${YELLOW}(wt context to switch)${NC}\n" >&2
+  fi
+}
 
 # Source a library script from lib/ directory
 # Usage: wt_source <script_name>

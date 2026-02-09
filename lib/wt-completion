@@ -14,8 +14,8 @@
 # Completion support for zsh
 if [[ -n "$ZSH_VERSION" ]]; then
   _wt_completion() {
-    # Reload config to get current context settings
-    wt_read_config "$HOME/.wt/current" 2>/dev/null || true
+    # Force reload config to pick up context changes in current shell
+    wt_read_config "$HOME/.wt/current" "force" 2>/dev/null || true
     local -a commands
     commands=(
       'add:Create a new worktree for a branch'
@@ -99,8 +99,8 @@ fi
 # Completion support for bash
 if [[ -n "$BASH_VERSION" ]]; then
   _wt_completion_bash() {
-    # Reload config to get current context settings
-    wt_read_config "$HOME/.wt/current" 2>/dev/null || true
+    # Force reload config to pick up context changes in current shell
+    wt_read_config "$HOME/.wt/current" "force" 2>/dev/null || true
     local cur commands
     COMPREPLY=()
     cur="${COMP_WORDS[COMP_CWORD]}"

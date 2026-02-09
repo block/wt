@@ -127,26 +127,12 @@ wt_set_current_context() {
   echo "$name" > "$current_file"
 }
 
-# Load the current context's configuration
-# Sources the .conf file for the current context, setting WT_* variables
-# Returns: 0 on success, 1 if no context or context not found
+# DEPRECATED: Use wt_read_config() from wt-common instead
+# This function used to source config files directly, which is less safe.
+# Kept for backward compatibility but redirects to the safer wt_read_config().
 wt_load_context_config() {
-  local current_context config_path
-  current_context="$(wt_get_current_context)"
-
-  if [[ -z "$current_context" ]]; then
-    return 1
-  fi
-
-  config_path="$(wt_get_context_config_path "$current_context")"
-
-  if [[ ! -f "$config_path" ]]; then
-    return 1
-  fi
-
-  # Source the config file to set WT_* variables
-  . "$config_path"
-  return 0
+  # Redirect to wt_read_config with force mode to ensure variables are set
+  wt_read_config "$HOME/.wt/current" "force" 2>/dev/null
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
