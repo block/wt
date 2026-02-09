@@ -56,22 +56,25 @@ _wt_detect_default_branch() {
 }
 
 # Derive all paths from the repository location
-# Args: $1 = repo path, $2 = context name (for idea-files path)
+# Args: $1 = repo path, $2 = context name (for path derivation)
 # Sets: WT_MAIN_REPO_ROOT, WT_WORKTREES_BASE, WT_ACTIVE_WORKTREE, WT_IDEA_FILES_BASE
 _wt_derive_paths() {
   local repo="$1"
   local context_name="${2:-}"
-  local repo_name repo_parent
+  local repo_name
 
   repo_name="$(basename "$repo")"
-  repo_parent="$(dirname "$repo")"
 
+  # The current repo location becomes the symlink location
   WT_ACTIVE_WORKTREE="$repo"
-  WT_MAIN_REPO_ROOT="${repo_parent}/${repo_name}-master"
-  WT_WORKTREES_BASE="${repo_parent}/${repo_name}-worktrees"
 
-  local idea_name="${context_name:-$repo_name}"
-  WT_IDEA_FILES_BASE="$HOME/.wt/repos/${idea_name}/idea-files"
+  # Use context name if provided, otherwise use repo name
+  local name="${context_name:-$repo_name}"
+
+  # All worktree data goes to ~/.wt/repos/<name>/
+  WT_MAIN_REPO_ROOT="$HOME/.wt/repos/${name}/base"
+  WT_WORKTREES_BASE="$HOME/.wt/repos/${name}/worktrees"
+  WT_IDEA_FILES_BASE="$HOME/.wt/repos/${name}/idea-files"
 }
 
 # Detect which known metadata patterns exist in a repository
@@ -322,8 +325,17 @@ _wt_migrate_repo() {
       return 1
     fi
 
-    echo "Moving $WT_ACTIVE_WORKTREE -> $WT_MAIN_REPO_ROOT ..."
-    mv "$WT_ACTIVE_WORKTREE" "$WT_MAIN_REPO_ROOT"
+    # Use a temp directory to handle nested structures (e.g., moving ~/java to ~/java/base)
+    local temp_dir="${WT_ACTIVE_WORKTREE}.wt-migrate-$$-$(date +%s)"
+
+    echo "Moving $WT_ACTIVE_WORKTREE -> $temp_dir (temporary) ..."
+    mv "$WT_ACTIVE_WORKTREE" "$temp_dir"
+
+    # Create parent directory for destination if needed
+    mkdir -p "$(dirname "$WT_MAIN_REPO_ROOT")"
+
+    echo "Moving $temp_dir -> $WT_MAIN_REPO_ROOT ..."
+    mv "$temp_dir" "$WT_MAIN_REPO_ROOT"
 
     echo "Creating symlink $WT_ACTIVE_WORKTREE -> $WT_MAIN_REPO_ROOT ..."
     ln -s "$WT_MAIN_REPO_ROOT" "$WT_ACTIVE_WORKTREE"

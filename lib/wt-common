@@ -167,19 +167,10 @@ info() {
   printf "${BLUE}ℹ${NC}  %s\n" "$*"
 }
 
-# Show context banner if contexts are configured
-wt_show_context_banner() {
-  local repos_dir="$HOME/.wt/repos"
-  if [[ -d "$repos_dir" ]] && compgen -G "$repos_dir/*.conf" >/dev/null 2>&1; then
-    local current=""
-    if [[ -f "$HOME/.wt/current" ]]; then
-      current="$(cat "$HOME/.wt/current")"
-    fi
-    if [[ -n "$current" ]]; then
-      printf "${BLUE}[Context: %s]${NC}\n" "$current"
-    fi
-  fi
-}
+# Fallback if wt-context failed to load
+if ! declare -f wt_show_context_banner >/dev/null 2>&1; then
+  wt_show_context_banner() { :; }
+fi
 
 # Source a library script from lib/ directory
 # Usage: wt_source <script_name>

@@ -344,8 +344,8 @@ install_toolkit() {
   # Make bin scripts executable
   chmod +x "$INSTALL_DIR"/bin/wt-*
 
-  # Make lib/wt-ijwb-refresh executable (for cron job)
-  [[ -f "$INSTALL_DIR/lib/wt-ijwb-refresh" ]] && chmod +x "$INSTALL_DIR"/lib/wt-ijwb-refresh
+  # Make lib/wt-metadata-refresh executable (for cron job)
+  [[ -f "$INSTALL_DIR/lib/wt-metadata-refresh" ]] && chmod +x "$INSTALL_DIR"/lib/wt-metadata-refresh
 
   echo "  ✓ Installed to $INSTALL_DIR"
 }
@@ -587,7 +587,7 @@ migrate_repo() {
 
 # Set up cron job for metadata refresh
 setup_cron_job() {
-  local refresh_script="$INSTALL_DIR/lib/wt-ijwb-refresh"
+  local refresh_script="$INSTALL_DIR/lib/wt-metadata-refresh"
 
   # Skip if refresh script doesn't exist
   if [[ ! -f "$refresh_script" ]]; then
@@ -595,7 +595,7 @@ setup_cron_job() {
   fi
 
   local log_dir="$HOME/.wt/logs"
-  local log_file="$log_dir/ijwb-refresh.log"
+  local log_file="$log_dir/metadata-refresh.log"
   local cron_entry="0 2 * * * /bin/zsh -lc '$refresh_script' >> $log_file 2>&1"
 
   echo "════════════════════════════════════════════════════════════════════════════════"
@@ -626,7 +626,7 @@ setup_cron_job() {
   echo "  ✓ Created log directory: $log_dir"
 
   # Check if cron job already exists
-  if crontab -l 2>/dev/null | grep -qF "wt-ijwb-refresh"; then
+  if crontab -l 2>/dev/null | grep -qF "wt-metadata-refresh"; then
     echo "  Cron job already exists. Skipping."
   else
     # Add cron job
