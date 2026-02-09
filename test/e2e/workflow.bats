@@ -155,6 +155,7 @@ teardown() {
     assert_equal "$current" "second-repo"
 
     # Load and verify variables (wt_load_context_config reads from ~/.wt/current)
+    source "$TEST_HOME/.wt/lib/wt-common"
     source "$TEST_HOME/.wt/lib/wt-context"
     wt_load_context_config
     assert_equal "$WT_MAIN_REPO_ROOT" "$REPO2"

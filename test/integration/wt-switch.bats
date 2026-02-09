@@ -134,7 +134,7 @@ teardown() {
     # Create a known symlink so we can verify it's not modified
     ln -sf "$REPO" "$WT_ACTIVE_WORKTREE"
 
-    run "$TEST_HOME/.wt/bin/wt-switch" ""
+    run "$TEST_HOME/.wt/bin/wt-switch" "" < /dev/null
     assert_failure
 
     # Verify symlink was not modified

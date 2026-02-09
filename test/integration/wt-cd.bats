@@ -56,7 +56,7 @@ teardown() {
 @test "wt-cd fails for non-existent path" {
     run "$TEST_HOME/.wt/bin/wt-cd" "/nonexistent/path/xyz"
     assert_failure
-    assert_output --partial "does not exist"
+    assert_output --partial "not found"
 }
 
 @test "wt-cd fails for non-worktree directory" {
@@ -69,7 +69,7 @@ teardown() {
 }
 
 @test "wt-cd fails with empty argument" {
-    run --separate-stderr "$TEST_HOME/.wt/bin/wt-cd" ""
+    run --separate-stderr "$TEST_HOME/.wt/bin/wt-cd" "" < /dev/null
     assert_failure
     # No path should be written to stdout
     assert_output ""
