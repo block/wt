@@ -99,9 +99,6 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Show context banner if contexts are configured
-wt_show_context_banner
-
 # Safety check: get absolute path of main repo
 MAIN_REPO_ABS="$(cd "$WT_MAIN_REPO_ROOT" && pwd)"
 

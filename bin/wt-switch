@@ -79,9 +79,6 @@ if [[ $# -eq 1 ]]; then
   esac
 fi
 
-# Show context banner if contexts are configured
-wt_show_context_banner
-
 # Resolve link path from config
 LINK_PATH="$WT_ACTIVE_WORKTREE"
 if [[ -d "$(dirname "$LINK_PATH")" ]]; then

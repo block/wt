@@ -218,47 +218,6 @@ if (( $+commands[fzf] )); then
   compdef _wt_remove wt-remove
   compdef _wt_cd wt-cd
 
-  # Completion for wt-context
-  _wt_context() {
-    local context state
-    typeset -A opt_args
-
-    _arguments -C \
-      '(-l --list)'{-l,--list}'[List all contexts]' \
-      '(-h --help)'{-h,--help}'[Show help]' \
-      '1:context or subcommand:->first' \
-      '*:args:->args' && return 0
-
-    case "$state" in
-      first)
-        local -a contexts subcommands
-        local repos_dir="$HOME/.wt/repos"
-
-        subcommands=('add:Add a new repository context')
-
-        if [[ -d "$repos_dir" ]]; then
-          for conf in "$repos_dir"/*.conf(N); do
-            [[ -f "$conf" ]] || continue
-            local name="${conf:t:r}"
-            contexts+=("$name")
-          done
-        fi
-
-        _describe 'subcommands' subcommands
-        if (( ${#contexts[@]} > 0 )); then
-          _describe 'contexts' contexts
-        fi
-        ;;
-      args)
-        if [[ "${words[2]}" == "add" ]]; then
-          _files -/
-        fi
-        ;;
-    esac
-  }
-
-  compdef _wt_context wt-context
-
   # Completion for wt-metadata-export: directories
   _wt_metadata_export() {
     _arguments -C \
@@ -405,47 +364,6 @@ else
   compdef _wt_switch wt-switch
   compdef _wt_remove wt-remove
   compdef _wt_cd wt-cd
-
-  # Completion for wt-context (same as FZF path)
-  _wt_context() {
-    local context state
-    typeset -A opt_args
-
-    _arguments -C \
-      '(-l --list)'{-l,--list}'[List all contexts]' \
-      '(-h --help)'{-h,--help}'[Show help]' \
-      '1:context or subcommand:->first' \
-      '*:args:->args' && return 0
-
-    case "$state" in
-      first)
-        local -a contexts subcommands
-        local repos_dir="$HOME/.wt/repos"
-
-        subcommands=('add:Add a new repository context')
-
-        if [[ -d "$repos_dir" ]]; then
-          for conf in "$repos_dir"/*.conf(N); do
-            [[ -f "$conf" ]] || continue
-            local name="${conf:t:r}"
-            contexts+=("$name")
-          done
-        fi
-
-        _describe 'subcommands' subcommands
-        if (( ${#contexts[@]} > 0 )); then
-          _describe 'contexts' contexts
-        fi
-        ;;
-      args)
-        if [[ "${words[2]}" == "add" ]]; then
-          _files -/
-        fi
-        ;;
-    esac
-  }
-
-  compdef _wt_context wt-context
 
   # Completion for wt-metadata-export: directories
   _wt_metadata_export() {

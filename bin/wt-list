@@ -58,9 +58,6 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Show context banner if contexts are configured
-wt_show_context_banner
-
 # Validate main repo exists
 if [[ ! -d "$WT_MAIN_REPO_ROOT" ]]; then
   error "WT_MAIN_REPO_ROOT does not exist: $WT_MAIN_REPO_ROOT"

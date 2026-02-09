@@ -12,81 +12,25 @@
 #   - wt-remove
 #
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Multi-repo context support
-# ─────────────────────────────────────────────────────────────────────────────
-# The wt toolkit supports multiple repository contexts. Each context has its
-# own configuration stored in ~/.wt/repos/<name>.conf
-#
-# If contexts are configured, variables are loaded from the current context.
-# Otherwise, fallback defaults are used (backward compatibility).
-# ─────────────────────────────────────────────────────────────────────────────
+# Main monorepo root (where `git worktree` is managed)
+# Default assumes a repo named "repo" - install.sh will configure the actual name
+: "${WT_MAIN_REPO_ROOT:="$HOME/.wt/repos/repo/base"}"
 
-# Helper to source wt-context from lib directory
-# This is defined early so we can use it before wt_source is available
-_wt_source_context_lib() {
-  local lib_dir="${LIB_DIR:-}"
+# Base directory where new worktrees will be created by default
+: "${WT_WORKTREES_BASE:="$HOME/.wt/repos/repo/worktrees"}"
 
-  # Try LIB_DIR first (set by calling script)
-  if [[ -n "$lib_dir" && -f "$lib_dir/wt-context" ]]; then
-    . "$lib_dir/wt-context"
-    return 0
-  fi
+# Base directory for project metadata vault (IDE configs: .ijwb, .idea, .vscode, etc.)
+: "${WT_IDEA_FILES_BASE:="$HOME/.wt/repos/repo/idea-files"}"
 
-  # Try relative to this script
-  local this_dir
-  this_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
-  if [[ -f "$this_dir/wt-context" ]]; then
-    . "$this_dir/wt-context"
-    return 0
-  fi
+# Symlink path that points to the currently active worktree (for IDE integration)
+: "${WT_ACTIVE_WORKTREE:="$HOME/Development/java"}"
 
-  # Try installed location
-  if [[ -f "$HOME/.wt/lib/wt-context" ]]; then
-    . "$HOME/.wt/lib/wt-context"
-    return 0
-  fi
+# Default primary branch to sync from when creating new worktrees
+: "${WT_BASE_BRANCH:="master"}"
 
-  return 1
-}
-
-# Try to load context configuration
-_wt_context_loaded=false
-if _wt_source_context_lib; then
-  # Check if any contexts are configured
-  _wt_repos_dir="$HOME/.wt/repos"
-  if [[ -d "$_wt_repos_dir" ]] && compgen -G "$_wt_repos_dir/*.conf" >/dev/null 2>&1; then
-    # Try to load current context config
-    if wt_load_context_config 2>/dev/null; then
-      _wt_context_loaded=true
-    fi
-  fi
-  unset _wt_repos_dir
-fi
-
-# Fallback defaults (used when no context is configured or loading fails)
-# These provide backward compatibility for single-repo setups
-if [[ "$_wt_context_loaded" != "true" ]]; then
-  # Main monorepo root (where `git worktree` is managed)
-  # Default assumes a repo named "repo" - install.sh will configure the actual name
-  : "${WT_MAIN_REPO_ROOT:="$HOME/.wt/repos/repo/base"}"
-
-  # Base directory where new worktrees will be created by default
-  : "${WT_WORKTREES_BASE:="$HOME/.wt/repos/repo/worktrees"}"
-
-  # Base directory for project metadata vault (IDE configs: .ijwb, .idea, .vscode, etc.)
-  : "${WT_IDEA_FILES_BASE:="$HOME/.wt/repos/repo/idea-files"}"
-
-  # Symlink path that points to the currently active worktree (for IDE integration)
-  : "${WT_ACTIVE_WORKTREE:="$HOME/Development/java"}"
-
-  # Default primary branch to sync from when creating new worktrees
-  : "${WT_BASE_BRANCH:="master"}"
-
-  # Project metadata patterns to preserve across worktrees (space-separated)
-  # Detected during install, can be customized later
-  : "${WT_METADATA_PATTERNS:=""}"
-fi
+# Project metadata patterns to preserve across worktrees (space-separated)
+# Detected during install, can be customized later
+: "${WT_METADATA_PATTERNS:=""}"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Known project metadata patterns (for detection)
@@ -167,11 +111,6 @@ info() {
   printf "${BLUE}ℹ${NC}  %s\n" "$*"
 }
 
-# Fallback if wt-context failed to load
-if ! declare -f wt_show_context_banner >/dev/null 2>&1; then
-  wt_show_context_banner() { :; }
-fi
-
 # Source a library script from lib/ directory
 # Usage: wt_source <script_name>
 # Requires LIB_DIR to be set by the calling script (usually SCRIPT_DIR/../lib)
@@ -203,12 +142,12 @@ wt_source() {
 # Outputs: absolute path to linked worktree, or empty if none
 wt_get_linked_worktree() {
   local link_path="$WT_ACTIVE_WORKTREE"
-
+  
   # Normalize link path
   if [[ -d "$(dirname "$link_path")" ]]; then
     link_path="$(cd "$(dirname "$link_path")" && pwd)/$(basename "$link_path")"
   fi
-
+  
   if [[ -L "$link_path" ]]; then
     local target
     target="$(readlink "$link_path")"
@@ -229,31 +168,31 @@ wt_format_worktree() {
   local main_repo_abs="${2:-}"
   local linked_worktree="${3:-}"
   local verbose="${4:-false}"
-
+  
   # Get branch name
   local branch
   branch="$(git -C "$wt_abs" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "detached")"
-
+  
   # Build indicator string
   local indicators=""
-
+  
   # Check if this is the main repo (fast - just string compare)
   if [[ -n "$main_repo_abs" && "$wt_abs" == "$main_repo_abs" ]]; then
     indicators="${indicators}${YELLOW}[main]${NC} "
   fi
-
+  
   # Check if this is the currently linked worktree (fast - just string compare)
   if [[ -n "$linked_worktree" && "$wt_abs" == "$linked_worktree" ]]; then
     indicators="${indicators}${GREEN}[linked]${NC} "
   fi
-
+  
   # Slow status checks - only when verbose mode is enabled
   if [[ "$verbose" == "true" ]]; then
     # Check for uncommitted changes (SLOW - runs git status)
     if wt_has_uncommitted_changes "$wt_abs"; then
       indicators="${indicators}${RED}[dirty]${NC} "
     fi
-
+    
     # Check ahead/behind upstream (can be slow for repos with many commits)
     if [[ "$branch" != "detached" && "$branch" != "HEAD" ]]; then
       local upstream
@@ -271,7 +210,7 @@ wt_format_worktree() {
       fi
     fi
   fi
-
+  
   # Output formatted entry
   printf "${BOLD}%s${NC} ${BLUE}(%s)${NC} %s" "$wt_abs" "$branch" "$indicators"
 }
@@ -281,15 +220,15 @@ wt_format_worktree() {
 # Returns: 0 if uncommitted changes exist, 1 if clean
 wt_has_uncommitted_changes() {
   local worktree="$1"
-
+  
   if [[ ! -d "$worktree" ]]; then
     return 1
   fi
-
+  
   # Check for uncommitted changes (staged + unstaged + untracked)
   local status
   status="$(git -C "$worktree" status --porcelain 2>/dev/null)"
-
+  
   if [[ -n "$status" ]]; then
     return 0  # Has uncommitted changes
   else
@@ -303,16 +242,16 @@ wt_has_uncommitted_changes() {
 wt_uncommitted_summary() {
   local worktree="$1"
   local staged unstaged untracked
-
+  
   staged=$(git -C "$worktree" diff --cached --numstat 2>/dev/null | wc -l | tr -d ' ')
   unstaged=$(git -C "$worktree" diff --numstat 2>/dev/null | wc -l | tr -d ' ')
   untracked=$(git -C "$worktree" ls-files --others --exclude-standard 2>/dev/null | wc -l | tr -d ' ')
-
+  
   local parts=()
   [[ "$staged" -gt 0 ]] && parts+=("$staged staged")
   [[ "$unstaged" -gt 0 ]] && parts+=("$unstaged modified")
   [[ "$untracked" -gt 0 ]] && parts+=("$untracked untracked")
-
+  
   if [[ ${#parts[@]} -gt 0 ]]; then
     echo "${parts[*]}"
   fi
@@ -356,3 +295,4 @@ prompt_confirm() {
       ;;
   esac
 }
+
