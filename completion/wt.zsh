@@ -218,6 +218,49 @@ if (( $+commands[fzf] )); then
   compdef _wt_remove wt-remove
   compdef _wt_cd wt-cd
 
+  # Completion for wt-metadata-export: directories
+  _wt_metadata_export() {
+    _arguments -C \
+      '1:source directory:_files -/' \
+      '2:target directory:_files -/'
+  }
+
+  # Completion for wt-metadata-import: worktrees and directories
+  _wt_metadata_import() {
+    local context state
+    typeset -A opt_args
+
+    _arguments -C \
+      '1:source or target:->first' \
+      '2:target worktree:->worktree' && return 0
+
+    case "$state" in
+      first)
+        local -a worktrees
+        worktrees=(${(f)$(_wt_worktree_list)})
+
+        if (( ${#worktrees[@]} > 0 )); then
+          _describe 'worktrees' worktrees || _files -/
+        else
+          _files -/
+        fi
+        ;;
+      worktree)
+        local -a worktrees
+        worktrees=(${(f)$(_wt_worktree_list)})
+
+        if (( ${#worktrees[@]} > 0 )); then
+          _describe 'worktrees' worktrees || _files -/
+        else
+          _files -/
+        fi
+        ;;
+    esac
+  }
+
+  compdef _wt_metadata_export wt-metadata-export
+  compdef _wt_metadata_import wt-metadata-import
+
 # -------------------------------------------------------------------
 #  PATH 2: FZF not available → pure zsh completion
 # -------------------------------------------------------------------
@@ -321,4 +364,47 @@ else
   compdef _wt_switch wt-switch
   compdef _wt_remove wt-remove
   compdef _wt_cd wt-cd
+
+  # Completion for wt-metadata-export: directories
+  _wt_metadata_export() {
+    _arguments -C \
+      '1:source directory:_files -/' \
+      '2:target directory:_files -/'
+  }
+
+  # Completion for wt-metadata-import: worktrees and directories
+  _wt_metadata_import() {
+    local context state
+    typeset -A opt_args
+
+    _arguments -C \
+      '1:source or target:->first' \
+      '2:target worktree:->worktree' && return 0
+
+    case "$state" in
+      first)
+        local -a worktrees
+        worktrees=(${(f)$(_wt_worktree_list)})
+
+        if (( ${#worktrees[@]} > 0 )); then
+          _describe 'worktrees' worktrees || _files -/
+        else
+          _files -/
+        fi
+        ;;
+      worktree)
+        local -a worktrees
+        worktrees=(${(f)$(_wt_worktree_list)})
+
+        if (( ${#worktrees[@]} > 0 )); then
+          _describe 'worktrees' worktrees || _files -/
+        else
+          _files -/
+        fi
+        ;;
+    esac
+  }
+
+  compdef _wt_metadata_export wt-metadata-export
+  compdef _wt_metadata_import wt-metadata-import
 fi

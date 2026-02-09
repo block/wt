@@ -11,7 +11,7 @@ Git worktrees let you work on multiple branches in parallel, but IntelliJ treats
 This toolkit makes IntelliJ context switching **instant** by:
 
 - **Symlink trick**: IntelliJ always opens the same path; switching worktrees looks like a branch checkout → incremental refresh in seconds, not minutes
-- **Metadata vault**: `.ijwb` directories are stored externally and automatically installed into every new worktree—no manual Bazel import needed
+- **Metadata vault**: IDE project metadata (`.ijwb`, `.idea`, `.vscode`, etc.) is stored externally and automatically installed into every new worktree—no manual IDE setup needed
 - **Safe worktree management**: Automatic stash/restore, branch creation, and cleanup of merged branches
 - **Parallel development at scale**: Works for humans and AI agents alike
 
@@ -36,8 +36,8 @@ The installer will:
 3. Prompt for workspace paths (main repo, worktrees, metadata vault)
 4. Create required directories
 5. Optionally migrate existing repo to worktree structure
-6. Optionally export `.ijwb` metadata to the vault
-7. Optionally set up a nightly cron job to refresh `.ijwb` metadata
+6. Optionally export project metadata to the vault
+7. Optionally set up a nightly cron job to refresh Bazel IDE metadata
 
 ## Workflow
 
@@ -50,26 +50,26 @@ The directory structure expected (controlled by environment variables, can be ov
 ├── java -> java-master          # Symlink (IntelliJ opens this)
 ├── java-master/                 # Main repository
 ├── java-worktrees/              # Worktrees go here
-└── idea-project-files/          # .ijwb metadata vault
+└── idea-project-files/          # Project metadata vault
 ```
 
 ### Full Workflow Diagram
 
 ```
                       ┌─────────────────────────────────────────────┐
-                      │   External IntelliJ Metadata Vault          │
+                      │   External Project Metadata Vault           │
                       │  ~/Development/idea-project-files           │
-                      │    (canonical .ijwb directories)            │
+                      │    (IDE configs: .ijwb, .idea, etc.)        │
                       └──────────▲───────────────┬──────────────────┘
-                                 │               │ 
                                  │               │
-           ┌────wt ijwb-export───┘               └───wt ijwb-import──┐
-           │                                                         │
-┌──────────┴───────────────────────┐                     ┌───────────▼────────────────────────┐
+                                 │               │
+           ┌──wt metadata-export─┘               └──wt metadata-import─┐
+           │                                                           │
+┌──────────┴───────────────────────┐                     ┌─────────────▼──────────────────────┐
 │   Main Repository                │                     │    Worktrees                       │
 │ ~/Development/java-master        │       wt add        │ ~/Development/java-worktrees/...   │
 │  • master branch                 │ ──────────────────► │  • feature/foo                     │
-│  • safe stash/pull/restore       │ (calls ijwb-import) │  • bugfix/bar                      │
+│  • safe stash/pull/restore       │(calls metadata-imp) │  • bugfix/bar                      │
 │  • never removed                 │                     │  • agent-task-123                  │
 └───────────────┬──────────────────┘                     └─────────┬──────────────────────────┘
                 │                                                  │
@@ -104,7 +104,7 @@ When creating with `-b`, the script:
 1. Stashes uncommitted changes
 2. Switches to master, pulls latest
 3. Creates branch + worktree
-4. Imports .ijwb metadata
+4. Imports project metadata from vault
 5. Restores original state
 
 ### Switching Worktrees
@@ -167,26 +167,26 @@ Safety features:
 - Always prompts for confirmation if uncommitted changes exist, even with `-y`
 - `--merged` mode: automatically finds and removes all worktrees whose branches are merged
 
-### Managing IntelliJ Metadata
+### Managing Project Metadata
 
 ```bash
-# Export .ijwb from main repo to vault (run after importing new Bazel projects)
-wt ijwb-export
+# Export metadata from main repo to vault (run after setting up new IDE projects)
+wt metadata-export
 
-# Import .ijwb into a worktree (interactive selection if target omitted)
-wt ijwb-import
-wt ijwb-import ~/Development/java-worktrees/feature/foo
+# Import metadata into a worktree (interactive selection if target omitted)
+wt metadata-import
+wt metadata-import ~/Development/java-worktrees/feature/foo
 
 # Skip confirmation prompts (useful in scripts)
-wt ijwb-export -y
-wt ijwb-import -y ~/Development/java-worktrees/feature/foo
+wt metadata-export -y
+wt metadata-import -y ~/Development/java-worktrees/feature/foo
 ```
 
-### Refreshing Stale .ijwb Metadata (Cron Job)
+### Refreshing Stale Bazel IDE Metadata (Cron Job)
 
-When most development work is done in worktrees, the `.ijwb` directories in the main repository can become stale (targets files don't reflect new Bazel targets).
+When most development work is done in worktrees, the Bazel IDE directories (`.ijwb`, `.aswb`, `.clwb`) in the main repository can become stale (targets files don't reflect new Bazel targets).
 
-The `lib/wt-ijwb-refresh` script is designed to run as a cron job to keep metadata current.
+The `lib/wt-metadata-refresh` script is designed to run as a cron job to keep metadata current.
 
 **Note:** When IntelliJ has `derive_targets_from_directories: true` in `.bazelproject` (the default), it queries Bazel fresh on every sync. The `targets-*` file serves as a cache for initial project imports and may improve import speed.
 
@@ -202,27 +202,28 @@ mkdir -p ~/.wt/logs
 crontab -e
 
 # Add this line to run nightly at 2am (uses login shell for full PATH):
-0 2 * * * /bin/zsh -lc '~/.wt/lib/wt-ijwb-refresh' >> ~/.wt/logs/ijwb-refresh.log 2>&1
+0 2 * * * /bin/zsh -lc '~/.wt/lib/wt-metadata-refresh' >> ~/.wt/logs/metadata-refresh.log 2>&1
 ```
 
 You can also run the script manually:
 
 ```bash
-# Refresh all .ijwb directories and re-export to vault
-~/.wt/lib/wt-ijwb-refresh
+# Refresh all Bazel IDE directories and re-export to vault
+~/.wt/lib/wt-metadata-refresh
 
 # Preview what would be refreshed (dry run)
-~/.wt/lib/wt-ijwb-refresh --dry-run
+~/.wt/lib/wt-metadata-refresh --dry-run
 
 # Refresh targets files only (skip re-export step)
-~/.wt/lib/wt-ijwb-refresh --no-export
+~/.wt/lib/wt-metadata-refresh --no-export
 ```
 
 The refresh script:
-- Uses `bazel query` to regenerate `targets/targets-*` files in each `.ijwb` directory
+- Uses `bazel query` to regenerate `targets/targets-*` files in each Bazel IDE directory
+- Supports all Bazel patterns configured in WT_METADATA_PATTERNS (`.ijwb`, `.aswb`, `.clwb`)
 - Parses `.bazelproject` to determine which directories to include in the query
 - Preserves existing targets file hashes (IntelliJ may reference them)
-- Re-exports refreshed metadata to the vault
+- Re-exports all metadata to the vault (including non-Bazel patterns)
 - Logs timestamped output for monitoring
 - Returns exit codes: 0=success, 1=error, 2=partial success
 
@@ -269,7 +270,7 @@ export WT_WORKTREES_BASE="$HOME/Development/java-worktrees"
 
 
 ### WT_IDEA_FILES_BASE
-Canonical metadata vault storing `.ijwb` directories.
+Canonical metadata vault storing project metadata (IDE configs, etc.).
 
 **Default:** `~/Development/idea-project-files`
 
@@ -278,9 +279,9 @@ export WT_IDEA_FILES_BASE="$HOME/Development/idea-project-files"
 ```
 
 Used by:
-- wt-ijwb-import
-- wt-ijwb-export
-- wt-ijwb-refresh
+- wt-metadata-import
+- wt-metadata-export
+- wt-metadata-refresh
 - wt-add (when installing metadata)
 
 
@@ -332,14 +333,14 @@ wt/
 │   ├── wt-list
 │   ├── wt-remove
 │   ├── wt-switch
-│   ├── wt-ijwb-import
-│   └── wt-ijwb-export
+│   ├── wt-metadata-import
+│   └── wt-metadata-export
 ├── lib/                     # Shared libraries
 │   ├── wt-common            # Configuration and helpers
 │   ├── wt-choose            # Interactive worktree selection
 │   ├── wt-help              # Help text for wt command
 │   ├── wt-completion        # Shell completion for wt command
-│   └── wt-ijwb-refresh      # Cron script to refresh .ijwb metadata
+│   └── wt-metadata-refresh  # Cron script to refresh Bazel IDE metadata
 ├── completion/              # Shell completions for wt-* scripts
 │   ├── wt.zsh
 │   └── wt.bash
@@ -352,12 +353,12 @@ wt/
 You can also run the underlying scripts directly:
 
 ```bash
-wt-add, wt-switch, wt-remove, wt-list, wt-cd, wt-ijwb-export, wt-ijwb-import
+wt-add, wt-switch, wt-remove, wt-list, wt-cd, wt-metadata-export, wt-metadata-import
 ```
 
 These are located in `bin/` and work identically to the `wt` subcommands.
 
-The `lib/wt-ijwb-refresh` script is designed for cron jobs and can be run directly from its location.
+The `lib/wt-metadata-refresh` script is designed for cron jobs and can be run directly from its location.
 
 ## Project Resources
 

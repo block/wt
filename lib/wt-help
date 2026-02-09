@@ -21,18 +21,19 @@ Worktree Commands:
   remove [worktree]         Remove a worktree
                             - interactive worktree selection if omitted
                             - use --merged to remove all merged-branch worktrees
-  list                      List all worktrees with status
+  list [-v]                 List all worktrees with status
+                            - use -v for dirty/ahead/behind indicators
   cd [worktree]             Change directory to a worktree
                             - interactive worktree selection if omitted
 
-IntelliJ Metadata Commands:
-  ijwb-export [src] [dst]   Export .ijwb directories from source to metadata vault
-                            - src: defaults to $WT_MAIN_REPO_ROOT
-                            - dst: defaults to $WT_IDEA_FILES_BASE
+Metadata Commands:
+  metadata-export [src] [vault] Export project metadata to vault
+                                - src: source repo (default: $WT_MAIN_REPO_ROOT)
+                                - vault: metadata vault (default: $WT_IDEA_FILES_BASE)
 
-  ijwb-import [src] [dst]   Import .ijwb metadata into a target worktree
-                            - src: defaults to $WT_IDEA_FILES_BASE
-                            - dst: interactive worktree selection if omitted
+  metadata-import [wt]          Import project metadata into a worktree
+  metadata-import [vault] [wt]  - wt: target worktree (interactive if omitted)
+                                - vault: metadata vault (default: $WT_IDEA_FILES_BASE)
 
 Other:
   help                      Show this help message
@@ -42,14 +43,14 @@ Examples:
   wt switch                       # Interactive: pick worktree to link
   wt cd                           # Interactive: cd to selected worktree
   wt list                         # Show all worktrees (fast)
+  wt list -v                      # Show worktrees with dirty/ahead/behind
   wt remove                       # Interactive: remove a worktree
   wt remove --merged              # Remove all worktrees with merged branches
 
-  wt ijwb-export                  # Export using default paths
-  wt ijwb-export ~/repo ~/vault   # Export from specific source to specific vault
-  wt ijwb-import                  # Interactive: pick worktree to import into
-  wt ijwb-import ~/worktree       # Import into specific worktree
-  wt ijwb-import ~/vault ~/wt     # Import from specific vault into worktree
+  wt metadata-export              # Export using default paths
+  wt metadata-export ~/repo ~/vault
+  wt metadata-import              # Interactive: pick worktree to import into
+  wt metadata-import ~/worktree   # Import into specific worktree
 
 EOF
   cat <<EOF
@@ -58,12 +59,14 @@ Environment Variables (configured in lib/wt-common):
                         [current: $WT_MAIN_REPO_ROOT]
   WT_WORKTREES_BASE     Directory where worktrees are created
                         [current: $WT_WORKTREES_BASE]
-  WT_IDEA_FILES_BASE    IntelliJ metadata vault location
+  WT_IDEA_FILES_BASE    Project metadata vault location
                         [current: $WT_IDEA_FILES_BASE]
   WT_ACTIVE_WORKTREE    Symlink path for active worktree
                         [current: $WT_ACTIVE_WORKTREE]
   WT_BASE_BRANCH        Default branch for new worktrees
                         [current: $WT_BASE_BRANCH]
+  WT_METADATA_PATTERNS  Patterns to preserve (space-separated)
+                        [current: $WT_METADATA_PATTERNS]
 EOF
 }
 

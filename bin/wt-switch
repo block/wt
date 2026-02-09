@@ -30,7 +30,7 @@
 # ------
 # - The symlink location is configured via WT_ACTIVE_WORKTREE in wt-common.
 # - This script is intended to be used together with the `wt-add`, `wt-choose`,
-#   `wt-ijwb-import`, and `wt-ijwb-export` tools as part of the workflow suite.
+#   `wt-metadata-import`, and `wt-metadata-export` tools as part of the workflow suite.
 #
 
 set -euo pipefail

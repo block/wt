@@ -1,64 +1,37 @@
 #!/usr/bin/env bash
 #
-# wt-ijwb-import — Import IntelliJ `.ijwb` Metadata Into a Target Worktree
-# ==========================================================================
+# wt-metadata-import — Import Project Metadata Into a Target Worktree
+# =====================================================================
 #
-# This script locates all `.ijwb` directories within a source directory and
-# reproduces them inside a target directory. Instead of linking the `.ijwb`
-# directory itself, the script **resolves any symlinks** in the source and
-# **copies the actual underlying directory** into the target.
+# This script locates all project metadata directories within a source
+# directory (vault) and copies them into a target worktree. It resolves
+# any symlinks and copies the actual underlying directories.
 #
-# This allows a worktree to receive the “real” IntelliJ Bazel project metadata
-# even when the source `.ijwb` directories are symlinked (e.g., from a shared
-# metadata workspace). It is especially useful in large monorepos where Bazel
-# import time is expensive, and multiple worktrees must share identical IDE
-# metadata.
+# Supported metadata includes:
+#   - .ijwb, .aswb, .clwb (Bazel IDE plugins)
+#   - .idea (JetBrains IDEs)
+#   - .vscode (VS Code)
+#   - .swiftpm (Swift Package Manager)
+#   - And more (see WT_KNOWN_METADATA in wt-common)
 #
 # Behavior:
 # ---------
 # 1. Supports three invocation modes:
-#      - `wt-ijwb-import <source> <target>`   → explicit paths
-#      - `wt-ijwb-import <target>`            → $WT_IDEA_FILES_BASE is source
-#      - `wt-ijwb-import`                     → $WT_IDEA_FILES_BASE is source,
-#                                               interactively pick the target worktree
+#      - `wt-metadata-import <source> <target>`   → explicit paths
+#      - `wt-metadata-import <target>`            → $WT_IDEA_FILES_BASE is source
+#      - `wt-metadata-import`                     → interactive worktree selection
 #
-# 2. If no target directory is provided, the script invokes `select_git_worktree`
-#    (from `wt-choose`) to interactively select one.
-#
-# 3. For every `.ijwb` directory found under the source:
+# 2. For every metadata directory found under the source:
 #      - Computes its relative path
 #      - Ensures the corresponding directory exists under the target
-#      - If the source `.ijwb` is a symlink:
-#            • Resolves the real path (absolute)
-#            • Copies the *real* directory using `cp -a`
-#      - If the source `.ijwb` is a real directory:
-#            • Copies it directly
-#
-# 4. The result is a target worktree whose `.ijwb` directories exactly mirror the
-#    underlying canonical IntelliJ metadata, avoiding duplication while remaining
-#    resilient to changes in the source workspace.
-#
-# Guarantees:
-# -----------
-# - Works with absolute paths to avoid symlink resolution issues.
-# - Only `.ijwb` directories are processed; other files and directories are ignored.
-# - Safe to rerun; existing `.ijwb` directories in the target are replaced.
-# - All UI output is printed normally; scripting callers can capture behavior reliably.
+#      - If the source is a symlink, resolves and copies the real directory
+#      - If the source is a real directory, copies it directly
 #
 # Usage Examples:
 # ---------------
-#   # Import real .ijwb content from current directory into a selected worktree
-#   wt-ijwb-import
-#
-#   # Import from one explicit directory to another
-#   wt-ijwb-import ~/dev/shared-idea ~/dev/worktrees/feature-x
-#
-#   # Use current directory as source, specific directory as target
-#   wt-ijwb-import ~/Development/java-worktrees/feature-x
-#
-# Note: If you create a new IntelliJ Bazel project in the source directory,
-# you need to run wt-ijwb-export again to sync it to the metadata vault.
-# This ensures newly created worktrees will receive the new .ijwb metadata.
+#   wt-metadata-import                              # Interactive: pick target worktree
+#   wt-metadata-import ~/dev/worktrees/feature-x    # Import to specific worktree
+#   wt-metadata-import ~/dev/vault ~/dev/worktree   # Explicit source and target
 #
 
 set -euo pipefail
@@ -90,6 +63,8 @@ Options:
 Arguments:
   source-directory    Metadata vault location (default: \$WT_IDEA_FILES_BASE)
   target-directory    Target worktree to import into (REQUIRED, or interactive if omitted)
+
+Patterns to import: ${WT_METADATA_PATTERNS:-"(none configured)"}
 
 Modes:
   $(basename "$0")                              # Interactive: pick target worktree
@@ -152,30 +127,44 @@ case $# in
     ;;
 esac
 
+# Expand ~ to $HOME (bash doesn't expand ~ in variable assignments)
+[[ "$SOURCE_DIR" == "~/"* ]] && SOURCE_DIR="${HOME}/${SOURCE_DIR:2}"
+[[ "$SOURCE_DIR" == "~" ]] && SOURCE_DIR="$HOME"
+[[ "$TARGET_DIR" == "~/"* ]] && TARGET_DIR="${HOME}/${TARGET_DIR:2}"
+[[ "$TARGET_DIR" == "~" ]] && TARGET_DIR="$HOME"
+
 # Resolve absolute paths
 SOURCE_DIR="$(cd "$SOURCE_DIR" && pwd)"
 TARGET_DIR="$(cd "$TARGET_DIR" && pwd)"
 
+# Check if any patterns are configured
+if [[ -z "${WT_METADATA_PATTERNS:-}" ]]; then
+  warn "No metadata patterns configured (WT_METADATA_PATTERNS is empty)"
+  info "Configure patterns during 'wt install' or edit wt-common directly"
+  exit 0
+fi
+
 echo "Source directory: $SOURCE_DIR"
 echo "Target directory: $TARGET_DIR"
+echo "Patterns: $WT_METADATA_PATTERNS"
 echo
 
 # Confirmation prompt (skip if -y/--yes was provided)
 if [[ "$SKIP_CONFIRM" != "true" ]]; then
-  if ! prompt_confirm "Import .ijwb metadata from source to target? [y/N]" "n"; then
+  if ! prompt_confirm "Import metadata from source to target? [y/N]" "n"; then
     echo "Aborted."
     exit 0
   fi
   echo
 fi
 
-# Copy a .ijwb directory, resolving symlinks to real paths when needed.
+# Copy a metadata directory, resolving symlinks to real paths when needed.
 # Args:
-#   $1 = source .ijwb path (may be symlink or real dir)
-#   $2 = destination .ijwb path (directory to create)
+#   $1 = source path (may be symlink or real dir)
+#   $2 = destination path (directory to create)
 # Returns:
 #   0 on success, 1 if source doesn't exist (broken symlink)
-copy_real_ijwb() {
+copy_real_metadata() {
   local src="$1"
   local dst="$2"
   local real_path
@@ -204,13 +193,22 @@ copy_real_ijwb() {
   cp -a "$real_path" "$dst"
 }
 
-# Find all .ijwb directories (symlinks or real directories) under the source directory
-find "$SOURCE_DIR" \( -type l -o -type d \) -name '.ijwb' -print0 |
-  while IFS= read -r -d '' IJWB_SRC; do
+# Import a single pattern
+# Args: $1 = pattern name (e.g., ".ijwb")
+import_pattern() {
+  local pattern="$1"
+  local count=0
+
+  echo "Importing '$pattern' directories..."
+
+  # Find all matching directories (symlinks or real directories) under the source directory
+  # Use -L to follow symlinks (source path might be a symlink)
+  # Note: Use process substitution (< <(...)) instead of pipe to avoid subshell variable scope issues
+  while IFS= read -r -d '' META_SRC; do
     # Parent dir relative to SOURCE_DIR
-    PARENT_SRC="$(dirname "$IJWB_SRC")"
-    
-    # Handle .ijwb at root (PARENT_SRC == SOURCE_DIR)
+    PARENT_SRC="$(dirname "$META_SRC")"
+
+    # Handle pattern at root (PARENT_SRC == SOURCE_DIR)
     if [[ "$PARENT_SRC" == "$SOURCE_DIR" ]]; then
       REL_PATH=""
     else
@@ -223,24 +221,35 @@ find "$SOURCE_DIR" \( -type l -o -type d \) -name '.ijwb' -print0 |
     else
       TARGET_PARENT="$TARGET_DIR/$REL_PATH"
     fi
-    TARGET_IJWB="$TARGET_PARENT/.ijwb"
+    TARGET_META="$TARGET_PARENT/$pattern"
 
-    echo "Found source: $IJWB_SRC"
-    echo " -> Installing to: $TARGET_IJWB"
+    echo "  Found source: $META_SRC"
+    echo "  -> Installing to: $TARGET_META"
 
     mkdir -p "$TARGET_PARENT"
 
-    if [[ -e "$TARGET_IJWB" || -L "$TARGET_IJWB" ]]; then
-      rm -rf "$TARGET_IJWB"
+    if [[ -e "$TARGET_META" || -L "$TARGET_META" ]]; then
+      rm -rf "$TARGET_META"
     fi
 
-    if ! copy_real_ijwb "$IJWB_SRC" "$TARGET_IJWB"; then
-      echo "   Skipping due to broken symlink"
-      echo "   Removing broken symlink from vault: $IJWB_SRC"
-      rm -f "$IJWB_SRC"
+    if ! copy_real_metadata "$META_SRC" "$TARGET_META"; then
+      echo "     Skipping due to broken symlink"
+      echo "     Removing broken symlink from vault: $META_SRC"
+      rm -f "$META_SRC"
     fi
 
-    echo
-  done
+    count=$((count + 1))
+  done < <(find -L "$SOURCE_DIR" \( -type l -o -type d \) -name "$pattern" -print0 2>/dev/null)
 
-success "Done installing .ijwb metadata."
+  if [[ $count -eq 0 ]]; then
+    echo "  (no '$pattern' directories found in vault)"
+  fi
+}
+
+# Import each configured pattern
+for pattern in $WT_METADATA_PATTERNS; do
+  import_pattern "$pattern"
+  echo
+done
+
+success "Done importing metadata."

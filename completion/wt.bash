@@ -260,8 +260,51 @@ _wt_cd_complete() {
   COMPREPLY+=( $(compgen -d -- "$cur") )
 }
 
+# --- Completion for wt-metadata-export: directories ---
+_wt_metadata_export_complete() {
+  local cur
+  COMPREPLY=()
+  cur="${COMP_WORDS[COMP_CWORD]}"
+
+  # Complete directories
+  COMPREPLY=($(compgen -d -- "$cur"))
+}
+
+# --- Completion for wt-metadata-import: worktrees and directories ---
+_wt_metadata_import_complete() {
+  local cur cword
+  COMPREPLY=()
+  cur="${COMP_WORDS[COMP_CWORD]}"
+  cword=$COMP_CWORD
+
+  # First arg: source directory or target worktree
+  # Second arg: target worktree
+  if [[ $cword -eq 1 ]]; then
+    # Offer both worktrees and directories
+    local worktrees
+    worktrees="$(_wt_worktree_list)"
+    if [[ -n "$worktrees" ]]; then
+      local IFS=$'\n'
+      compopt -o filenames 2>/dev/null
+      COMPREPLY+=( $(compgen -W "$worktrees" -- "$cur") )
+    fi
+    COMPREPLY+=($(compgen -d -- "$cur"))
+  elif [[ $cword -eq 2 ]]; then
+    # Second argument - target worktree
+    local worktrees
+    worktrees="$(_wt_worktree_list)"
+    if [[ -n "$worktrees" ]]; then
+      local IFS=$'\n'
+      compopt -o filenames 2>/dev/null
+      COMPREPLY+=( $(compgen -W "$worktrees" -- "$cur") )
+    fi
+  fi
+}
+
 # --- Wire up completion functions (only if commands exist on PATH) ---
 type wt-add >/dev/null 2>&1 && complete -F _wt_add_complete wt-add
 type wt-switch >/dev/null 2>&1 && complete -F _wt_switch_complete wt-switch
 type wt-remove >/dev/null 2>&1 && complete -F _wt_remove_complete wt-remove
 type wt-cd >/dev/null 2>&1 && complete -F _wt_cd_complete wt-cd
+type wt-metadata-export >/dev/null 2>&1 && complete -F _wt_metadata_export_complete wt-metadata-export
+type wt-metadata-import >/dev/null 2>&1 && complete -F _wt_metadata_import_complete wt-metadata-import
