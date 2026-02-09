@@ -18,75 +18,96 @@
 # The wt toolkit supports multiple repository contexts. Each context has its
 # own configuration stored in ~/.wt/repos/<name>.conf
 #
-# If contexts are configured, variables are loaded from the current context.
-# Otherwise, fallback defaults are used (backward compatibility).
+# Configuration is loaded at runtime via parsing (not sourcing), so context
+# switches take effect immediately without requiring shell reload.
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Helper to source wt-context from lib directory
-# This is defined early so we can use it before wt_source is available
-_wt_source_context_lib() {
-  local lib_dir="${LIB_DIR:-}"
-
-  # Try LIB_DIR first (set by calling script)
-  if [[ -n "$lib_dir" && -f "$lib_dir/wt-context" ]]; then
-    . "$lib_dir/wt-context"
-    return 0
-  fi
-
-  # Try relative to this script
-  local this_dir
-  this_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
-  if [[ -f "$this_dir/wt-context" ]]; then
-    . "$this_dir/wt-context"
-    return 0
-  fi
-
-  # Try installed location
-  if [[ -f "$HOME/.wt/lib/wt-context" ]]; then
-    . "$HOME/.wt/lib/wt-context"
-    return 0
-  fi
-
-  return 1
+# Clear all WT_* config variables to allow fresh reload
+# Used before wt_read_config() when we need to pick up context changes
+# in the current shell (e.g., completions, help)
+wt_clear_config_vars() {
+  unset WT_MAIN_REPO_ROOT
+  unset WT_WORKTREES_BASE
+  unset WT_IDEA_FILES_BASE
+  unset WT_ACTIVE_WORKTREE
+  unset WT_BASE_BRANCH
+  unset WT_METADATA_PATTERNS
+  unset WT_CONTEXT_NAME
 }
 
-# Try to load context configuration
-_wt_context_loaded=false
-if _wt_source_context_lib; then
-  # Check if any contexts are configured
-  _wt_repos_dir="$HOME/.wt/repos"
-  if [[ -d "$_wt_repos_dir" ]] && compgen -G "$_wt_repos_dir/*.conf" >/dev/null 2>&1; then
-    # Try to load current context config
-    if wt_load_context_config 2>/dev/null; then
-      _wt_context_loaded=true
-    fi
+# Parse config file into shell variables (no sourcing)
+# Only sets variables that aren't already set in the environment
+# Args: $1 = config file path (default: ~/.wt/current)
+#       $2 = "force" to clear existing variables first (for in-shell reload)
+#
+# When reading ~/.wt/current, it contains just the context name.
+# The actual config is then loaded from ~/.wt/repos/<name>.conf
+wt_read_config() {
+  local config_file="${1:-$HOME/.wt/current}"
+  local force="${2:-}"
+
+  # If force mode, clear existing variables first (for in-shell reload after context switch)
+  if [[ "$force" == "force" ]]; then
+    wt_clear_config_vars
   fi
-  unset _wt_repos_dir
-fi
 
-# Fallback defaults (used when no context is configured or loading fails)
+  [[ ! -f "$config_file" ]] && return 1
+
+  # If this is the current context file, read context name and load from .conf
+  if [[ "$config_file" == "$HOME/.wt/current" ]]; then
+    local context_name
+    context_name="$(head -1 "$config_file" | tr -d '[:space:]')"
+    [[ -z "$context_name" ]] && return 1
+
+    # Set context name for display purposes
+    : "${WT_CONTEXT_NAME:="$context_name"}"
+
+    # Now read the actual config from .conf file
+    config_file="$HOME/.wt/repos/${context_name}.conf"
+    [[ ! -f "$config_file" ]] && return 1
+  fi
+
+  local key value current_val
+  while IFS='=' read -r key value; do
+    # Skip empty lines and comments
+    [[ -z "$key" || "$key" =~ ^[[:space:]]*# ]] && continue
+    # Strip quotes from value
+    value="${value#\"}"
+    value="${value%\"}"
+    # Only set if not already set in environment (allows env override)
+    # Use eval with proper escaping for both bash and zsh compatibility
+    eval "current_val=\"\${$key:-}\""
+    if [[ -z "$current_val" ]]; then
+      eval "$key=\"\$value\""
+    fi
+  done < <(grep -E '^WT_[A-Z_]+=' "$config_file" 2>/dev/null)
+}
+
+# Load config from current file, then apply fallback defaults
+wt_read_config "$HOME/.wt/current" 2>/dev/null || true
+
+# Fallback defaults (used when no context is configured or config missing values)
 # These provide backward compatibility for single-repo setups
-if [[ "$_wt_context_loaded" != "true" ]]; then
-  # Main monorepo root (where `git worktree` is managed)
-  # Default assumes a repo named "repo" - install.sh will configure the actual name
-  : "${WT_MAIN_REPO_ROOT:="$HOME/.wt/repos/repo/base"}"
+# Main monorepo root (where `git worktree` is managed)
+: "${WT_MAIN_REPO_ROOT:="$HOME/.wt/repos/repo/base"}"
 
-  # Base directory where new worktrees will be created by default
-  : "${WT_WORKTREES_BASE:="$HOME/.wt/repos/repo/worktrees"}"
+# Base directory where new worktrees will be created by default
+: "${WT_WORKTREES_BASE:="$HOME/.wt/repos/repo/worktrees"}"
 
-  # Base directory for project metadata vault (IDE configs: .ijwb, .idea, .vscode, etc.)
-  : "${WT_IDEA_FILES_BASE:="$HOME/.wt/repos/repo/idea-files"}"
+# Base directory for project metadata vault (IDE configs: .ijwb, .idea, .vscode, etc.)
+: "${WT_IDEA_FILES_BASE:="$HOME/.wt/repos/repo/idea-files"}"
 
-  # Symlink path that points to the currently active worktree (for IDE integration)
-  : "${WT_ACTIVE_WORKTREE:="$HOME/Development/java"}"
+# Symlink path that points to the currently active worktree (for IDE integration)
+: "${WT_ACTIVE_WORKTREE:="$HOME/Development/java"}"
 
-  # Default primary branch to sync from when creating new worktrees
-  : "${WT_BASE_BRANCH:="master"}"
+# Default primary branch to sync from when creating new worktrees
+: "${WT_BASE_BRANCH:="master"}"
 
-  # Project metadata patterns to preserve across worktrees (space-separated)
-  # Detected during install, can be customized later
-  : "${WT_METADATA_PATTERNS:=""}"
-fi
+# Project metadata patterns to preserve across worktrees (space-separated)
+: "${WT_METADATA_PATTERNS:=""}"
+
+# Context name (for display purposes)
+: "${WT_CONTEXT_NAME:=""}"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Known project metadata patterns (for detection)
@@ -167,10 +188,28 @@ info() {
   printf "${BLUE}ℹ${NC}  %s\n" "$*"
 }
 
-# Fallback if wt-context failed to load
-if ! declare -f wt_show_context_banner >/dev/null 2>&1; then
-  wt_show_context_banner() { :; }
-fi
+# Show the context banner if contexts are configured
+# Output goes to stderr so it doesn't interfere with command output
+wt_show_context_banner() {
+  local repos_dir="$HOME/.wt/repos"
+  local current_context=""
+
+  # Only show banner if contexts are configured
+  if [[ ! -d "$repos_dir" ]] || ! compgen -G "$repos_dir/*.conf" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  # Read current context name from ~/.wt/current
+  if [[ -f "$HOME/.wt/current" ]]; then
+    current_context="$(head -1 "$HOME/.wt/current" | tr -d '[:space:]')"
+  fi
+
+  if [[ -n "$current_context" ]]; then
+    printf "${BLUE}[Context: %s]${NC} ${YELLOW}(wt context to switch)${NC}\n" "$current_context" >&2
+  else
+    printf "${YELLOW}[No context set]${NC} ${YELLOW}(wt context to switch)${NC}\n" >&2
+  fi
+}
 
 # Source a library script from lib/ directory
 # Usage: wt_source <script_name>

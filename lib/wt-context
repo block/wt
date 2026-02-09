@@ -65,7 +65,7 @@ wt_get_current_context() {
   current_file="$(wt_get_current_file)"
 
   if [[ -f "$current_file" ]]; then
-    cat "$current_file"
+    head -1 "$current_file" | tr -d '[:space:]'
   fi
 }
 
@@ -122,53 +122,17 @@ wt_set_current_context() {
 
   # Ensure parent directory exists
   mkdir -p "$(dirname "$current_file")"
+
+  # Write just the context name - config is read from .conf file at runtime
   echo "$name" > "$current_file"
 }
 
-# Load the current context's configuration
-# Sources the .conf file for the current context, setting WT_* variables
-# Returns: 0 on success, 1 if no context or context not found
+# DEPRECATED: Use wt_read_config() from wt-common instead
+# This function used to source config files directly, which is less safe.
+# Kept for backward compatibility but redirects to the safer wt_read_config().
 wt_load_context_config() {
-  local current_context config_path
-  current_context="$(wt_get_current_context)"
-
-  if [[ -z "$current_context" ]]; then
-    return 1
-  fi
-
-  config_path="$(wt_get_context_config_path "$current_context")"
-
-  if [[ ! -f "$config_path" ]]; then
-    return 1
-  fi
-
-  # Source the config file to set WT_* variables
-  . "$config_path"
-  return 0
-}
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Context banner (for display in commands)
-# ─────────────────────────────────────────────────────────────────────────────
-
-# Show the context banner if contexts are configured
-# Output goes to stderr so it doesn't interfere with command output
-wt_show_context_banner() {
-  local current_context repos_dir
-  repos_dir="$(wt_get_repos_dir)"
-
-  # Only show banner if contexts are configured
-  if [[ ! -d "$repos_dir" ]] || ! compgen -G "$repos_dir/*.conf" >/dev/null 2>&1; then
-    return 0
-  fi
-
-  current_context="$(wt_get_current_context)"
-
-  if [[ -n "$current_context" ]]; then
-    printf "${BLUE}[Context: %s]${NC} ${YELLOW}(wt context to switch)${NC}\n" "$current_context" >&2
-  else
-    printf "${YELLOW}[No context set]${NC} ${YELLOW}(wt context to switch)${NC}\n" >&2
-  fi
+  # Redirect to wt_read_config with force mode to ensure variables are set
+  wt_read_config "$HOME/.wt/current" "force" 2>/dev/null
 }
 
 # ─────────────────────────────────────────────────────────────────────────────

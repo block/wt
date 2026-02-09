@@ -9,14 +9,11 @@
 
 # Display help for the wt command
 wt_show_help() {
-  # Check if contexts are configured and get current context
-  local current_context=""
-  local repos_dir="$HOME/.wt/repos"
-  if [[ -d "$repos_dir" ]] && compgen -G "$repos_dir/*.conf" >/dev/null 2>&1; then
-    if [[ -f "$HOME/.wt/current" ]]; then
-      current_context="$(cat "$HOME/.wt/current")"
-    fi
-  fi
+  # Force reload config to pick up context changes in current shell
+  wt_read_config "$HOME/.wt/current" "force" 2>/dev/null || true
+
+  # Use WT_CONTEXT_NAME if set, otherwise empty
+  local current_context="${WT_CONTEXT_NAME:-}"
 
   cat <<'EOF'
 wt — Unified Worktree Toolkit
