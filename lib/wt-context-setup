@@ -71,7 +71,7 @@ _wt_derive_paths() {
   WT_WORKTREES_BASE="${repo_parent}/${repo_name}-worktrees"
 
   local idea_name="${context_name:-$repo_name}"
-  WT_IDEA_FILES_BASE="$HOME/.config/wt/idea-files/${idea_name}"
+  WT_IDEA_FILES_BASE="$HOME/.wt/repos/${idea_name}/idea-files"
 }
 
 # Detect which known metadata patterns exist in a repository
@@ -279,7 +279,7 @@ _wt_create_directories() {
 _wt_update_context_main_repo() {
   local context_name="$1"
   local new_main_repo="$2"
-  local config_path="$HOME/.config/wt/repos/$context_name.conf"
+  local config_path="$HOME/.wt/repos/$context_name.conf"
 
   if [[ -f "$config_path" ]]; then
     sed -i.bak "s|^WT_MAIN_REPO_ROOT=.*|WT_MAIN_REPO_ROOT=\"$new_main_repo\"|" "$config_path"
@@ -418,8 +418,8 @@ _wt_sync_metadata() {
   local script_dir="${SCRIPT_DIR:-}"
   if [[ -n "$script_dir" && -x "$script_dir/wt-metadata-export" ]]; then
     metadata_export="$script_dir/wt-metadata-export"
-  elif [[ -x "$HOME/.config/wt/bin/wt-metadata-export" ]]; then
-    metadata_export="$HOME/.config/wt/bin/wt-metadata-export"
+  elif [[ -x "$HOME/.wt/bin/wt-metadata-export" ]]; then
+    metadata_export="$HOME/.wt/bin/wt-metadata-export"
   elif command -v wt-metadata-export >/dev/null 2>&1; then
     metadata_export="wt-metadata-export"
   fi
@@ -442,8 +442,8 @@ _wt_sync_metadata() {
 wt_setup_context() {
   local repo_path="${1:-}"
   local context_name="${2:-}"
-  local repos_dir="$HOME/.config/wt/repos"
-  local current_file="$HOME/.config/wt/current"
+  local repos_dir="$HOME/.wt/repos"
+  local current_file="$HOME/.wt/current"
 
   # ─────────────────────────────────────────────────────────────────────────────
   # Step 1: Get repository path

@@ -8,16 +8,16 @@
 # configuration (worktree paths, metadata location, etc.).
 #
 # Storage Structure:
-#   ~/.config/wt/
+#   ~/.wt/
 #   ├── repos/
 #   │   ├── java.conf          # per-repo config
+#   │   ├── java/
+#   │   │   ├── base/          # main worktree
+#   │   │   ├── worktrees/     # additional worktrees
+#   │   │   └── idea-files/    # metadata vault
 #   │   ├── go.conf
 #   │   └── frontend.conf
-#   ├── current                 # contains name of current context
-#   └── idea-files/
-#       ├── java/              # per-repo metadata vault
-#       ├── go/
-#       └── frontend/
+#   └── current                 # contains name of current context
 #
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -25,15 +25,15 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 # Get the directory where context config files are stored
-# Returns: ~/.config/wt/repos
+# Returns: ~/.wt/repos
 wt_get_repos_dir() {
-  echo "$HOME/.config/wt/repos"
+  echo "$HOME/.wt/repos"
 }
 
 # Get the path to the current context file
-# Returns: ~/.config/wt/current
+# Returns: ~/.wt/current
 wt_get_current_file() {
-  echo "$HOME/.config/wt/current"
+  echo "$HOME/.wt/current"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
