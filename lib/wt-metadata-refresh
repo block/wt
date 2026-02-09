@@ -146,8 +146,8 @@ find_all_bazel_dirs() {
   fi
 
   for pattern in $patterns; do
-    # Use -maxdepth 5 for better performance since most dirs are at service level
-    find "$WT_MAIN_REPO_ROOT" -maxdepth 5 -type d -name "$pattern" 2>/dev/null
+    # Use -L to follow symlinks, -maxdepth 5 for better performance
+    find -L "$WT_MAIN_REPO_ROOT" -maxdepth 5 -type d -name "$pattern" 2>/dev/null
   done
 }
 

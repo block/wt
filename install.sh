@@ -278,7 +278,8 @@ select_metadata_patterns() {
             # Check if already selected
             local found=0
             local new_selected=()
-            for s in "${selected[@]}"; do
+            # Use ${arr[@]+"${arr[@]}"} pattern for empty array safety in older bash
+            for s in ${selected[@]+"${selected[@]}"}; do
               if [[ "$s" == "$pattern" ]]; then
                 found=1
               else
@@ -286,7 +287,12 @@ select_metadata_patterns() {
               fi
             done
             if ((found)); then
-              selected=("${new_selected[@]}")
+              # Assign empty or populated array safely
+              if [[ ${#new_selected[@]} -gt 0 ]]; then
+                selected=("${new_selected[@]}")
+              else
+                selected=()
+              fi
             else
               selected+=("$pattern")
             fi
@@ -302,7 +308,8 @@ select_metadata_patterns() {
       local desc
       desc=$(get_pattern_description "$pattern")
       local mark=" "
-      for s in "${selected[@]}"; do
+      # Use ${arr[@]+"${arr[@]}"} pattern for empty array safety in older bash
+      for s in ${selected[@]+"${selected[@]}"}; do
         [[ "$s" == "$pattern" ]] && mark="x"
       done
       echo "  $i) [$mark] $pattern - $desc"
@@ -312,7 +319,12 @@ select_metadata_patterns() {
     echo "Enter numbers to toggle, 'a' for all, 'n' for none, or Enter to confirm:"
   done
 
-  WT_METADATA_PATTERNS="${selected[*]}"
+  # Safely handle empty array (${arr[*]} on empty array is fine, but be explicit)
+  if [[ ${#selected[@]} -gt 0 ]]; then
+    WT_METADATA_PATTERNS="${selected[*]}"
+  else
+    WT_METADATA_PATTERNS=""
+  fi
 
   echo
   if [[ -n "$WT_METADATA_PATTERNS" ]]; then

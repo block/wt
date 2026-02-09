@@ -25,8 +25,8 @@
 # Intended Use:
 # -------------
 # These helper functions are used by:
-#    - wt-ijwb-import   (imports IntelliJ project metadata into a worktree)
-#    - wt-switch         (updates a symlink to point to a chosen worktree)
+#    - wt-metadata-import (imports project metadata into a worktree)
+#    - wt-switch          (updates a symlink to point to a chosen worktree)
 #
 # Guarantees:
 # -----------

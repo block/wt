@@ -7,8 +7,8 @@
 #   - wt-add
 #   - wt-switch
 #   - wt-choose
-#   - wt-ijwb-import
-#   - wt-ijwb-export
+#   - wt-metadata-import
+#   - wt-metadata-export
 #   - wt-remove
 #
 
