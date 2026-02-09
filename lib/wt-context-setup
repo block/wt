@@ -714,7 +714,10 @@ EOF
   # Step 8: Migrate repository
   # ─────────────────────────────────────────────────────────────────────────────
   echo
-  _wt_migrate_repo "$context_name"
+  if ! _wt_migrate_repo "$context_name"; then
+    error "Repository migration failed. Aborting setup."
+    return 1
+  fi
 
   # ─────────────────────────────────────────────────────────────────────────────
   # Step 9: Sync metadata
