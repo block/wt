@@ -56,23 +56,31 @@ _wt_detect_default_branch() {
 }
 
 # Derive all paths from the repository location
-# Args: $1 = repo path, $2 = context name (for path derivation)
+# Args: $1 = repo path (base worktree), $2 = context name, $3 = symlink path (optional)
 # Sets: WT_MAIN_REPO_ROOT, WT_WORKTREES_BASE, WT_ACTIVE_WORKTREE, WT_IDEA_FILES_BASE
 _wt_derive_paths() {
   local repo="$1"
   local context_name="${2:-}"
+  local symlink_path="${3:-}"
   local repo_name
 
   repo_name="$(basename "$repo")"
 
-  # The current repo location becomes the symlink location
-  WT_ACTIVE_WORKTREE="$repo"
+  # If a symlink was provided, use that as the active worktree location
+  # Otherwise, use the repo path itself
+  if [[ -n "$symlink_path" ]]; then
+    WT_ACTIVE_WORKTREE="$symlink_path"
+    WT_MAIN_REPO_ROOT="$repo"
+  else
+    WT_ACTIVE_WORKTREE="$repo"
+    # Use context name if provided, otherwise use repo name
+    local name="${context_name:-$repo_name}"
+    WT_MAIN_REPO_ROOT="$HOME/.wt/repos/${name}/base"
+  fi
 
   # Use context name if provided, otherwise use repo name
   local name="${context_name:-$repo_name}"
 
-  # All worktree data goes to ~/.wt/repos/<name>/
-  WT_MAIN_REPO_ROOT="$HOME/.wt/repos/${name}/base"
   WT_WORKTREES_BASE="$HOME/.wt/repos/${name}/worktrees"
   WT_IDEA_FILES_BASE="$HOME/.wt/repos/${name}/idea-files"
 }
@@ -86,7 +94,7 @@ _wt_detect_metadata_patterns() {
     local pattern="${entry%%:*}"
     while IFS= read -r path; do
       [[ -n "$path" ]] && all_paths+=("$path")
-    done < <(find -L "$repo" -maxdepth 5 -type d -name "$pattern" 2>/dev/null)
+    done < <(find "$repo" -maxdepth 5 -type d -name "$pattern" 2>/dev/null)
   done
 
   if [[ ${#all_paths[@]} -eq 0 ]]; then
@@ -348,11 +356,19 @@ _wt_migrate_repo() {
     if [[ "$symlink_target" != /* ]]; then
       symlink_target="$(cd "$(dirname "$WT_ACTIVE_WORKTREE")" && cd "$(dirname "$symlink_target")" && pwd)/$(basename "$symlink_target")"
     fi
-    echo "Active worktree symlink already exists: $WT_ACTIVE_WORKTREE"
-    echo "  -> $symlink_target"
+
+    echo "Active worktree symlink: $WT_ACTIVE_WORKTREE -> $symlink_target"
+
+    # Offer to update symlink if it points elsewhere
     if [[ "$symlink_target" != "$WT_MAIN_REPO_ROOT" ]]; then
-      _wt_update_context_main_repo "$context_name" "$symlink_target"
-      echo "  ✓ Updated config: WT_MAIN_REPO_ROOT=$symlink_target"
+      echo
+      echo "Update symlink to point to main repo? (You can switch later with 'wt switch')"
+      if prompt_confirm "Update symlink to $WT_MAIN_REPO_ROOT? [y/N]" "n"; then
+        ln -sfn "$WT_MAIN_REPO_ROOT" "$WT_ACTIVE_WORKTREE"
+        echo "  ✓ Symlink updated!"
+      else
+        echo "  Symlink unchanged"
+      fi
     fi
 
   elif [[ ! -e "$WT_ACTIVE_WORKTREE" ]]; then
@@ -393,7 +409,7 @@ _wt_sync_metadata() {
   local total_count=0
   for pattern in $WT_METADATA_PATTERNS; do
     local count
-    count=$(find -L "$WT_MAIN_REPO_ROOT" -maxdepth 5 -type d -name "$pattern" 2>/dev/null | wc -l | tr -d ' ')
+    count=$(find "$WT_MAIN_REPO_ROOT" -maxdepth 5 -type d -name "$pattern" 2>/dev/null | wc -l | tr -d ' ')
     if [[ $count -gt 0 ]]; then
       echo "  Found $count '$pattern' directories"
       total_count=$((total_count + count))
@@ -508,6 +524,75 @@ wt_setup_context() {
 
   repo_path="$(cd "$repo_path" && pwd)"
 
+  # Track the symlink location separately if user entered a symlink
+  local active_symlink=""
+  if [[ -L "$repo_path" ]]; then
+    active_symlink="$repo_path"
+    local symlink_target
+    symlink_target="$(readlink "$repo_path")"
+    if [[ "$symlink_target" != /* ]]; then
+      symlink_target="$(cd "$(dirname "$repo_path")" && cd "$(dirname "$symlink_target")" && pwd)/$(basename "$symlink_target")"
+    fi
+
+    # Detect default branch to suggest base path
+    local base_branch
+    base_branch=$(_wt_detect_default_branch "$repo_path")
+
+    # Show detected repository info first
+    echo
+    echo "Detected repository:"
+    echo "  Path:   $repo_path"
+    local remote_url
+    remote_url=$(git -C "$repo_path" remote get-url origin 2>/dev/null || echo "(no remote)")
+    echo "  Remote: $remote_url"
+    echo "  Branch: $base_branch (default branch)"
+
+    echo
+    echo "════════════════════════════════════════════════════════════════════════════════"
+    echo "  Symlink Detected"
+    echo "════════════════════════════════════════════════════════════════════════════════"
+    echo
+    echo "You entered a symlink:"
+    echo "  $repo_path -> $symlink_target"
+    echo
+    echo "Please specify the path to your main (base) worktree."
+    echo
+    local suggested_base=""
+    local candidate="${repo_path}-${base_branch}"
+    if [[ -d "$candidate" ]] && git -C "$candidate" rev-parse --git-dir &>/dev/null; then
+      suggested_base="$candidate"
+    fi
+
+    while true; do
+      local prompt="Main repository path"
+      if [[ -n "$suggested_base" ]]; then
+        prompt="Main repository path [$suggested_base]"
+      fi
+      if ! read -rp "$prompt: " repo_path; then
+        echo
+        return 1
+      fi
+      if [[ -z "$repo_path" && -n "$suggested_base" ]]; then
+        repo_path="$suggested_base"
+      fi
+      if [[ -z "$repo_path" ]]; then
+        error "Please enter a path"
+        continue
+      fi
+      repo_path=$(_wt_expand_path "$repo_path")
+      if [[ ! -d "$repo_path" ]]; then
+        error "Directory not found: $repo_path"
+        continue
+      fi
+      if ! git -C "$repo_path" rev-parse --git-dir &>/dev/null; then
+        error "Not a git repository: $repo_path"
+        continue
+      fi
+      break
+    done
+    repo_path="$(cd "$repo_path" && pwd)"
+  fi
+
   # ─────────────────────────────────────────────────────────────────────────────
   # Step 2: Get context name
   # ─────────────────────────────────────────────────────────────────────────────
@@ -616,7 +701,7 @@ wt_setup_context() {
   # ─────────────────────────────────────────────────────────────────────────────
   # Step 4: Derive and show configuration
   # ─────────────────────────────────────────────────────────────────────────────
-  _wt_derive_paths "$repo_path" "$context_name"
+  _wt_derive_paths "$repo_path" "$context_name" "$active_symlink"
 
   echo "Derived configuration for context '$context_name':"
   echo
@@ -626,7 +711,11 @@ wt_setup_context() {
   echo "     Your IDE opens this path. It's a symlink that can point to any worktree."
   echo
   echo "  ${BOLD}Main repository:${NC}     $WT_MAIN_REPO_ROOT"
-  echo "     Your current repo will be moved here (the \"master\" worktree)."
+  if [[ -n "$active_symlink" ]]; then
+    echo "     Your main/base worktree."
+  else
+    echo "     Your current repo will be moved here (the \"master\" worktree)."
+  fi
   echo
   echo "  ${BOLD}Worktrees directory:${NC} $WT_WORKTREES_BASE"
   echo "     New worktrees will be created here."

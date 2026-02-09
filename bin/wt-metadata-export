@@ -161,11 +161,10 @@ fi
 find_all_metadata_dirs() {
   local all_paths=()
 
-  # Collect all metadata directories for all patterns
   for pattern in $WT_METADATA_PATTERNS; do
     while IFS= read -r path; do
       [[ -n "$path" ]] && all_paths+=("$path")
-    done < <(find -L "$SOURCE_DIR" -maxdepth 5 -type d -name "$pattern" 2>/dev/null)
+    done < <(find "$SOURCE_DIR" -maxdepth 5 -type d -name "$pattern" 2>/dev/null)
   done
 
   # No metadata found
