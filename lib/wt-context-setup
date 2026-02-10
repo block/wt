@@ -17,18 +17,37 @@
 #
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Known project metadata patterns (for detection)
+# Format: pattern:description
+# ─────────────────────────────────────────────────────────────────────────────
+WT_KNOWN_METADATA=(
+  # JetBrains IDEs
+  ".idea:JetBrains IDEs (IntelliJ, WebStorm, PyCharm, etc.)"
+  ".run:JetBrains run/debug configurations"
+  ".fleet:JetBrains Fleet"
+  # Bazel
+  ".ijwb:IntelliJ + Bazel plugin (legacy)"
+  ".aswb:Android Studio + Bazel plugin (legacy)"
+  ".clwb:CLion + Bazel plugin (legacy)"
+  ".bazelbsp:JetBrains Bazel plugin (new, BSP-based)"
+  ".bsp:Build Server Protocol (Scala, Java, Bazel)"
+  # Xcode / iOS
+  ".swiftpm:Swift Package Manager metadata"
+  "xcuserdata:Xcode user data (breakpoints, UI state)"
+  # VS Code
+  ".vscode:Visual Studio Code"
+  # Scala
+  ".metals:Metals LSP (Scala)"
+  ".bloop:Bloop build server (Scala)"
+  # Eclipse
+  ".settings:Eclipse settings"
+  ".project:Eclipse project"
+  ".classpath:Eclipse classpath"
+)
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Helper functions
 # ─────────────────────────────────────────────────────────────────────────────
-
-# Expand ~ to $HOME in a path
-_wt_expand_path() {
-  local path="$1"
-  case "$path" in
-    "~") echo "$HOME" ;;
-    "~/"*) echo "${HOME}${path#\~}" ;;
-    *) echo "$path" ;;
-  esac
-}
 
 # Detect the default branch for a repository
 _wt_detect_default_branch() {
@@ -334,7 +353,8 @@ _wt_migrate_repo() {
     fi
 
     # Use a temp directory to handle nested structures (e.g., moving ~/java to ~/java/base)
-    local temp_dir="${WT_ACTIVE_WORKTREE}.wt-migrate-$$-$(date +%s)"
+    local temp_dir
+    temp_dir="${WT_ACTIVE_WORKTREE}.wt-migrate-$$-$(date +%s)"
 
     echo "Moving $WT_ACTIVE_WORKTREE -> $temp_dir (temporary) ..."
     mv "$WT_ACTIVE_WORKTREE" "$temp_dir"
@@ -465,8 +485,8 @@ _wt_sync_metadata() {
 
 # Run the full context setup flow
 # Args: $1 = repo path (optional), $2 = context name (optional)
+# Expects: SCRIPT_DIR to be set by caller (for finding wt-metadata-export)
 # Returns: 0 on success, 1 on failure
-# Sets: CURRENT_CONTEXT_NAME on success
 wt_setup_context() {
   local repo_path="${1:-}"
   local context_name="${2:-}"
@@ -792,8 +812,6 @@ EOF
   echo "$context_name" > "$current_file"
   echo "  ✓ Set as current context: $context_name"
 
-  CURRENT_CONTEXT_NAME="$context_name"
-
   # ─────────────────────────────────────────────────────────────────────────────
   # Step 7: Create directories
   # ─────────────────────────────────────────────────────────────────────────────
@@ -817,6 +835,12 @@ EOF
 
   echo
   success "Context '$context_name' setup complete!"
+  echo
+  echo "To change configuration for '$context_name', edit:"
+  echo "    $config_path"
+  echo
+  echo "To add another repository:"
+  echo "    wt context add"
 
   return 0
 }

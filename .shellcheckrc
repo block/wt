@@ -1,0 +1,5 @@
+# Follow source statements to resolve cross-file references
+external-sources=true
+
+# Disable source-following warnings for dynamic/unresolvable sources
+disable=SC1090,SC1091

@@ -1,11 +1,13 @@
+# shellcheck disable=SC2207  # compgen idiom is standard for bash completion;
+# fix (mapfile -t) requires bash 4.0+ which is not the default on macOS
 # completion/wt.bash
 # ==================
-# Bash completion for wt-* scripts with conditional FZF support.
+# Bash completion for both the unified `wt` command and standalone `wt-*` scripts.
 #
 # Behavior:
 #   - Always:
 #       * Source wt-common (if present) to read WT_MAIN_REPO_ROOT, etc.
-#       * Provide completions for wt-* commands.
+#       * Provide completions for `wt` and `wt-*` commands.
 #
 #   - If `fzf` is available:
 #       * For `wt-add`:
@@ -23,12 +25,6 @@
 #
 #   - For other wt-* commands:
 #       * File/dir completion.
-#
-# Usage:
-#   1. Place this file as: completion/wt.bash
-#   2. Have install.sh copy it into ~/.wt/wt.bash
-#   3. In ~/.bashrc (or ~/.bash_profile), add:
-#        [[ -f "$HOME/.wt/wt.bash" ]] && source "$HOME/.wt/wt.bash"
 
 # --- Load shared config (wt-common) if available ---
 if [[ -f "$HOME/.wt/lib/wt-common" ]]; then
@@ -301,7 +297,7 @@ _wt_metadata_import_complete() {
   fi
 }
 
-# --- Wire up completion functions (only if commands exist on PATH) ---
+# --- Wire up standalone wt-* completions (only if commands exist on PATH) ---
 type wt-add >/dev/null 2>&1 && complete -F _wt_add_complete wt-add
 type wt-switch >/dev/null 2>&1 && complete -F _wt_switch_complete wt-switch
 type wt-remove >/dev/null 2>&1 && complete -F _wt_remove_complete wt-remove
@@ -309,3 +305,69 @@ type wt-cd >/dev/null 2>&1 && complete -F _wt_cd_complete wt-cd
 type wt-context >/dev/null 2>&1 && complete -F _wt_context_complete wt-context
 type wt-metadata-export >/dev/null 2>&1 && complete -F _wt_metadata_export_complete wt-metadata-export
 type wt-metadata-import >/dev/null 2>&1 && complete -F _wt_metadata_import_complete wt-metadata-import
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Unified `wt` command completion
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_wt_completion_bash() {
+  # Force reload config to pick up context changes in current shell
+  wt_read_config "$HOME/.wt/current" "force" 2>/dev/null || true
+  local cur
+  COMPREPLY=()
+  cur="${COMP_WORDS[COMP_CWORD]}"
+
+  if [[ ${COMP_CWORD} -eq 1 ]]; then
+    local commands="add switch remove list cd context metadata-export metadata-import ijwb-export ijwb-import help"
+    COMPREPLY=($(compgen -W "$commands" -- "$cur"))
+  else
+    case "${COMP_WORDS[1]}" in
+      add)
+        local branches
+        branches=$(git branch -a 2>/dev/null | sed 's/^[* ]*//' | sed 's|remotes/origin/||')
+        COMPREPLY=($(compgen -W "$branches" -- "$cur"))
+        ;;
+      switch|cd)
+        local branches
+        branches="$(wt_worktree_branch_list)"
+        if [[ -n "$branches" ]]; then
+          local IFS=$'\n'
+          COMPREPLY+=($(compgen -W "$branches" -- "$cur"))
+        fi
+        ;;
+      remove)
+        local branches
+        branches="$(wt_worktree_branch_list exclude_main)"
+        if [[ -n "$branches" ]]; then
+          local IFS=$'\n'
+          COMPREPLY+=($(compgen -W "$branches" -- "$cur"))
+        fi
+        ;;
+      context)
+        local contexts
+        contexts="$(_wt_context_list)"
+        COMPREPLY=($(compgen -W "add --list $contexts" -- "$cur"))
+        ;;
+      metadata-import|ijwb-import)
+        if [[ ${COMP_CWORD} -eq 2 ]]; then
+          local worktrees
+          if [[ -n "$WT_MAIN_REPO_ROOT" ]] && [[ -d "$WT_MAIN_REPO_ROOT" ]]; then
+            worktrees=$(git -C "$WT_MAIN_REPO_ROOT" worktree list --porcelain 2>/dev/null | grep '^worktree ' | cut -d' ' -f2-)
+            COMPREPLY=($(compgen -W "$worktrees" -- "$cur"))
+          fi
+          COMPREPLY+=($(compgen -d -- "$cur"))
+        elif [[ ${COMP_CWORD} -eq 3 ]]; then
+          local worktrees
+          if [[ -n "$WT_MAIN_REPO_ROOT" ]] && [[ -d "$WT_MAIN_REPO_ROOT" ]]; then
+            worktrees=$(git -C "$WT_MAIN_REPO_ROOT" worktree list --porcelain 2>/dev/null | grep '^worktree ' | cut -d' ' -f2-)
+            COMPREPLY=($(compgen -W "$worktrees" -- "$cur"))
+          fi
+        fi
+        ;;
+      metadata-export|ijwb-export)
+        COMPREPLY=($(compgen -d -- "$cur"))
+        ;;
+    esac
+  fi
+}
+complete -F _wt_completion_bash wt

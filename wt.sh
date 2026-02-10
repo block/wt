@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+# shellcheck shell=bash  # wt.sh is sourced (not executed), it runs in the user's shell (bash or zsh)
 #
 # wt.sh — Unified Worktree Command
 # ================================
@@ -11,34 +11,31 @@
 # Usage: source this file, then run `wt help` for details.
 #
 
-# Helper to get the path of the current script (works in both bash and zsh)
-_wt_get_script_path() {
-  if [[ -n "${BASH_SOURCE[0]:-}" ]]; then
-    # Bash: use BASH_SOURCE
-    echo "${BASH_SOURCE[0]}"
-  elif [[ -n "${ZSH_VERSION:-}" ]]; then
-    # Zsh: use %x prompt expansion to get script path
-    echo "${(%):-%x}"
-  else
-    # Fallback
-    echo "$0"
-  fi
-}
+# Capture script path at top level (works in both bash and zsh)
+# In bash, $0 is the shell name; BASH_SOURCE[0] gives the sourced file path.
+# In zsh, $0 at top level of a sourced file gives the file path.
+# Note: in zsh, $0 gives the *sourcing* file's path. If wt.sh is sourced
+# indirectly via a wrapper script, $0 will resolve to the wrapper, causing
+# _wt_resolve_root to derive the wrong root directory.
+# TLDR: wt.sh should be sourced directly.
+if [[ -n "${BASH_SOURCE[0]:-}" ]]; then
+  _WT_SCRIPT_PATH="${BASH_SOURCE[0]}"
+else
+  _WT_SCRIPT_PATH="$0"
+fi
 
 # Ensure this file is sourced, not executed; exit with error if executed directly
 _wt_ensure_sourced() {
-  local script_path="$(_wt_get_script_path)"
-  
   if [[ -n "${ZSH_VERSION:-}" ]]; then
     # In zsh, check if we're being sourced by examining ZSH_EVAL_CONTEXT
     # When sourced, it contains "toplevel:file" or similar patterns with "file"
     if [[ "${ZSH_EVAL_CONTEXT:-}" != *:file:* && "${ZSH_EVAL_CONTEXT:-}" != *:file ]]; then
       # Not sourced - but this check can be unreliable, so also check $0
-      if [[ "$0" == "$script_path" ]]; then
+      if [[ "$0" == "$_WT_SCRIPT_PATH" ]]; then
         echo "Error: This file must be sourced, not executed." >&2
         echo "" >&2
         echo "Add this to your ~/.zshrc:" >&2
-        echo "  source $script_path" >&2
+        echo "  source $_WT_SCRIPT_PATH" >&2
         echo "" >&2
         echo "Then use: wt <command> [args]" >&2
         exit 1
@@ -49,7 +46,7 @@ _wt_ensure_sourced() {
     echo "Error: This file must be sourced, not executed." >&2
     echo "" >&2
     echo "Add this to your ~/.bashrc:" >&2
-    echo "  source $script_path" >&2
+    echo "  source $_WT_SCRIPT_PATH" >&2
     echo "" >&2
     echo "Then use: wt <command> [args]" >&2
     exit 1
@@ -58,10 +55,11 @@ _wt_ensure_sourced() {
 
 # Resolve the root directory where wt.sh lives
 _wt_resolve_root() {
-  local source="$(_wt_get_script_path)"
+  local source="$_WT_SCRIPT_PATH"
   # Resolve symlinks to find the real location
   while [[ -L "$source" ]]; do
-    local dir="$(command cd -P "$(dirname "$source")" && pwd)"
+    local dir
+    dir="$(command cd -P "$(dirname "$source")" && pwd)"
     source="$(readlink "$source")"
     # If source is relative, resolve it relative to the symlink's directory
     [[ "$source" != /* ]] && source="$dir/$source"
@@ -161,6 +159,5 @@ _wt_ensure_sourced
 _WT_ROOT="$(_wt_resolve_root)"
 _wt_source_lib wt-common
 _wt_source_lib wt-help
-_wt_source_lib wt-completion       # completion for `wt` subcommands
-_wt_source_shell_completion        # completion for individual `wt-*` scripts
+_wt_source_shell_completion        # completion for `wt` and `wt-*` commands
 

@@ -33,11 +33,12 @@ append_if_missing() {
 
   [[ ! -f "$file" ]] && return 0
 
-  if ! grep -Fxq "$line" "$file"; then
+  # Match both ~ and $HOME variants of the wt.sh source line
+  if grep -qE '(source|\.)\s+.*\.wt/wt\.sh' "$file"; then
+    echo "  Already configured: $file"
+  else
     printf "\n%s\n" "$line" >> "$file"
     echo "  ✓ Updated $file"
-  else
-    echo "  Already configured: $file"
   fi
 }
 
@@ -66,7 +67,7 @@ install_toolkit() {
 
 # Configure shell rc files to source wt.sh
 configure_shell_rc() {
-  local source_line='[[ -f "$HOME/.wt/wt.sh" ]] && source "$HOME/.wt/wt.sh"'
+  local source_line='[[ -f ~/.wt/wt.sh ]] && source ~/.wt/wt.sh'
 
   echo "Configuring shell..."
 
@@ -135,50 +136,6 @@ setup_cron_job() {
   echo "  crontab -e        Edit cron jobs (to modify or remove)"
 }
 
-# Print completion message
-# Args: $1 = context name (optional)
-print_completion() {
-  local context_name="${1:-}"
-  local config_path=""
-
-  if [[ -n "$context_name" ]]; then
-    config_path="$INSTALL_DIR/repos/$context_name.conf"
-  fi
-
-  cat <<EOF
-════════════════════════════════════════════════════════════════════════════════
-  Installation Complete!
-════════════════════════════════════════════════════════════════════════════════
-
-Reload your shell to activate:
-
-    source ~/.zshrc    # or ~/.bashrc
-
-Then run:
-
-    wt help           Show all commands and options
-    wt context        Switch between repository contexts
-
-EOF
-
-  if [[ -n "$config_path" ]]; then
-    cat <<EOF
-To change configuration for '$context_name', edit:
-
-    $config_path
-
-EOF
-  fi
-
-  cat <<EOF
-To add another repository:
-
-    wt context add
-
-════════════════════════════════════════════════════════════════════════════════
-EOF
-}
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # Main
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -226,7 +183,7 @@ main() {
   echo
 
   # Source the context setup library (from installed location)
-  # Set SCRIPT_DIR so wt-context-setup can find wt-metadata-export
+  # Set SCRIPT_DIR so _wt_sync_metadata can find wt-metadata-export
   SCRIPT_DIR="$INSTALL_DIR/bin"
   . "$INSTALL_DIR/lib/wt-context-setup"
 
@@ -239,7 +196,22 @@ main() {
   setup_cron_job
   echo
 
-  print_completion "${CURRENT_CONTEXT_NAME:-}"
+  cat <<'EOF'
+════════════════════════════════════════════════════════════════════════════════
+  Installation Complete!
+════════════════════════════════════════════════════════════════════════════════
+
+Reload your shell to activate:
+
+    source ~/.zshrc    # or ~/.bashrc
+
+Then run:
+
+    wt help           Show all commands and options
+    wt context        Switch between repository contexts
+
+════════════════════════════════════════════════════════════════════════════════
+EOF
 }
 
 main "$@"
