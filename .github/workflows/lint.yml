@@ -1,0 +1,24 @@
+name: ShellCheck
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '0 8 * * *' # daily at 8am UTC
+
+env:
+  SHELLCHECK_VERSION: v0.11.0
+
+jobs:
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ShellCheck ${{ env.SHELLCHECK_VERSION }}
+        run: |
+          wget -qO- "https://github.com/koalaman/shellcheck/releases/download/${SHELLCHECK_VERSION}/shellcheck-${SHELLCHECK_VERSION}.linux.x86_64.tar.xz" | tar -xJv
+          sudo mv "shellcheck-${SHELLCHECK_VERSION}/shellcheck" /usr/bin/
+          shellcheck --version
+      - name: Run ShellCheck
+        run: shellcheck -x -s bash wt.sh install.sh bin/wt-* lib/wt-* completion/wt.bash

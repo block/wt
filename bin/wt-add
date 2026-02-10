@@ -312,6 +312,7 @@ stash_name=""
 stash_ref=""
 restore_ran=0
 
+# shellcheck disable=SC2329  # invoked via trap
 restore_state() {
   # avoid running twice (EXIT + INT/TERM)
   if [[ $restore_ran -eq 1 ]]; then
@@ -341,8 +342,7 @@ restore_state() {
     stash_ref="$(git stash list | grep -F "$stash_name" | head -n1 | cut -d: -f1 || true)"
     if [[ -n "$stash_ref" ]]; then
       echo "Popping stash: $stash_ref"
-      git stash pop "$stash_ref"
-      if [[ $? -ne 0 ]]; then
+      if ! git stash pop "$stash_ref"; then
         warn "git stash pop had conflicts or failed; please resolve manually."
       fi
     else

@@ -111,10 +111,8 @@ case $# in
 esac
 
 # Expand ~ to $HOME (bash doesn't expand ~ in variable assignments)
-[[ "$SOURCE_DIR" == "~/"* ]] && SOURCE_DIR="${HOME}/${SOURCE_DIR:2}"
-[[ "$SOURCE_DIR" == "~" ]] && SOURCE_DIR="$HOME"
-[[ "$TARGET_DIR" == "~/"* ]] && TARGET_DIR="${HOME}/${TARGET_DIR:2}"
-[[ "$TARGET_DIR" == "~" ]] && TARGET_DIR="$HOME"
+SOURCE_DIR="$(_wt_expand_path "$SOURCE_DIR")"
+TARGET_DIR="$(_wt_expand_path "$TARGET_DIR")"
 
 # Validate directories exist before proceeding
 if [[ ! -d "$SOURCE_DIR" ]]; then

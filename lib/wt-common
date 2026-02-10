@@ -110,33 +110,17 @@ wt_read_config "$HOME/.wt/current" 2>/dev/null || true
 : "${WT_CONTEXT_NAME:=""}"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Known project metadata patterns (for detection)
-# Format: pattern:description
+# Path helpers
 # ─────────────────────────────────────────────────────────────────────────────
-WT_KNOWN_METADATA=(
-  # JetBrains IDEs
-  ".idea:JetBrains IDEs (IntelliJ, WebStorm, PyCharm, etc.)"
-  ".run:JetBrains run/debug configurations"
-  ".fleet:JetBrains Fleet"
-  # Bazel
-  ".ijwb:IntelliJ + Bazel plugin (legacy)"
-  ".aswb:Android Studio + Bazel plugin (legacy)"
-  ".clwb:CLion + Bazel plugin (legacy)"
-  ".bazelbsp:JetBrains Bazel plugin (new, BSP-based)"
-  ".bsp:Build Server Protocol (Scala, Java, Bazel)"
-  # Xcode / iOS
-  ".swiftpm:Swift Package Manager metadata"
-  "xcuserdata:Xcode user data (breakpoints, UI state)"
-  # VS Code
-  ".vscode:Visual Studio Code"
-  # Scala
-  ".metals:Metals LSP (Scala)"
-  ".bloop:Bloop build server (Scala)"
-  # Eclipse
-  ".settings:Eclipse settings"
-  ".project:Eclipse project"
-  ".classpath:Eclipse classpath"
-)
+
+# Expand ~ to $HOME in a path (bash doesn't expand ~ in variable assignments
+# or interactive read input)
+_wt_expand_path() {
+  local path="$1"
+  [[ "$path" == "~" ]] && path="$HOME"
+  echo "${path/#\~\//$HOME/}"
+}
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Color support (only if output is a TTY)
@@ -207,7 +191,7 @@ wt_show_context_banner() {
   if [[ -n "$current_context" ]]; then
     printf "${BLUE}[Context: %s]${NC} ${YELLOW}(wt context to switch)${NC}\n" "$current_context" >&2
   else
-    printf "${YELLOW}[No context set]${NC} ${YELLOW}(wt context to switch)${NC}\n" >&2
+    printf "%s[No context set]%s %s(wt context to switch)%s\n" "$YELLOW" "$NC" "$YELLOW" "$NC" >&2
   fi
 }
 

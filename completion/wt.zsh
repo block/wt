@@ -1,11 +1,11 @@
 # completion/wt.zsh
 # ==================
-# Zsh integration for wt-* scripts with conditional FZF support.
+# Zsh completion for both the unified `wt` command and standalone `wt-*` scripts.
 #
 # Behavior:
 #   - Always:
 #       * Source wt-common (if present) to get WT_MAIN_REPO_ROOT, etc.
-#       * Provide some form of completion for wt-* commands.
+#       * Provide completion for wt-* commands and the unified `wt` command.
 #
 #   - If `fzf` is available:
 #       * TAB is wrapped:
@@ -25,6 +25,10 @@
 if [[ -r "$HOME/.wt/lib/wt-common" ]]; then
   source "$HOME/.wt/lib/wt-common"
 fi
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Helper functions
+# ═══════════════════════════════════════════════════════════════════════════════
 
 # --- Helper: resolve which repo to use for branch completion ---
 # Priority:
@@ -55,9 +59,143 @@ _wt_branch_list() {
   git -C "$repo" branch --format='%(refname:short)' 2>/dev/null
 }
 
-# -------------------------------------------------------------------
-#  PATH 1: FZF is available → use FZF-powered completion for wt-add
-# -------------------------------------------------------------------
+# ═══════════════════════════════════════════════════════════════════════════════
+# Shared completion functions (used by both `wt-*` and `wt` subcommands)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Completion for wt-switch / wt switch: worktree branch names
+_wt_switch() {
+  local context state
+  typeset -A opt_args
+
+  _arguments -C \
+    '1:worktree:->worktree' && return 0
+
+  case "$state" in
+    worktree)
+      local -a branches
+      branches=("${(f)$(wt_worktree_branch_list)}")
+
+      if (( ${#branches[@]} > 0 )); then
+        _describe 'branch names' branches
+      fi
+      ;;
+  esac
+}
+
+# Completion for wt-remove / wt remove: worktree branch names (main repo excluded)
+_wt_remove() {
+  local context state
+  typeset -A opt_args
+
+  _arguments -C \
+    '1:worktree:->worktree' && return 0
+
+  case "$state" in
+    worktree)
+      local -a branches
+      branches=("${(f)$(wt_worktree_branch_list exclude_main)}")
+
+      if (( ${#branches[@]} > 0 )); then
+        _describe 'branch names' branches
+      fi
+      ;;
+  esac
+}
+
+# Completion for wt-cd / wt cd: worktree branch names
+_wt_cd() {
+  local context state
+  typeset -A opt_args
+
+  _arguments -C \
+    '1:worktree:->worktree' && return 0
+
+  case "$state" in
+    worktree)
+      local -a branches
+      branches=("${(f)$(wt_worktree_branch_list)}")
+
+      if (( ${#branches[@]} > 0 )); then
+        _describe 'branch names' branches
+      fi
+      ;;
+  esac
+}
+
+# Completion for wt-context / wt context
+_wt_context() {
+  local context state
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-l --list)'{-l,--list}'[List all contexts]' \
+    '(-h --help)'{-h,--help}'[Show help]' \
+    '1:context or subcommand:->first' \
+    '*:args:->args' && return 0
+
+  case "$state" in
+    first)
+      local -a contexts subcommands
+      local repos_dir="$HOME/.wt/repos"
+
+      subcommands=('add:Add a new repository context')
+
+      if [[ -d "$repos_dir" ]]; then
+        for conf in "$repos_dir"/*.conf(N); do
+          [[ -f "$conf" ]] || continue
+          local name="${conf:t:r}"
+          contexts+=("$name")
+        done
+      fi
+
+      _describe 'subcommands' subcommands
+      if (( ${#contexts[@]} > 0 )); then
+        _describe 'contexts' contexts
+      fi
+      ;;
+    args)
+      if [[ "${words[2]}" == "add" ]]; then
+        _files -/
+      fi
+      ;;
+  esac
+}
+
+# Completion for wt-metadata-export / wt metadata-export: directories
+_wt_metadata_export() {
+  _arguments -C \
+    '1:source directory:_files -/' \
+    '2:target directory:_files -/'
+}
+
+# Completion for wt-metadata-import / wt metadata-import: worktrees and directories
+_wt_metadata_import() {
+  local context state
+  typeset -A opt_args
+
+  _arguments -C \
+    '1:source or target:->first' \
+    '2:target worktree:->worktree' && return 0
+
+  case "$state" in
+    first|worktree)
+      local -a worktrees
+      worktrees=(${(f)$(_wt_worktree_list)})
+
+      if (( ${#worktrees[@]} > 0 )); then
+        _describe 'worktrees' worktrees || _files -/
+      else
+        _files -/
+      fi
+      ;;
+  esac
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# FZF-specific setup (wt-add only — other commands use shared functions above)
+# ═══════════════════════════════════════════════════════════════════════════════
+
 if (( $+commands[fzf] )); then
   # FZF-based branch picker widget
   wt_fzf_branch_complete() {
@@ -122,162 +260,8 @@ if (( $+commands[fzf] )); then
   # Bind Ctrl+X Ctrl+A to always trigger FZF-based branch picker
   bindkey '^X^A' wt_fzf_branch_complete
 
-  # Completion for wt-switch: branch names
-  _wt_switch() {
-    local context state
-    typeset -A opt_args
-
-    _arguments -C \
-      '1:worktree:->worktree' && return 0
-
-    case "$state" in
-      worktree)
-        local -a branches
-        branches=("${(f)$(wt_worktree_branch_list)}")
-
-        if (( ${#branches[@]} > 0 )); then
-          _describe 'branch names' branches
-        fi
-        ;;
-    esac
-  }
-
-  # Completion for wt-remove: branch names (main repo excluded)
-  _wt_remove() {
-    local context state
-    typeset -A opt_args
-
-    _arguments -C \
-      '1:worktree:->worktree' && return 0
-
-    case "$state" in
-      worktree)
-        local -a branches
-        branches=("${(f)$(wt_worktree_branch_list exclude_main)}")
-
-        if (( ${#branches[@]} > 0 )); then
-          _describe 'branch names' branches
-        fi
-        ;;
-    esac
-  }
-
-  # Completion for wt-cd: branch names
-  _wt_cd() {
-    local context state
-    typeset -A opt_args
-
-    _arguments -C \
-      '1:worktree:->worktree' && return 0
-
-    case "$state" in
-      worktree)
-        local -a branches
-        branches=("${(f)$(wt_worktree_branch_list)}")
-
-        if (( ${#branches[@]} > 0 )); then
-          _describe 'branch names' branches
-        fi
-        ;;
-    esac
-  }
-
-  compdef _wt_switch wt-switch
-  compdef _wt_remove wt-remove
-  compdef _wt_cd wt-cd
-
-  # Completion for wt-context
-  _wt_context() {
-    local context state
-    typeset -A opt_args
-
-    _arguments -C \
-      '(-l --list)'{-l,--list}'[List all contexts]' \
-      '(-h --help)'{-h,--help}'[Show help]' \
-      '1:context or subcommand:->first' \
-      '*:args:->args' && return 0
-
-    case "$state" in
-      first)
-        local -a contexts subcommands
-        local repos_dir="$HOME/.wt/repos"
-
-        subcommands=('add:Add a new repository context')
-
-        if [[ -d "$repos_dir" ]]; then
-          for conf in "$repos_dir"/*.conf(N); do
-            [[ -f "$conf" ]] || continue
-            local name="${conf:t:r}"
-            contexts+=("$name")
-          done
-        fi
-
-        _describe 'subcommands' subcommands
-        if (( ${#contexts[@]} > 0 )); then
-          _describe 'contexts' contexts
-        fi
-        ;;
-      args)
-        if [[ "${words[2]}" == "add" ]]; then
-          _files -/
-        fi
-        ;;
-    esac
-  }
-
-  compdef _wt_context wt-context
-
-  # Completion for wt-metadata-export: directories
-  _wt_metadata_export() {
-    _arguments -C \
-      '1:source directory:_files -/' \
-      '2:target directory:_files -/'
-  }
-
-  # Completion for wt-metadata-import: worktrees and directories
-  _wt_metadata_import() {
-    local context state
-    typeset -A opt_args
-
-    _arguments -C \
-      '1:source or target:->first' \
-      '2:target worktree:->worktree' && return 0
-
-    case "$state" in
-      first)
-        local -a worktrees
-        worktrees=(${(f)$(_wt_worktree_list)})
-
-        if (( ${#worktrees[@]} > 0 )); then
-          _describe 'worktrees' worktrees || _files -/
-        else
-          _files -/
-        fi
-        ;;
-      worktree)
-        local -a worktrees
-        worktrees=(${(f)$(_wt_worktree_list)})
-
-        if (( ${#worktrees[@]} > 0 )); then
-          _describe 'worktrees' worktrees || _files -/
-        else
-          _files -/
-        fi
-        ;;
-    esac
-  }
-
-  compdef _wt_metadata_export wt-metadata-export
-  compdef _wt_metadata_import wt-metadata-import
-
-# -------------------------------------------------------------------
-#  PATH 2: FZF not available → pure zsh completion
-# -------------------------------------------------------------------
 else
-  # Pure zsh completion for wt-add:
-  # - Supports -b/--branch flag
-  # - First arg: branch name from resolved repo OR path
-  # - Others: file completion
+  # Non-FZF: standard completion for wt-add
   _wt_add() {
     emulate -L zsh -o extended_glob
 
@@ -303,152 +287,69 @@ else
     esac
   }
 
-  # Completion for wt-switch: branch names
-  _wt_switch() {
-    local context state
-    typeset -A opt_args
-
-    _arguments -C \
-      '1:worktree:->worktree' && return 0
-
-    case "$state" in
-      worktree)
-        local -a branches
-        branches=("${(f)$(wt_worktree_branch_list)}")
-
-        if (( ${#branches[@]} > 0 )); then
-          _describe 'branch names' branches
-        fi
-        ;;
-    esac
-  }
-
-  # Completion for wt-remove: branch names (main repo excluded)
-  _wt_remove() {
-    local context state
-    typeset -A opt_args
-
-    _arguments -C \
-      '1:worktree:->worktree' && return 0
-
-    case "$state" in
-      worktree)
-        local -a branches
-        branches=("${(f)$(wt_worktree_branch_list exclude_main)}")
-
-        if (( ${#branches[@]} > 0 )); then
-          _describe 'branch names' branches
-        fi
-        ;;
-    esac
-  }
-
-  # Completion for wt-cd: branch names
-  _wt_cd() {
-    local context state
-    typeset -A opt_args
-
-    _arguments -C \
-      '1:worktree:->worktree' && return 0
-
-    case "$state" in
-      worktree)
-        local -a branches
-        branches=("${(f)$(wt_worktree_branch_list)}")
-
-        if (( ${#branches[@]} > 0 )); then
-          _describe 'branch names' branches
-        fi
-        ;;
-    esac
-  }
-
-  compdef _wt_add   wt-add
-  compdef _wt_switch wt-switch
-  compdef _wt_remove wt-remove
-  compdef _wt_cd wt-cd
-
-  # Completion for wt-context (same as FZF path)
-  _wt_context() {
-    local context state
-    typeset -A opt_args
-
-    _arguments -C \
-      '(-l --list)'{-l,--list}'[List all contexts]' \
-      '(-h --help)'{-h,--help}'[Show help]' \
-      '1:context or subcommand:->first' \
-      '*:args:->args' && return 0
-
-    case "$state" in
-      first)
-        local -a contexts subcommands
-        local repos_dir="$HOME/.wt/repos"
-
-        subcommands=('add:Add a new repository context')
-
-        if [[ -d "$repos_dir" ]]; then
-          for conf in "$repos_dir"/*.conf(N); do
-            [[ -f "$conf" ]] || continue
-            local name="${conf:t:r}"
-            contexts+=("$name")
-          done
-        fi
-
-        _describe 'subcommands' subcommands
-        if (( ${#contexts[@]} > 0 )); then
-          _describe 'contexts' contexts
-        fi
-        ;;
-      args)
-        if [[ "${words[2]}" == "add" ]]; then
-          _files -/
-        fi
-        ;;
-    esac
-  }
-
-  compdef _wt_context wt-context
-
-  # Completion for wt-metadata-export: directories
-  _wt_metadata_export() {
-    _arguments -C \
-      '1:source directory:_files -/' \
-      '2:target directory:_files -/'
-  }
-
-  # Completion for wt-metadata-import: worktrees and directories
-  _wt_metadata_import() {
-    local context state
-    typeset -A opt_args
-
-    _arguments -C \
-      '1:source or target:->first' \
-      '2:target worktree:->worktree' && return 0
-
-    case "$state" in
-      first)
-        local -a worktrees
-        worktrees=(${(f)$(_wt_worktree_list)})
-
-        if (( ${#worktrees[@]} > 0 )); then
-          _describe 'worktrees' worktrees || _files -/
-        else
-          _files -/
-        fi
-        ;;
-      worktree)
-        local -a worktrees
-        worktrees=(${(f)$(_wt_worktree_list)})
-
-        if (( ${#worktrees[@]} > 0 )); then
-          _describe 'worktrees' worktrees || _files -/
-        else
-          _files -/
-        fi
-        ;;
-    esac
-  }
-
-  compdef _wt_metadata_export wt-metadata-export
-  compdef _wt_metadata_import wt-metadata-import
+  compdef _wt_add wt-add
 fi
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Register standalone wt-* completions
+# ═══════════════════════════════════════════════════════════════════════════════
+
+compdef _wt_switch wt-switch
+compdef _wt_remove wt-remove
+compdef _wt_cd wt-cd
+compdef _wt_context wt-context
+compdef _wt_metadata_export wt-metadata-export
+compdef _wt_metadata_import wt-metadata-import
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Unified `wt` command completion
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_wt_completion() {
+  # Force reload config to pick up context changes in current shell
+  wt_read_config "$HOME/.wt/current" "force" 2>/dev/null || true
+
+  local -a commands
+  commands=(
+    'add:Create a new worktree for a branch'
+    'switch:Switch the active worktree symlink'
+    'remove:Remove a worktree'
+    'list:List all worktrees with status'
+    'cd:Change directory to a worktree'
+    'context:Switch repository context'
+    'metadata-export:Export project metadata to vault'
+    'metadata-import:Import project metadata into worktree'
+    'ijwb-export:Export .ijwb metadata to vault (legacy alias)'
+    'ijwb-import:Import .ijwb metadata into worktree (legacy alias)'
+    'help:Show help message'
+  )
+
+  local context state
+  typeset -A opt_args
+
+  _arguments -C \
+    '1:command:->command' \
+    '*::args:->args' && return 0
+
+  case "$state" in
+    command)
+      _describe 'command' commands
+      ;;
+    args)
+      case "${words[1]}" in
+        add)
+          # Simple branch completion for `wt add`
+          local -a branches
+          branches=("${(f)$(git branch -a 2>/dev/null | sed 's/^[* ]*//' | sed 's|remotes/origin/||')}")
+          (( ${#branches[@]} > 0 )) && _describe 'branch' branches
+          ;;
+        switch|cd)              _wt_switch ;;
+        remove)                 _wt_remove ;;
+        context)                _wt_context ;;
+        metadata-export|ijwb-export)  _wt_metadata_export ;;
+        metadata-import|ijwb-import)  _wt_metadata_import ;;
+      esac
+      ;;
+  esac
+}
+compdef _wt_completion wt

@@ -1,6 +1,7 @@
 # Worktree Toolkit
 
 [![Tests](https://github.com/block/wt/actions/workflows/test.yml/badge.svg)](https://github.com/block/wt/actions/workflows/test.yml)
+[![ShellCheck](https://github.com/block/wt/actions/workflows/lint.yml/badge.svg)](https://github.com/block/wt/actions/workflows/lint.yml)
 
 A streamlined workflow for developing in large Bazel + IntelliJ monorepos using Git worktrees.
 

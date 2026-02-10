@@ -192,14 +192,14 @@ if [[ "$REMOVE_MERGED" == "true" ]]; then
     fi
 
     echo "Removing: $wt ($wt_branch)"
-    git worktree remove --force -- "$wt" 2>/dev/null && {
+    if git worktree remove --force -- "$wt" 2>/dev/null; then
       # Also delete the branch
       git branch -d "$wt_branch" 2>/dev/null || true
       REMOVED=$((REMOVED + 1))
-    } || {
+    else
       warn "Failed to remove $wt"
       SKIPPED=$((SKIPPED + 1))
-    }
+    fi
   done
 
   echo

@@ -17,6 +17,27 @@ teardown() {
 }
 
 # =============================================================================
+# Tests for WT_KNOWN_METADATA patterns
+# =============================================================================
+
+@test "WT_KNOWN_METADATA array is defined" {
+    assert [ -n "${WT_KNOWN_METADATA[*]:-}" ]
+}
+
+@test "WT_KNOWN_METADATA contains expected patterns" {
+    for expected in ".idea" ".ijwb"; do
+        local found=false
+        for pattern in "${WT_KNOWN_METADATA[@]}"; do
+            if [[ "$pattern" == "${expected}:"* ]]; then
+                found=true
+                break
+            fi
+        done
+        assert [ "$found" = true ]
+    done
+}
+
+# =============================================================================
 # Tests for _wt_expand_path()
 # =============================================================================
 

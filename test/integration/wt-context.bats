@@ -196,7 +196,11 @@ teardown() {
 
     # Record all config file mtimes
     local config_mtime
-    config_mtime=$(stat -f %m "$TEST_HOME/.wt/repos/update-test.conf" 2>/dev/null || stat -c %Y "$TEST_HOME/.wt/repos/update-test.conf")
+    if [[ "$(uname)" == "Darwin" ]]; then
+        config_mtime=$(stat -f %m "$TEST_HOME/.wt/repos/update-test.conf")
+    else
+        config_mtime=$(stat -c %Y "$TEST_HOME/.wt/repos/update-test.conf")
+    fi
 
     sleep 1  # Ensure time passes
 
@@ -205,6 +209,10 @@ teardown() {
 
     # Config file should have same mtime
     local new_mtime
-    new_mtime=$(stat -f %m "$TEST_HOME/.wt/repos/update-test.conf" 2>/dev/null || stat -c %Y "$TEST_HOME/.wt/repos/update-test.conf")
+    if [[ "$(uname)" == "Darwin" ]]; then
+        new_mtime=$(stat -f %m "$TEST_HOME/.wt/repos/update-test.conf")
+    else
+        new_mtime=$(stat -c %Y "$TEST_HOME/.wt/repos/update-test.conf")
+    fi
     assert_equal "$new_mtime" "$config_mtime"
 }

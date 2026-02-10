@@ -132,7 +132,7 @@ list_contexts() {
 
     printf "%s%-15s %s" "$prefix" "$name" "$path"
     if [[ "$name" == "$current_context" ]]; then
-      printf " ${GREEN}(current)${NC}"
+      printf " %s(current)%s" "$GREEN" "$NC"
     fi
     echo
   done
