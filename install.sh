@@ -17,6 +17,7 @@ set -euo pipefail
 # ═══════════════════════════════════════════════════════════════════════════════
 
 SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Must match _WT_ROOT in wt.sh
 INSTALL_DIR="$HOME/.wt"
 
 # Source wt-common to get color helpers
