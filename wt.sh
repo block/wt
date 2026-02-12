@@ -12,7 +12,6 @@
 #
 
 # Installation root — all wt files live under this directory.
-# Must match INSTALL_DIR in install.sh.
 # Override by setting _WT_ROOT before sourcing (e.g., for development).
 _WT_ROOT="${_WT_ROOT:-$HOME/.wt}"
 
