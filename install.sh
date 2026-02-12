@@ -177,24 +177,30 @@ main() {
   configure_shell_rc
   echo
 
-  echo "════════════════════════════════════════════════════════════════════════════════"
-  echo "  Repository Setup"
-  echo "════════════════════════════════════════════════════════════════════════════════"
-  echo
+  if prompt_confirm "Run repository context setup? [Y/n]" "y"; then
+    echo
+    echo "════════════════════════════════════════════════════════════════════════════════"
+    echo "  Repository Setup"
+    echo "════════════════════════════════════════════════════════════════════════════════"
+    echo
 
-  # Source the context setup library (from installed location)
-  # Set SCRIPT_DIR so _wt_sync_metadata can find wt-metadata-export
-  SCRIPT_DIR="$INSTALL_DIR/bin"
-  . "$INSTALL_DIR/lib/wt-context-setup"
+    # Source the context setup library (from installed location)
+    # Set SCRIPT_DIR so _wt_sync_metadata can find wt-metadata-export
+    SCRIPT_DIR="$INSTALL_DIR/bin"
+    . "$INSTALL_DIR/lib/wt-context-setup"
 
-  # Run the full context setup flow
-  # This handles: repo selection, context naming, path derivation, metadata detection,
-  # config file creation, directory creation, migration, and metadata export
-  wt_setup_context
-  echo
+    # Run the full context setup flow
+    # This handles: repo selection, context naming, path derivation, metadata detection,
+    # config file creation, directory creation, migration, and metadata export
+    wt_setup_context
+    echo
 
-  setup_cron_job
-  echo
+    setup_cron_job
+    echo
+  else
+    echo "  Skipping. Run 'wt context add' later to set up a repository."
+    echo
+  fi
 
   cat <<'EOF'
 ════════════════════════════════════════════════════════════════════════════════
