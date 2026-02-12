@@ -12,14 +12,14 @@
 #
 
 # Capture script path at top level (works in both bash and zsh)
-# In bash, $0 is the shell name; BASH_SOURCE[0] gives the sourced file path.
-# In zsh, $0 at top level of a sourced file gives the file path.
-# Note: in zsh, $0 gives the *sourcing* file's path. If wt.sh is sourced
-# indirectly via a wrapper script, $0 will resolve to the wrapper, causing
-# _wt_resolve_root to derive the wrong root directory.
-# TLDR: wt.sh should be sourced directly.
+# In bash, BASH_SOURCE[0] gives the sourced file path.
+# In zsh, %x prompt expansion reliably gives the current source file path,
+# even when FUNCTION_ARGZERO is unset (where $0 would return "-zsh").
 if [[ -n "${BASH_SOURCE[0]:-}" ]]; then
   _WT_SCRIPT_PATH="${BASH_SOURCE[0]}"
+elif [[ -n "${ZSH_VERSION:-}" ]]; then
+  # %x prompt expansion reliably gives the current source file path
+  _WT_SCRIPT_PATH="$(print -P '%x')"
 else
   _WT_SCRIPT_PATH="$0"
 fi
@@ -56,6 +56,7 @@ _wt_ensure_sourced() {
 # Resolve the root directory where wt.sh lives
 _wt_resolve_root() {
   local source="$_WT_SCRIPT_PATH"
+  local root
   # Resolve symlinks to find the real location
   while [[ -L "$source" ]]; do
     local dir
@@ -64,7 +65,17 @@ _wt_resolve_root() {
     # If source is relative, resolve it relative to the symlink's directory
     [[ "$source" != /* ]] && source="$dir/$source"
   done
-  command cd -P "$(dirname "$source")" && pwd
+  root="$(command cd -P "$(dirname "$source")" && pwd)"
+
+  # Validate: root must contain bin/ and lib/ directories
+  if [[ -d "$root/bin" && -d "$root/lib" ]]; then
+    echo "$root"
+  elif [[ -d "$HOME/.wt/bin" && -d "$HOME/.wt/lib" ]]; then
+    echo "$HOME/.wt"
+  else
+    echo "wt: cannot determine installation root" >&2
+    return 1
+  fi
 }
 
 # helper for sourcing a library file from lib/ directory
