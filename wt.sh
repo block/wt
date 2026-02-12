@@ -57,14 +57,16 @@ _wt_ensure_sourced() {
 _wt_resolve_root() {
   local source="$_WT_SCRIPT_PATH"
   # Resolve symlinks to find the real location
+  # Note: uses `builtin cd` instead of `command cd` because zsh's `command cd`
+  # silently fails to change directories (exits 0 but stays in CWD)
   while [[ -L "$source" ]]; do
     local dir
-    dir="$(command cd -P "$(dirname "$source")" && pwd)"
+    dir="$(builtin cd -P "$(dirname "$source")" && pwd)"
     source="$(readlink "$source")"
     # If source is relative, resolve it relative to the symlink's directory
     [[ "$source" != /* ]] && source="$dir/$source"
   done
-  command cd -P "$(dirname "$source")" && pwd
+  builtin cd -P "$(dirname "$source")" && pwd
 }
 
 # helper for sourcing a library file from lib/ directory
