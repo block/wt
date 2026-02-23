@@ -130,7 +130,7 @@ select_git_worktree() {
     # Prompt goes to stderr so stdout stays clean for return value
     # Note: read -p outputs prompt to stderr by default
     local choice
-    if ! read -rp "Select worktree [1-${#WORKTREES[@]}]: " choice; then
+    if ! read -erp "Select worktree [1-${#WORKTREES[@]}]: " choice; then
       # Ctrl-C or EOF
       echoerr ""
       exit 1

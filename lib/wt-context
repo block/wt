@@ -196,7 +196,7 @@ select_context() {
   echoerr ""
 
   local choice
-  if ! read -rp "Select context [1-${#contexts[@]}]: " choice; then
+  if ! read -erp "Select context [1-${#contexts[@]}]: " choice; then
     echoerr ""
     return 1
   fi
