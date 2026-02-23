@@ -218,7 +218,7 @@ _wt_select_metadata_patterns() {
 
   while true; do
     local input
-    if ! read -rp "> " input; then
+    if ! read -erp "> " input; then
       echo
       exit 1
     fi
@@ -504,7 +504,7 @@ wt_setup_context() {
     echo
 
     while true; do
-      if ! read -rp "Repository path: " repo_path; then
+      if ! read -erp "Repository path: " repo_path; then
         echo
         return 1
       fi
@@ -588,7 +588,7 @@ wt_setup_context() {
       if [[ -n "$suggested_base" ]]; then
         prompt="Main repository path [$suggested_base]"
       fi
-      if ! read -rp "$prompt: " repo_path; then
+      if ! read -erp "$prompt: " repo_path; then
         echo
         return 1
       fi
@@ -628,7 +628,7 @@ wt_setup_context() {
     echo
 
     while true; do
-      if ! read -rp "Context name [$suggested_name]: " context_name; then
+      if ! read -erp "Context name [$suggested_name]: " context_name; then
         echo
         return 1
       fi
@@ -655,7 +655,7 @@ wt_setup_context() {
         echo "  2) Choose a different name"
         echo
         local choice
-        if ! read -rp "Select [1-2]: " choice; then
+        if ! read -erp "Select [1-2]: " choice; then
           echo
           return 1
         fi
@@ -753,19 +753,19 @@ wt_setup_context() {
     echo
 
     local input
-    read -rp "Active symlink path [$WT_ACTIVE_WORKTREE]: " input
+    read -erp "Active symlink path [$WT_ACTIVE_WORKTREE]: " input
     WT_ACTIVE_WORKTREE="${input:-$WT_ACTIVE_WORKTREE}"
 
-    read -rp "Main repository path [$WT_MAIN_REPO_ROOT]: " input
+    read -erp "Main repository path [$WT_MAIN_REPO_ROOT]: " input
     WT_MAIN_REPO_ROOT="${input:-$WT_MAIN_REPO_ROOT}"
 
-    read -rp "Worktrees directory [$WT_WORKTREES_BASE]: " input
+    read -erp "Worktrees directory [$WT_WORKTREES_BASE]: " input
     WT_WORKTREES_BASE="${input:-$WT_WORKTREES_BASE}"
 
-    read -rp "Metadata vault directory [$WT_IDEA_FILES_BASE]: " input
+    read -erp "Metadata vault directory [$WT_IDEA_FILES_BASE]: " input
     WT_IDEA_FILES_BASE="${input:-$WT_IDEA_FILES_BASE}"
 
-    read -rp "Default base branch [$WT_BASE_BRANCH]: " input
+    read -erp "Default base branch [$WT_BASE_BRANCH]: " input
     WT_BASE_BRANCH="${input:-$WT_BASE_BRANCH}"
 
     echo
