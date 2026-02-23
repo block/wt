@@ -50,7 +50,7 @@ prompt_with_default() {
   local default="$2"
   local result
 
-  if ! read -rp "$prompt [$default]: " result; then
+  if ! read -erp "$prompt [$default]: " result; then
     # Ctrl-C or EOF
     echo
     exit 1

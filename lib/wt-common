@@ -241,7 +241,7 @@ prompt_confirm() {
   local default="${2:-}"
   local response
 
-  if ! read -rp "$prompt " response; then
+  if ! read -erp "$prompt " response; then
     # Ctrl-C or EOF
     echo
     return 1
