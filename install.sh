@@ -42,7 +42,6 @@ append_if_missing() {
   fi
 }
 
-
 # Copy toolkit to installation directory
 install_toolkit() {
   echo "Installing worktree-toolkit to $INSTALL_DIR ..."
