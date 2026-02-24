@@ -1,0 +1,206 @@
+<idea-plugin>
+    <id>com.block.wt</id>
+    <name>Worktree Manager</name>
+    <vendor email="wt@block.xyz" url="https://github.com/nickcash/wt">Block</vendor>
+
+    <description><![CDATA[
+        Native git worktree management for JetBrains IDEs using atomic symlink switching.
+        <br/><br/>
+        Features:
+        <ul>
+            <li>List, create, switch, and remove git worktrees from the IDE</li>
+            <li>Atomic symlink switching — switch worktrees in &lt;1 second with zero IDE restarts</li>
+            <li>Multi-repo context management — interoperable with the wt CLI</li>
+            <li>IDE metadata vault — export/import .idea, .ijwb, .vscode dirs across worktrees</li>
+            <li>Bazel symlink management — shared build cache across worktrees</li>
+        </ul>
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>Git4Idea</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <!-- Tool Window -->
+        <toolWindow id="Worktrees"
+                    factoryClass="com.block.wt.ui.WorktreeToolWindowFactory"
+                    anchor="bottom"
+                    icon="/icons/worktree.svg"/>
+
+        <!-- Settings -->
+        <applicationConfigurable
+                parentId="tools"
+                instance="com.block.wt.settings.WtSettingsConfigurable"
+                id="com.block.wt.settings"
+                displayName="Worktree Manager"/>
+
+        <applicationService
+                serviceImplementation="com.block.wt.settings.WtPluginSettings"/>
+
+        <!-- Services -->
+        <projectService
+                serviceImplementation="com.block.wt.services.WorktreeService"/>
+        <projectService
+                serviceImplementation="com.block.wt.services.SymlinkSwitchService"/>
+        <projectService
+                serviceImplementation="com.block.wt.services.MetadataService"/>
+        <projectService
+                serviceImplementation="com.block.wt.services.BazelService"/>
+        <projectService
+                serviceImplementation="com.block.wt.services.ExternalChangeWatcher"/>
+
+        <applicationService
+                serviceImplementation="com.block.wt.services.ContextService"/>
+
+        <!-- Status Bar Widget -->
+        <statusBarWidgetFactory
+                id="WtContextWidget"
+                implementation="com.block.wt.ui.ContextStatusBarWidgetFactory"
+                order="after positionWidget"/>
+
+        <!-- Startup Activity -->
+        <postStartupActivity
+                implementation="com.block.wt.services.WtStartupActivity"/>
+
+        <!-- Notification Group -->
+        <notificationGroup id="Worktree Manager"
+                           displayType="BALLOON"/>
+    </extensions>
+
+    <applicationListeners>
+        <listener class="com.block.wt.services.MetadataAutoExporter"
+                  topic="com.intellij.ide.AppLifecycleListener"/>
+    </applicationListeners>
+
+    <actions>
+        <!-- VCS Menu Actions -->
+        <group id="Wt.VcsGroup" text="Worktrees" popup="true">
+            <add-to-group group-id="VcsGroups" anchor="last"/>
+
+            <action id="Wt.SwitchWorktree"
+                    class="com.block.wt.actions.worktree.SwitchWorktreeAction"
+                    text="Switch Worktree..."
+                    description="Switch to another worktree via symlink swap">
+                <keyboard-shortcut first-keystroke="control alt W" keymap="$default"/>
+            </action>
+
+            <action id="Wt.CreateWorktree"
+                    class="com.block.wt.actions.worktree.CreateWorktreeAction"
+                    text="Create Worktree..."
+                    description="Create a new git worktree">
+                <keyboard-shortcut first-keystroke="control alt shift W" keymap="$default"/>
+            </action>
+
+            <action id="Wt.RemoveWorktree"
+                    class="com.block.wt.actions.worktree.RemoveWorktreeAction"
+                    text="Remove Worktree..."
+                    description="Remove a git worktree"/>
+
+            <action id="Wt.RemoveMerged"
+                    class="com.block.wt.actions.worktree.RemoveMergedAction"
+                    text="Remove Merged Worktrees..."
+                    description="Remove all worktrees whose branches have been merged"/>
+
+            <action id="Wt.ProvisionWorktree"
+                    class="com.block.wt.actions.worktree.ProvisionWorktreeAction"
+                    text="Provision Worktree..."
+                    description="Provision an existing worktree for the current wt context"/>
+
+            <separator/>
+
+            <action id="Wt.SwitchContext"
+                    class="com.block.wt.actions.context.SwitchContextAction"
+                    text="Switch Context..."
+                    description="Switch to a different wt context (repository)"/>
+
+            <action id="Wt.AddContext"
+                    class="com.block.wt.actions.context.AddContextAction"
+                    text="Add Context..."
+                    description="Add a new wt context for a repository"/>
+
+            <separator/>
+
+            <action id="Wt.ExportMetadata"
+                    class="com.block.wt.actions.metadata.ExportMetadataAction"
+                    text="Export Metadata to Vault"
+                    description="Export IDE metadata to the vault"/>
+
+            <action id="Wt.ImportMetadata"
+                    class="com.block.wt.actions.metadata.ImportMetadataAction"
+                    text="Import Metadata from Vault"
+                    description="Import IDE metadata from the vault into the current worktree"/>
+
+            <action id="Wt.RefreshBazelTargets"
+                    class="com.block.wt.actions.metadata.RefreshBazelTargetsAction"
+                    text="Refresh Bazel Targets"
+                    description="Refresh Bazel IDE target files"/>
+
+            <separator/>
+
+            <action id="Wt.Welcome"
+                    class="com.block.wt.actions.util.WelcomeAction"
+                    text="Worktree Manager Welcome"
+                    description="Show the Worktree Manager welcome page"/>
+        </group>
+
+        <!-- Tool Window Toolbar Actions -->
+        <group id="Wt.ToolWindowToolbar">
+            <action id="Wt.Toolbar.Create"
+                    class="com.block.wt.actions.worktree.CreateWorktreeAction"
+                    text="Create Worktree"
+                    icon="AllIcons.General.Add"/>
+            <action id="Wt.Toolbar.Switch"
+                    class="com.block.wt.actions.worktree.SwitchWorktreeAction"
+                    text="Switch Worktree"
+                    icon="AllIcons.Actions.SwapPanels"/>
+            <action id="Wt.Toolbar.Remove"
+                    class="com.block.wt.actions.worktree.RemoveWorktreeAction"
+                    text="Remove Worktree"
+                    icon="AllIcons.General.Remove"/>
+            <action id="Wt.Toolbar.OpenTerminal"
+                    class="com.block.wt.actions.util.OpenInTerminalAction"
+                    text="Open in Terminal"
+                    icon="AllIcons.Actions.Execute"/>
+            <separator/>
+            <action id="Wt.Toolbar.SwitchContext"
+                    class="com.block.wt.actions.context.SwitchContextAction"
+                    text="Switch Context"
+                    icon="AllIcons.Actions.GroupByModule"/>
+            <action id="Wt.Toolbar.AddContext"
+                    class="com.block.wt.actions.context.AddContextAction"
+                    text="Add Context"
+                    icon="AllIcons.General.Add"/>
+            <separator/>
+            <action id="Wt.Toolbar.Refresh"
+                    class="com.block.wt.actions.util.RefreshWorktreeListAction"
+                    text="Refresh"
+                    icon="AllIcons.Actions.Refresh"/>
+        </group>
+
+        <!-- Right-click context menu on worktree table rows -->
+        <group id="Wt.WorktreeRowContextMenu" text="Worktree">
+            <reference ref="Wt.Toolbar.Switch"/>
+            <reference ref="Wt.Toolbar.OpenTerminal"/>
+            <separator/>
+            <action id="Wt.Context.RevealInFinder"
+                    class="com.block.wt.actions.util.RevealInFinderAction"
+                    text="Reveal in Finder"
+                    icon="AllIcons.Actions.MenuOpen"/>
+            <action id="Wt.Context.CopyPath"
+                    class="com.block.wt.actions.util.CopyWorktreePathAction"
+                    text="Copy Path"/>
+            <separator/>
+            <action id="Wt.Context.ProvisionWorktree"
+                    class="com.block.wt.actions.worktree.ProvisionWorktreeAction"
+                    text="Provision Worktree..."
+                    icon="AllIcons.Actions.Download"/>
+            <reference ref="Wt.Toolbar.Remove"/>
+            <separator/>
+            <action id="Wt.Context.ExportMetadata"
+                    class="com.block.wt.actions.metadata.ExportMetadataAction"
+                    text="Export Metadata to Vault"/>
+            <action id="Wt.Context.ImportMetadata"
+                    class="com.block.wt.actions.metadata.ImportMetadataAction"
+                    text="Import Metadata from Vault"/>
+        </group>
+    </actions>
+</idea-plugin>
