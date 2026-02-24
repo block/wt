@@ -1,0 +1,4 @@
+build/
+.gradle/
+.intellijPlatform/
+gradle/wrapper/gradle-wrapper.jar
