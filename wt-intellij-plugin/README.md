@@ -21,7 +21,7 @@ To update, rebuild and reinstall. The old version is replaced automatically.
 
 ## Screenshot
 
-![Tool Window](ui.png)
+![Tool Window](src/main/resources/ui.png)
 
 ## Features
 
