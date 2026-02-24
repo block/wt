@@ -105,7 +105,7 @@ wt_read_git_config() {
 
   # Read all wt.* keys into local variables
   local gc_worktrees_base="" gc_idea_files_base=""
-  local gc_active_worktree="" gc_base_branch="" gc_metadata_patterns=""
+  local gc_active_worktree="" gc_base_branch="" gc_metadata_patterns="" gc_context_name=""
   local has_any=false
 
   local key value line lkey
@@ -124,6 +124,7 @@ wt_read_git_config() {
       wt.activeworktree)    gc_active_worktree="$value" ;;
       wt.basebranch)        gc_base_branch="$value" ;;
       wt.metadatapatterns)  gc_metadata_patterns="$value" ;;
+      wt.contextname)       gc_context_name="$value" ;;
     esac
   done < <(git config --local --get-regexp '^wt\.' 2>/dev/null)
 
@@ -155,6 +156,7 @@ wt_read_git_config() {
   # Optional keys: apply if present
   [[ -n "$gc_active_worktree" ]]   && WT_ACTIVE_WORKTREE="$gc_active_worktree"
   [[ -n "$gc_metadata_patterns" ]] && WT_METADATA_PATTERNS="$gc_metadata_patterns"
+  [[ -n "$gc_context_name" ]]      && WT_CONTEXT_NAME="$gc_context_name"
 
   return 0
 }
@@ -370,7 +372,11 @@ wt_show_context_banner() {
   fi
 
   if [[ -n "$current_context" ]]; then
-    printf "${BLUE}[Context: %s]${NC} ${YELLOW}(wt context to switch)${NC}\n" "$current_context" >&2
+    if [[ "$(git config --local --get wt.enabled 2>/dev/null)" == "true" ]]; then
+      printf "${BLUE}[Context: %s 📌]${NC}\n" "$current_context" >&2
+    else
+      printf "${BLUE}[Context: %s]${NC} ${YELLOW}(wt context to switch)${NC}\n" "$current_context" >&2
+    fi
   else
     printf "%s[No context set]%s %s(wt context to switch)%s\n" "$YELLOW" "$NC" "$YELLOW" "$NC" >&2
   fi
