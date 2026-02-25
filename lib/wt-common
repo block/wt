@@ -105,7 +105,7 @@ wt_read_git_config() {
   local gc_active_worktree="" gc_base_branch="" gc_metadata_patterns=""
   local has_any=false
 
-  local key value line
+  local key value line lkey
   while IFS= read -r line; do
     [[ -z "$line" ]] && continue
     key="${line%% *}"
@@ -114,7 +114,6 @@ wt_read_git_config() {
 
     # git config keys are case-insensitive; lowercase for matching
     # (use tr for bash 3.2 compatibility — ${key,,} requires bash 4.0+)
-    local lkey
     lkey="$(printf '%s' "$key" | tr '[:upper:]' '[:lower:]')"
     case "$lkey" in
       wt.worktreesbase)     gc_worktrees_base="$value" ;;
