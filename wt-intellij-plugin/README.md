@@ -12,7 +12,7 @@ Native git worktree management for all JetBrains IDEs, using atomic symlink swit
 ## Installation
 
 ```bash
-JAVA_HOME=/path/to/jdk-21 ./gradlew buildPlugin
+./gradlew buildPlugin
 ```
 
 Then **Settings > Plugins > gear icon > Install Plugin from Disk...** and select `build/distributions/wt-intellij-plugin-0.1.0.zip`.
@@ -113,7 +113,7 @@ A worktree shows the agent indicator if either method detects activity.
 
 ## Development
 
-**JDK 21** required.
+JDK 25 toolchain is auto-provisioned by Gradle (via [foojay](https://github.com/gradle/foojay-toolchains)). Just needs JDK 17+ to run Gradle itself.
 
 ```bash
 ./gradlew buildPlugin       # Build ZIP
@@ -178,4 +178,4 @@ src/test/kotlin/  65 tests across 8 classes + test fakes
 |---|---|
 | IDE versions | 2025.3 (253) through 2026.1 (261.*) |
 | Platforms | macOS, Linux |
-| Build | Gradle 8.13, Kotlin 2.3.0, IntelliJ Platform Gradle Plugin 2.11.0 |
+| Build | Gradle 9.3.1, Kotlin 2.3.0, IntelliJ Platform Gradle Plugin 2.11.0, JDK 25 toolchain → JVM 21 bytecode |
