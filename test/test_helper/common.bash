@@ -212,6 +212,28 @@ create_metadata_dirs() {
     done
 }
 
+# Set wt.* git config keys in a repository
+# Usage: set_wt_git_config <repo_path> <git_key> <value> [<git_key> <value> ...]
+set_wt_git_config() {
+    local repo_path="$1"
+    shift
+    while [[ $# -ge 2 ]]; do
+        git -C "$repo_path" config --local "$1" "$2"
+        shift 2
+    done
+}
+
+# Set all four required wt.* git config keys in a repository
+# Usage: set_wt_git_config_required <repo_path> <main_repo_root> <worktrees_base> <idea_files_base> <base_branch>
+set_wt_git_config_required() {
+    local repo_path="$1"
+    set_wt_git_config "$repo_path" \
+        "wt.mainRepoRoot" "$2" \
+        "wt.worktreesBase" "$3" \
+        "wt.ideaFilesBase" "$4" \
+        "wt.baseBranch" "$5"
+}
+
 # Assert that a symlink points to expected target
 # Usage: assert_symlink_target <symlink_path> <expected_target>
 assert_symlink_target() {
