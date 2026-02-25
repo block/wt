@@ -1,6 +1,7 @@
 package com.block.wt.services
 
 import com.block.wt.model.MetadataPattern
+import com.block.wt.progress.ProgressScope
 import com.block.wt.util.PathHelper
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
@@ -9,12 +10,14 @@ import com.intellij.openapi.project.Project
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.nio.file.FileVisitOption
 import java.nio.file.FileVisitResult
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.SimpleFileVisitor
 import java.nio.file.StandardCopyOption
 import java.nio.file.attribute.BasicFileAttributes
+import java.util.EnumSet
 
 @Service(Service.Level.PROJECT)
 class MetadataService(
@@ -34,6 +37,7 @@ class MetadataService(
     suspend fun importMetadata(
         vault: Path,
         target: Path,
+        scope: ProgressScope? = null,
     ): Result<Int> = withContext(Dispatchers.IO) {
         try {
             if (!Files.isDirectory(vault)) {
@@ -42,30 +46,36 @@ class MetadataService(
                 )
             }
 
+            val entries = Files.list(vault).use { it.toList() }
+            val total = entries.size
             var count = 0
-            Files.list(vault).use { stream ->
-                for (entry in stream) {
-                    val realPath = if (Files.isSymbolicLink(entry)) {
-                        try {
-                            entry.toRealPath()
-                        } catch (_: Exception) {
-                            log.warn("Broken symlink in vault: $entry, cleaning up")
-                            Files.deleteIfExists(entry)
-                            continue
-                        }
-                    } else {
-                        entry
+
+            for ((i, entry) in entries.withIndex()) {
+                scope?.fraction(i.toDouble() / total.coerceAtLeast(1))
+                scope?.text2("${i + 1} / $total directories")
+
+                val realPath = if (Files.isSymbolicLink(entry)) {
+                    try {
+                        entry.toRealPath()
+                    } catch (_: Exception) {
+                        log.warn("Broken symlink in vault: $entry, cleaning up")
+                        Files.deleteIfExists(entry)
+                        continue
                     }
-
-                    if (!Files.isDirectory(realPath)) continue
-
-                    val targetDir = target.resolve(entry.fileName)
-                    copyDirectory(realPath, targetDir)
-                    count++
-                    log.info("Imported metadata: ${entry.fileName}")
+                } else {
+                    entry
                 }
+
+                if (!Files.isDirectory(realPath)) continue
+
+                val targetDir = target.resolve(entry.fileName)
+                copyDirectory(realPath, targetDir)
+                count++
+                log.info("Imported metadata: ${entry.fileName}")
             }
 
+            scope?.text2("")
+            scope?.fraction(1.0)
             Result.success(count)
         } catch (e: Exception) {
             log.error("Failed to import metadata", e)
@@ -87,19 +97,30 @@ class MetadataService(
     internal fun deduplicateNested(paths: List<Path>): List<Path> = deduplicateNestedStatic(paths)
 
     private fun copyDirectory(source: Path, target: Path) {
-        Files.walkFileTree(source, object : SimpleFileVisitor<Path>() {
-            override fun preVisitDirectory(dir: Path, attrs: BasicFileAttributes): FileVisitResult {
-                val targetDir = target.resolve(source.relativize(dir))
-                Files.createDirectories(targetDir)
-                return FileVisitResult.CONTINUE
-            }
+        // FOLLOW_LINKS so vault symlinks are resolved to actual content
+        Files.walkFileTree(source, EnumSet.of(FileVisitOption.FOLLOW_LINKS), Int.MAX_VALUE,
+            object : SimpleFileVisitor<Path>() {
+                override fun preVisitDirectory(dir: Path, attrs: BasicFileAttributes): FileVisitResult {
+                    val targetDir = target.resolve(source.relativize(dir))
+                    Files.createDirectories(targetDir)
+                    return FileVisitResult.CONTINUE
+                }
 
-            override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult {
-                val targetFile = target.resolve(source.relativize(file))
-                Files.copy(file, targetFile, StandardCopyOption.REPLACE_EXISTING)
-                return FileVisitResult.CONTINUE
-            }
-        })
+                override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult {
+                    val targetFile = target.resolve(source.relativize(file))
+                    try {
+                        Files.copy(file, targetFile, StandardCopyOption.REPLACE_EXISTING)
+                    } catch (e: java.nio.file.NoSuchFileException) {
+                        log.warn("Skipping broken symlink during copy: $file")
+                    }
+                    return FileVisitResult.CONTINUE
+                }
+
+                override fun visitFileFailed(file: Path, exc: java.io.IOException): FileVisitResult {
+                    log.warn("Failed to access file during copy, skipping: $file (${exc.message})")
+                    return FileVisitResult.CONTINUE
+                }
+            })
     }
 
     companion object {

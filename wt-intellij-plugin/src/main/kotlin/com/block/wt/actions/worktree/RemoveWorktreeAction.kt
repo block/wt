@@ -2,6 +2,8 @@ package com.block.wt.actions.worktree
 
 import com.block.wt.actions.WtAction
 import com.block.wt.model.WorktreeInfo
+import com.block.wt.progress.RemovalProgress
+import com.block.wt.progress.asScope
 import com.block.wt.services.ContextService
 import com.block.wt.services.SymlinkSwitchService
 import com.block.wt.services.WorktreeService
@@ -89,22 +91,37 @@ class RemoveWorktreeAction : WtAction() {
             if (answer != Messages.YES) return
         }
 
-        runInBackground(project, "Removing Worktree", cancellable = false) {
+        runInBackground(project, "Removing Worktree", cancellable = false) { indicator ->
+            indicator.isIndeterminate = false
+            val scope = indicator.asScope()
+
             if (wt.isLinked && config != null) {
-                it.text = "Switching to main worktree..."
-                SymlinkSwitchService.getInstance(project).doSwitch(config.mainRepoRoot)
+                scope.fraction(0.0)
+                scope.text("Switching to main worktree...")
+                SymlinkSwitchService.getInstance(project).doSwitch(
+                    config.mainRepoRoot, indicator,
+                    scope = scope.sub(0.0, 0.05),
+                )
             }
 
-            it.text = "Removing worktree..."
+            scope.fraction(0.05)
+            scope.text("Removing worktree...")
             val force = wt.isDirty == true
-            worktreeService.removeWorktree(wt.path, force = force).fold(
+            val result = RemovalProgress.removeWithProgress(
+                scope.sub(0.05, 0.90), wt.path, worktreeService, force,
+            )
+
+            result.fold(
                 onSuccess = {
+                    scope.fraction(0.95)
+                    scope.text("Refreshing worktree list...")
                     worktreeService.refreshWorktreeList()
+                    scope.fraction(1.0)
                     Notifications.info(project, "Worktree Removed", "Removed ${wt.displayName}")
                 },
                 onFailure = { ex ->
                     Notifications.error(project, "Remove Failed", ex.message ?: "Unknown error")
-                }
+                },
             )
         }
     }

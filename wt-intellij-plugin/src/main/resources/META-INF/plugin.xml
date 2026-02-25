@@ -51,11 +51,15 @@
         <applicationService
                 serviceImplementation="com.block.wt.services.ContextService"/>
 
-        <!-- Status Bar Widget -->
+        <!-- Status Bar Widgets -->
         <statusBarWidgetFactory
                 id="WtContextWidget"
                 implementation="com.block.wt.ui.ContextStatusBarWidgetFactory"
                 order="after positionWidget"/>
+        <statusBarWidgetFactory
+                id="WtWorktreeWidget"
+                implementation="com.block.wt.ui.WorktreeStatusBarWidgetFactory"
+                order="after WtContextWidget"/>
 
         <!-- Startup Activity -->
         <postStartupActivity

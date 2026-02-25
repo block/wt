@@ -1,6 +1,8 @@
 package com.block.wt.actions.worktree
 
 import com.block.wt.actions.WtAction
+import com.block.wt.progress.RemovalProgress
+import com.block.wt.progress.asScope
 import com.block.wt.services.WorktreeService
 import com.block.wt.ui.Notifications
 import com.intellij.openapi.actionSystem.AnActionEvent
@@ -61,16 +63,28 @@ class RemoveMergedAction : WtAction() {
                     ) {
                         override fun run(indicator: ProgressIndicator) {
                             runBlockingCancellable {
+                                indicator.isIndeterminate = false
+                                val scope = indicator.asScope()
                                 var removed = 0
                                 var failed = 0
 
-                                for (wt in cleanWorktrees) {
-                                    indicator.text = "Removing ${wt.displayName}..."
-                                    val result = worktreeService.removeWorktree(wt.path)
+                                for ((i, wt) in cleanWorktrees.withIndex()) {
+                                    val wtStart = i.toDouble() / cleanWorktrees.size * 0.95
+                                    val wtSize = 0.95 / cleanWorktrees.size
+                                    val wtScope = scope.sub(wtStart, wtSize)
+
+                                    scope.text("Removing ${wt.displayName}...")
+                                    val result = RemovalProgress.removeWithProgress(
+                                        wtScope, wt.path, worktreeService,
+                                    )
                                     if (result.isSuccess) removed++ else failed++
                                 }
 
+                                scope.fraction(0.95)
+                                scope.text("Refreshing worktree list...")
+                                scope.text2("")
                                 worktreeService.refreshWorktreeList()
+                                scope.fraction(1.0)
 
                                 val msg = buildString {
                                     append("Removed $removed worktree(s)")

@@ -1,11 +1,11 @@
 package com.block.wt.provision
 
 import com.block.wt.model.ContextConfig
+import com.block.wt.progress.ProgressScope
 import com.block.wt.services.BazelService
 import com.block.wt.services.MetadataService
 import com.block.wt.ui.Notifications
 import com.intellij.openapi.diagnostic.Logger
-import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.project.Project
 import java.nio.file.Path
 
@@ -21,36 +21,45 @@ object ProvisionHelper {
      * Performs the full provision sequence for a single worktree.
      *
      * @param keepExistingFiles If true, only writes the provision marker without importing metadata.
-     * @param indicator Optional progress indicator for UI feedback.
+     * @param scope Optional progress scope for UI feedback.
      */
     suspend fun provisionWorktree(
         project: Project,
         worktreePath: Path,
         config: ContextConfig,
         keepExistingFiles: Boolean = false,
-        indicator: ProgressIndicator? = null,
+        scope: ProgressScope? = null,
     ) {
         val errors = mutableListOf<String>()
 
-        indicator?.checkCanceled()
-        indicator?.text = "Writing provision marker..."
+        // Step 1: Write marker (0%–5%)
+        scope?.checkCanceled()
+        scope?.text("Writing provision marker...")
+        scope?.fraction(0.0)
         ProvisionMarkerService.writeProvisionMarker(worktreePath, config.name).onFailure {
             log.warn("Failed to write provision marker for $worktreePath", it)
             errors.add("Failed to write provision marker: ${it.message}")
         }
 
         if (!keepExistingFiles) {
-            indicator?.checkCanceled()
-            indicator?.text = "Importing metadata..."
+            // Step 2: Import metadata (5%–85%)
+            scope?.checkCanceled()
+            scope?.fraction(0.05)
+            scope?.text("Importing metadata...")
             runCatching {
-                MetadataService.getInstance(project).importMetadata(config.ideaFilesBase, worktreePath)
+                MetadataService.getInstance(project).importMetadata(
+                    config.ideaFilesBase, worktreePath,
+                    scope = scope?.sub(0.05, 0.80),
+                )
             }.onFailure {
                 log.warn("Metadata import failed for $worktreePath", it)
                 errors.add("Metadata import: ${it.message}")
             }
 
-            indicator?.checkCanceled()
-            indicator?.text = "Installing Bazel symlinks..."
+            // Step 3: Bazel symlinks (85%–100%)
+            scope?.checkCanceled()
+            scope?.fraction(0.85)
+            scope?.text("Installing Bazel symlinks...")
             runCatching {
                 BazelService.getInstance(project).installBazelSymlinks(config.mainRepoRoot, worktreePath)
             }.onFailure {
@@ -58,6 +67,8 @@ object ProvisionHelper {
                 errors.add("Bazel symlinks: ${it.message}")
             }
         }
+
+        scope?.fraction(1.0)
 
         if (errors.isNotEmpty()) {
             Notifications.warning(

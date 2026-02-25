@@ -1,5 +1,6 @@
 package com.block.wt.services
 
+import com.block.wt.util.ProcessHelper
 import com.block.wt.util.ProcessRunner
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -12,6 +13,7 @@ class GitClient(private val processRunner: ProcessRunner) {
         path: Path,
         branch: String,
         createNewBranch: Boolean = false,
+        onProgress: ((Double) -> Unit)? = null,
     ): Result<Unit> = withContext(Dispatchers.IO) {
         val args = mutableListOf("worktree", "add")
         if (createNewBranch) {
@@ -23,7 +25,11 @@ class GitClient(private val processRunner: ProcessRunner) {
             args.add(branch)
         }
 
-        val result = processRunner.runGit(args, workingDir = repoRoot)
+        val result = if (onProgress != null && processRunner is ProcessHelper) {
+            processRunner.runGitWithProgress(args, workingDir = repoRoot, onProgress = onProgress)
+        } else {
+            processRunner.runGit(args, workingDir = repoRoot)
+        }
         if (result.isSuccess) {
             Result.success(Unit)
         } else {
@@ -104,11 +110,16 @@ class GitClient(private val processRunner: ProcessRunner) {
         else Result.failure(RuntimeException(result.stderr))
     }
 
-    suspend fun pullFfOnly(worktreePath: Path): Result<Unit> = withContext(Dispatchers.IO) {
-        val result = processRunner.runGit(
-            listOf("pull", "--ff-only"),
-            workingDir = worktreePath,
-        )
+    suspend fun pullFfOnly(
+        worktreePath: Path,
+        onProgress: ((Double) -> Unit)? = null,
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        val args = listOf("pull", "--ff-only", "--progress")
+        val result = if (onProgress != null && processRunner is ProcessHelper) {
+            processRunner.runGitWithProgress(args, workingDir = worktreePath, onProgress = onProgress)
+        } else {
+            processRunner.runGit(args, workingDir = worktreePath)
+        }
         if (result.isSuccess) Result.success(Unit)
         else Result.failure(RuntimeException(result.stderr))
     }

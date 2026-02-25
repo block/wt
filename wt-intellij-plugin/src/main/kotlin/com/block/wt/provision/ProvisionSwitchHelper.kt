@@ -1,6 +1,7 @@
 package com.block.wt.provision
 
 import com.block.wt.model.WorktreeInfo
+import com.block.wt.progress.asScope
 import com.block.wt.services.ContextService
 import com.block.wt.services.SymlinkSwitchService
 import com.block.wt.settings.WtPluginSettings
@@ -114,11 +115,21 @@ object ProvisionSwitchHelper {
             project, "Provisioning & Switching Worktree", true
         ) {
             override fun run(indicator: ProgressIndicator) {
-                runBlockingCancellable {
-                    ProvisionHelper.provisionWorktree(project, wt.path, config, indicator = indicator)
+                indicator.isIndeterminate = false
+                val scope = indicator.asScope()
 
-                    indicator.text = "Switching worktree..."
-                    SymlinkSwitchService.getInstance(project).doSwitch(wt.path, indicator)
+                runBlockingCancellable {
+                    ProvisionHelper.provisionWorktree(
+                        project, wt.path, config,
+                        scope = scope.sub(0.0, 0.40),
+                    )
+
+                    scope.fraction(0.40)
+                    SymlinkSwitchService.getInstance(project).doSwitch(
+                        wt.path, indicator,
+                        scope = scope.sub(0.40, 0.60),
+                    )
+                    scope.fraction(1.0)
                 }
             }
         })

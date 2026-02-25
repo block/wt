@@ -11,14 +11,13 @@ class WorktreeTableModel : AbstractTableModel() {
     var worktreesBase: Path? = null
 
     companion object {
-        const val COL_LINKED = 0
-        const val COL_PATH = 1
-        const val COL_BRANCH = 2
-        const val COL_STATUS = 3
-        const val COL_AGENT = 4
-        const val COL_PROVISIONED = 5
+        const val COL_PATH = 0
+        const val COL_BRANCH = 1
+        const val COL_STATUS = 2
+        const val COL_AGENT = 3
+        const val COL_PROVISIONED = 4
 
-        val COLUMN_NAMES = arrayOf("", "Path", "Branch", "Status", "Agent", "Provisioned")
+        val COLUMN_NAMES = arrayOf("Path", "Branch", "Status", "Agent", "Provisioned")
     }
 
     fun setWorktrees(newWorktrees: List<WorktreeInfo>) {
@@ -41,7 +40,6 @@ class WorktreeTableModel : AbstractTableModel() {
     override fun getValueAt(rowIndex: Int, columnIndex: Int): Any? {
         val wt = worktrees.getOrNull(rowIndex) ?: return null
         return when (columnIndex) {
-            COL_LINKED -> if (wt.isLinked) "*" else ""
             COL_PATH -> wt.relativePath(worktreesBase)
             COL_BRANCH -> buildString {
                 append(wt.displayName)

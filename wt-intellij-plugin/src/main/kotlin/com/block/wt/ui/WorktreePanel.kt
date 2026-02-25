@@ -32,12 +32,15 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import java.awt.BorderLayout
 import java.awt.CardLayout
+import java.awt.Color
+import java.awt.Component
 import java.awt.Cursor
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import javax.swing.JLabel
 import javax.swing.JPanel
 import javax.swing.SwingConstants
+import javax.swing.table.TableCellRenderer
 
 class WorktreePanel(private val project: Project) : JPanel(BorderLayout()), DataProvider, Disposable {
 
@@ -68,6 +71,15 @@ class WorktreePanel(private val project: Project) : JPanel(BorderLayout()), Data
 
             return super.getToolTipText(event)
         }
+
+        override fun prepareRenderer(renderer: TableCellRenderer, row: Int, column: Int): Component {
+            val comp = super.prepareRenderer(renderer, row, column)
+            val wt = tableModel.getWorktreeAt(row)
+            if (wt != null && wt.isLinked && !isRowSelected(row)) {
+                comp.background = linkedRowBackground()
+            }
+            return comp
+        }
     }
     private val contextLabel = JLabel("", SwingConstants.LEFT)
     private val cs = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -96,9 +108,6 @@ class WorktreePanel(private val project: Project) : JPanel(BorderLayout()), Data
     }
 
     private fun setupTable() {
-        table.columnModel.getColumn(WorktreeTableModel.COL_LINKED).apply {
-            minWidth = 16; preferredWidth = 20; maxWidth = 30
-        }
         table.columnModel.getColumn(WorktreeTableModel.COL_PATH).apply {
             minWidth = 40; preferredWidth = 200
         }
@@ -321,6 +330,16 @@ class WorktreePanel(private val project: Project) : JPanel(BorderLayout()), Data
             } else if (currentContextName != null && marker.current != currentContextName) {
                 append(" | Not provisioned by this context")
             }
+        }
+    }
+
+    private fun linkedRowBackground(): Color {
+        val bg = table.background
+        val isDark = (bg.red * 0.299 + bg.green * 0.587 + bg.blue * 0.114) < 128
+        return if (isDark) {
+            Color(bg.red, (bg.green + 30).coerceAtMost(255), bg.blue, bg.alpha)
+        } else {
+            Color((bg.red * 0.92).toInt(), (bg.green * 0.98).toInt(), (bg.blue * 0.92).toInt(), bg.alpha)
         }
     }
 

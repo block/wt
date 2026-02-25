@@ -5,6 +5,7 @@ import com.block.wt.services.ContextService
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.ui.ValidationInfo
+import com.intellij.ui.components.JBTextField
 import com.intellij.ui.dsl.builder.bindSelected
 import com.intellij.ui.dsl.builder.bindText
 import com.intellij.ui.dsl.builder.panel
@@ -15,6 +16,9 @@ class CreateWorktreeDialog(private val project: Project) : DialogWrapper(project
     var branchName: String = ""
     var createNewBranch: Boolean = false
     var worktreePath: String = ""
+
+    private lateinit var branchField: JBTextField
+    private lateinit var pathField: JBTextField
 
     init {
         title = "Create Worktree"
@@ -28,15 +32,8 @@ class CreateWorktreeDialog(private val project: Project) : DialogWrapper(project
                 textField()
                     .bindText(::branchName)
                     .focused()
-                    .validationOnApply {
-                        when {
-                            it.text.isBlank() -> ValidationInfo("Branch name is required")
-                            it.text.contains("..") -> ValidationInfo("Branch name cannot contain '..'")
-                            it.text.startsWith("-") -> ValidationInfo("Branch name cannot start with '-'")
-                            else -> null
-                        }
-                    }
                     .onChanged { updatePath() }
+                    .also { branchField = it.component }
             }
             row("") {
                 checkBox("Create new branch (-b)")
@@ -46,20 +43,24 @@ class CreateWorktreeDialog(private val project: Project) : DialogWrapper(project
                 textField()
                     .bindText(::worktreePath)
                     .comment("Auto-derived from branch name. Override if needed.")
+                    .also { pathField = it.component }
             }
         }
     }
 
     private fun updatePath() {
         val config = ContextService.getInstance().getCurrentConfig() ?: return
-        if (branchName.isNotBlank()) {
-            worktreePath = GitBranchHelper.worktreePathForBranch(config.worktreesBase, branchName).toString()
+        if (branchField.text.isNotBlank()) {
+            pathField.text = GitBranchHelper.worktreePathForBranch(config.worktreesBase, branchField.text).toString()
         }
     }
 
     override fun doValidate(): ValidationInfo? {
-        if (branchName.isBlank()) return ValidationInfo("Branch name is required")
-        if (worktreePath.isBlank()) return ValidationInfo("Worktree path is required")
+        val branch = branchField.text
+        if (branch.isBlank()) return ValidationInfo("Branch name is required", branchField)
+        if (branch.contains("..")) return ValidationInfo("Branch name cannot contain '..'", branchField)
+        if (branch.startsWith("-")) return ValidationInfo("Branch name cannot start with '-'", branchField)
+        if (pathField.text.isBlank()) return ValidationInfo("Worktree path is required", pathField)
         return null
     }
 }

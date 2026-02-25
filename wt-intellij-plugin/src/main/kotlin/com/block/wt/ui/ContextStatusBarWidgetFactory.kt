@@ -59,7 +59,7 @@ private class ContextStatusBarWidget(
 
     override fun getSelectedValue(): String? {
         val name = ContextService.getInstance().currentContextName.value
-        return if (name != null) "wt: $name" else "wt: (none)"
+        return "worktree context: ${name ?: "(none)"}"
     }
 
     override fun getTooltipText(): String = "Current wt context. Click to switch."

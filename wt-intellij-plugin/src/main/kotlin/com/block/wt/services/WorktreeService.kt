@@ -194,10 +194,11 @@ class WorktreeService(
         path: Path,
         branch: String,
         createNewBranch: Boolean = false,
+        onProgress: ((Double) -> Unit)? = null,
     ): Result<Unit> {
         val repoRoot = getMainRepoRoot()
             ?: return Result.failure(IllegalStateException("No git repository found"))
-        return gitClient.createWorktree(repoRoot, path, branch, createNewBranch)
+        return gitClient.createWorktree(repoRoot, path, branch, createNewBranch, onProgress)
     }
 
     suspend fun removeWorktree(path: Path, force: Boolean = false): Result<Unit> {
@@ -225,8 +226,8 @@ class WorktreeService(
     suspend fun checkout(worktreePath: Path, branchOrRev: String): Result<Unit> =
         gitClient.checkout(worktreePath, branchOrRev)
 
-    suspend fun pullFfOnly(worktreePath: Path): Result<Unit> =
-        gitClient.pullFfOnly(worktreePath)
+    suspend fun pullFfOnly(worktreePath: Path, onProgress: ((Double) -> Unit)? = null): Result<Unit> =
+        gitClient.pullFfOnly(worktreePath, onProgress)
 
     suspend fun getCurrentBranch(worktreePath: Path): String? =
         gitClient.getCurrentBranch(worktreePath)

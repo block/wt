@@ -1,6 +1,7 @@
 package com.block.wt.actions.worktree
 
 import com.block.wt.actions.WtTableAction
+import com.block.wt.progress.asScope
 import com.block.wt.provision.ProvisionHelper
 import com.block.wt.services.ContextService
 import com.block.wt.services.WorktreeService
@@ -46,8 +47,9 @@ class ProvisionWorktreeAction : WtTableAction() {
             project, "Provisioning Worktree", true
         ) {
             override fun run(indicator: com.intellij.openapi.progress.ProgressIndicator) {
+                indicator.isIndeterminate = false
                 runBlockingCancellable {
-                    ProvisionHelper.provisionWorktree(project, wt.path, config, indicator = indicator)
+                    ProvisionHelper.provisionWorktree(project, wt.path, config, scope = indicator.asScope())
                     WorktreeService.getInstance(project).refreshWorktreeList()
                     Notifications.info(project, "Worktree Provisioned", "Provisioned ${wt.displayName} for context '$currentContextName'")
                 }

@@ -1,5 +1,7 @@
 package com.block.wt.services
 
+import com.block.wt.progress.ProgressScope
+import com.block.wt.progress.asScope
 import com.block.wt.ui.Notifications
 import com.block.wt.util.PathHelper
 import com.intellij.openapi.application.ApplicationManager
@@ -33,24 +35,31 @@ class SymlinkSwitchService(
             project, "Switching Worktree", false
         ) {
             override fun run(indicator: ProgressIndicator) {
-                runBlockingCancellable { doSwitch(newTarget, indicator) }
+                indicator.isIndeterminate = false
+                val scope = indicator.asScope()
+                runBlockingCancellable { doSwitch(newTarget, indicator, scope) }
             }
         })
     }
 
-    suspend fun doSwitch(newTarget: Path, indicator: ProgressIndicator? = null) {
+    suspend fun doSwitch(
+        newTarget: Path,
+        indicator: ProgressIndicator? = null,
+        scope: ProgressScope? = null,
+    ) {
         val contextService = ContextService.getInstance()
         val config = contextService.getCurrentConfig()
             ?: throw IllegalStateException("No active wt context configured")
 
         val symlinkPath = config.activeWorktree
-        val projectRoot = project.basePath?.let { VfsUtil.findFileByIoFile(java.io.File(it), false) }
-            ?: throw IllegalStateException("Cannot determine project root")
+        val projectRoot = project.basePath?.let { VfsUtil.findFileByIoFile(java.io.File(it), true) }
 
         val app = ApplicationManager.getApplication()
 
         try {
-            // Phase 1: Pre-swap — save all documents inside a write-safe context
+            // Phase 1: Save documents (0%–10%)
+            scope?.fraction(0.0)
+            scope?.text("Saving documents...")
             indicator?.text = "Saving documents..."
             app.invokeAndWait({
                 WriteAction.run<Nothing> {
@@ -58,13 +67,17 @@ class SymlinkSwitchService(
                 }
             }, ModalityState.defaultModalityState())
 
-            // Phase 2: Atomic symlink swap
+            // Phase 2: Atomic symlink swap (10%–20%)
+            scope?.fraction(0.10)
+            scope?.text("Swapping symlink...")
             indicator?.text = "Swapping symlink..."
             withContext(Dispatchers.IO) {
                 PathHelper.atomicSetSymlink(symlinkPath, newTarget)
             }
 
-            // Phase 3: Suppress file cache conflict dialogs — reload open docs
+            // Phase 3: Reload editors (20%–40%)
+            scope?.fraction(0.20)
+            scope?.text("Reloading editors...")
             indicator?.text = "Reloading editors..."
             app.invokeAndWait({
                 WriteAction.run<Nothing> {
@@ -76,12 +89,18 @@ class SymlinkSwitchService(
                 }
             }, ModalityState.defaultModalityState())
 
-            // Phase 4: Full VFS refresh
+            // Phase 4: VFS refresh (40%–65%)
+            scope?.fraction(0.40)
+            scope?.text("Refreshing file system...")
             indicator?.text = "Refreshing file system..."
-            VfsUtil.markDirtyAndRefresh(false, true, true, projectRoot)
+            if (projectRoot != null) {
+                VfsUtil.markDirtyAndRefresh(false, true, true, projectRoot)
+            }
             VirtualFileManager.getInstance().asyncRefresh {}
 
-            // Phase 5: Git state refresh — repo.update() asserts background thread
+            // Phase 5: Git state (65%–85%)
+            scope?.fraction(0.65)
+            scope?.text("Updating git state...")
             indicator?.text = "Updating git state..."
             withContext(Dispatchers.IO) {
                 val repos = GitRepositoryManager.getInstance(project).repositories
@@ -91,8 +110,12 @@ class SymlinkSwitchService(
             }
             VcsDirtyScopeManager.getInstance(project).markEverythingDirty()
 
-            // Update tool window
+            // Phase 6: Refresh list (85%–100%)
+            scope?.fraction(0.85)
+            scope?.text("Refreshing worktree list...")
+            indicator?.text = "Refreshing worktree list..."
             WorktreeService.getInstance(project).refreshWorktreeList()
+            scope?.fraction(1.0)
 
             Notifications.info(
                 project,

@@ -1,6 +1,7 @@
 package com.block.wt.actions.worktree
 
 import com.block.wt.actions.WtAction
+import com.block.wt.progress.asScope
 import com.block.wt.provision.ProvisionHelper
 import com.block.wt.git.GitBranchHelper
 import com.block.wt.services.ContextService
@@ -35,15 +36,32 @@ class CreateWorktreeAction : WtAction() {
                     config.baseBranch, branchName, worktreePath, config,
                 )
             } else {
-                indicator.text = "Creating worktree..."
-                val result = worktreeService.createWorktree(worktreePath, branchName, createNewBranch)
+                indicator.isIndeterminate = false
+                val scope = indicator.asScope()
+
+                // Step 1: Create worktree (0%–85%) — no progress signal
+                scope.fraction(0.0)
+                scope.text("Creating worktree...")
+                val result = worktreeService.createWorktree(
+                    worktreePath, branchName, createNewBranch,
+                )
 
                 result.fold(
                     onSuccess = {
+                        // Step 2: Provision (85%–95%)
+                        scope.fraction(0.85)
                         if (config != null) {
-                            ProvisionHelper.provisionWorktree(project, worktreePath, config, indicator = indicator)
+                            ProvisionHelper.provisionWorktree(
+                                project, worktreePath, config,
+                                scope = scope.sub(0.85, 0.10),
+                            )
                         }
+                        // Step 3: Refresh (95%–100%)
+                        scope.fraction(0.95)
+                        scope.text("Refreshing worktree list...")
+                        scope.text2("")
                         worktreeService.refreshWorktreeList()
+                        scope.fraction(1.0)
                         Notifications.info(project, "Worktree Created", "Created worktree at $worktreePath")
                     },
                     onFailure = {

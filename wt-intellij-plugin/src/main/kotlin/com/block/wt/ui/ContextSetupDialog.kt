@@ -1,5 +1,6 @@
 package com.block.wt.ui
 
+import com.block.wt.progress.asScope
 import com.block.wt.provision.ProvisionHelper
 import com.block.wt.provision.ProvisionMarkerService
 import com.block.wt.model.ContextConfig
@@ -173,21 +174,27 @@ class ContextSetupDialog(
                 project, "Provisioning Worktrees", true
             ) {
                 override fun run(indicator: ProgressIndicator) {
+                    indicator.isIndeterminate = false
+                    val scope = indicator.asScope()
+
                     runBlockingCancellable {
                         for ((i, entry) in entries.withIndex()) {
                             indicator.checkCanceled()
-                            indicator.fraction = i.toDouble() / entries.size
-                            indicator.text = "Provisioning ${entry.wt.displayName}..."
+                            val wtStart = i.toDouble() / entries.size
+                            val wtSize = 1.0 / entries.size
+                            scope.text("Provisioning ${entry.wt.displayName}...")
 
                             ProvisionHelper.provisionWorktree(
                                 project,
                                 entry.wt.path,
                                 config,
                                 keepExistingFiles = entry.hasMetadata,
-                                indicator = indicator,
+                                scope = scope.sub(wtStart, wtSize),
                             )
                         }
 
+                        scope.fraction(1.0)
+                        scope.text("Refreshing worktree list...")
                         WorktreeService.getInstance(project).refreshWorktreeList()
                         Notifications.info(
                             project,
