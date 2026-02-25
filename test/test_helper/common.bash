@@ -223,15 +223,15 @@ set_wt_git_config() {
     done
 }
 
-# Set all four required wt.* git config keys in a repository
-# Usage: set_wt_git_config_required <repo_path> <main_repo_root> <worktrees_base> <idea_files_base> <base_branch>
+# Set all three required wt.* git config keys in a repository
+# (mainRepoRoot is auto-derived from git-common-dir and not required)
+# Usage: set_wt_git_config_required <repo_path> <worktrees_base> <idea_files_base> <base_branch>
 set_wt_git_config_required() {
     local repo_path="$1"
     set_wt_git_config "$repo_path" \
-        "wt.mainRepoRoot" "$2" \
-        "wt.worktreesBase" "$3" \
-        "wt.ideaFilesBase" "$4" \
-        "wt.baseBranch" "$5"
+        "wt.worktreesBase" "$2" \
+        "wt.ideaFilesBase" "$3" \
+        "wt.baseBranch" "$4"
 }
 
 # Assert that a symlink points to expected target

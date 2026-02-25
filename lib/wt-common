@@ -87,10 +87,12 @@ wt_read_config() {
 # If CWD is inside a worktree, reads from the main repo's .git/config
 # (git config --local in a worktree reads from the main repo automatically).
 #
-# Requires all four core keys (mainRepoRoot, worktreesBase, ideaFilesBase,
-# baseBranch) to be set. If partially configured, prints a warning to stderr
-# and applies nothing. Optional keys (activeWorktree, metadataPatterns) are
-# applied only when all required keys are present.
+# Requires three core keys (worktreesBase, ideaFilesBase, baseBranch) to be
+# set. mainRepoRoot is auto-derived from git-common-dir (the main repo's
+# .git parent) but can be overridden via wt.mainRepoRoot. If partially
+# configured, prints a warning to stderr and applies nothing. Optional keys
+# (activeWorktree, metadataPatterns) are applied only when all required keys
+# are present.
 #
 # Sets variables unconditionally — git local config has highest priority.
 wt_read_git_config() {
@@ -127,9 +129,8 @@ wt_read_git_config() {
   # Nothing found — not a wt-configured repo, silently return
   [[ "$has_any" == "false" ]] && return 0
 
-  # Validate: all four required keys must be present
+  # Validate: all three required keys must be present
   local -a missing=()
-  [[ -z "$gc_main_repo_root" ]]  && missing+=("wt.mainRepoRoot")
   [[ -z "$gc_worktrees_base" ]]  && missing+=("wt.worktreesBase")
   [[ -z "$gc_idea_files_base" ]] && missing+=("wt.ideaFilesBase")
   [[ -z "$gc_base_branch" ]]     && missing+=("wt.baseBranch")
@@ -139,6 +140,13 @@ wt_read_git_config() {
       "$repo_root" "${missing[*]}" >&2
     printf "wt: git local config ignored; falling back to context config\n" >&2
     return 0
+  fi
+
+  # Auto-derive main repo root from git-common-dir (the main repo's .git
+  # parent) unless explicitly overridden via wt.mainRepoRoot.
+  # git-common-dir always points to the main repo's .git, even from worktrees.
+  if [[ -z "$gc_main_repo_root" ]]; then
+    gc_main_repo_root="$(cd "$(git rev-parse --git-common-dir)/.." && pwd -P)"
   fi
 
   # All required keys present — apply unconditionally (highest priority)
