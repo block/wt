@@ -23,7 +23,7 @@ _wt_ensure_sourced() {
     if [[ "${ZSH_EVAL_CONTEXT:-}" != *:file:* && "${ZSH_EVAL_CONTEXT:-}" != *:file ]]; then
       echo "Error: This file must be sourced, not executed." >&2
       echo "" >&2
-      echo "Add this to your ~/.zshrc:" >&2
+      echo "Add this to your ${ZDOTDIR:-~}/.zshrc:" >&2
       echo "  source $_WT_ROOT/wt.sh" >&2
       echo "" >&2
       echo "Then use: wt <command> [args]" >&2
@@ -33,7 +33,7 @@ _wt_ensure_sourced() {
     # Bash: BASH_SOURCE[0] equals $0 when executed directly
     echo "Error: This file must be sourced, not executed." >&2
     echo "" >&2
-    echo "Add this to your ~/.bashrc:" >&2
+    echo "Add this to your ~/.bashrc (or ~/.bash_profile):" >&2
     echo "  source $_WT_ROOT/wt.sh" >&2
     echo "" >&2
     echo "Then use: wt <command> [args]" >&2

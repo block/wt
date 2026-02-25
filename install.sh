@@ -5,7 +5,7 @@
 #
 # This script:
 #   1. Copies the toolkit to ~/.wt/
-#   2. Adds source line to ~/.zshrc or ~/.bashrc
+#   2. Adds source line to shell rc file (respects ZDOTDIR, falls back to .bash_profile)
 #   3. Runs the context setup flow to configure the first repository
 #   4. Optionally sets up nightly cron job to refresh Bazel IDE metadata
 #
@@ -67,15 +67,33 @@ install_toolkit() {
 # Configure shell rc files to source wt.sh
 configure_shell_rc() {
   local source_line='[[ -f ~/.wt/wt.sh ]] && source ~/.wt/wt.sh'
+  local configured=false
 
   echo "Configuring shell..."
 
-  if [[ -f "$HOME/.zshrc" ]]; then
-    append_if_missing "$HOME/.zshrc" "$source_line"
+  # Zsh: respect ZDOTDIR (defaults to $HOME when unset)
+  local zshrc="${ZDOTDIR:-$HOME}/.zshrc"
+  if [[ -f "$zshrc" ]]; then
+    append_if_missing "$zshrc" "$source_line"
+    configured=true
   fi
 
-  if [[ -f "$HOME/.bashrc" ]]; then
-    append_if_missing "$HOME/.bashrc" "$source_line"
+  # Bash: prefer .bashrc, fall back to .bash_profile (macOS login shells)
+  local bashrc=""
+  for candidate in "$HOME/.bashrc" "$HOME/.bash_profile"; do
+    if [[ -f "$candidate" ]]; then
+      bashrc="$candidate"
+      break
+    fi
+  done
+  if [[ -n "$bashrc" ]]; then
+    append_if_missing "$bashrc" "$source_line"
+    configured=true
+  fi
+
+  if [[ "$configured" == false ]]; then
+    warn "No shell rc file found. Add this line manually to your shell config:"
+    warn "  $source_line"
   fi
 }
 
@@ -158,7 +176,8 @@ main() {
     if prompt_confirm "Remove old installation? [Y/n]" "y"; then
       rm -rf "$HOME/.config/wt"
       # Update shell rc files to use new path
-      for rc_file in "$HOME/.zshrc" "$HOME/.bashrc"; do
+      local rc_files=("${ZDOTDIR:-$HOME}/.zshrc" "$HOME/.bashrc" "$HOME/.bash_profile")
+      for rc_file in "${rc_files[@]}"; do
         if [[ -f "$rc_file" ]] && grep -q '\.config/wt' "$rc_file"; then
           sed -i.bak 's|\.config/wt|.wt|g' "$rc_file"
           rm -f "$rc_file.bak"
@@ -201,14 +220,30 @@ main() {
     echo
   fi
 
-  cat <<'EOF'
+  # Determine the best rc file to show in the reload instruction
+  local reload_file=""
+  local zshrc="${ZDOTDIR:-$HOME}/.zshrc"
+  if [[ -f "$zshrc" ]]; then
+    reload_file="$zshrc"
+  else
+    for candidate in "$HOME/.bashrc" "$HOME/.bash_profile"; do
+      if [[ -f "$candidate" ]]; then
+        reload_file="$candidate"
+        break
+      fi
+    done
+  fi
+  # Replace $HOME with ~ for display
+  local reload_display="${reload_file/#$HOME/\~}"
+
+  cat <<EOF
 ════════════════════════════════════════════════════════════════════════════════
   Installation Complete!
 ════════════════════════════════════════════════════════════════════════════════
 
 Reload your shell to activate:
 
-    source ~/.zshrc    # or ~/.bashrc
+    source $reload_display
 
 Then run:
 
