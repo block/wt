@@ -265,7 +265,7 @@ teardown() {
     local repo
     repo=$(create_mock_repo)
 
-    set_wt_git_config_required "$repo" "/main" "/worktrees" "/idea" "develop"
+    set_wt_git_config_required "$repo" "/worktrees" "/idea" "develop"
 
     # Clear variables that were set when wt-common was sourced in setup()
     unset WT_MAIN_REPO_ROOT WT_WORKTREES_BASE WT_IDEA_FILES_BASE WT_BASE_BRANCH
@@ -273,7 +273,8 @@ teardown() {
     cd "$repo"
     wt_read_git_config
 
-    assert_equal "$WT_MAIN_REPO_ROOT" "/main"
+    # mainRepoRoot is auto-derived from git-common-dir
+    assert_equal "$WT_MAIN_REPO_ROOT" "$repo"
     assert_equal "$WT_WORKTREES_BASE" "/worktrees"
     assert_equal "$WT_IDEA_FILES_BASE" "/idea"
     assert_equal "$WT_BASE_BRANCH" "develop"
@@ -312,7 +313,7 @@ teardown() {
     local repo
     repo=$(create_mock_repo)
 
-    set_wt_git_config_required "$repo" "/main" "/worktrees" "/idea" "from-git"
+    set_wt_git_config_required "$repo" "/worktrees" "/idea" "from-git"
 
     export WT_BASE_BRANCH="from-env"
     export WT_MAIN_REPO_ROOT="/env-main"
@@ -323,7 +324,8 @@ teardown() {
     wt_read_git_config
 
     assert_equal "$WT_BASE_BRANCH" "from-git"
-    assert_equal "$WT_MAIN_REPO_ROOT" "/main"
+    # mainRepoRoot auto-derived, supersedes env
+    assert_equal "$WT_MAIN_REPO_ROOT" "$repo"
 }
 
 # --- Validation ---
@@ -332,7 +334,7 @@ teardown() {
     local repo
     repo=$(create_mock_repo)
 
-    # Set only one required key
+    # Set only one of three required keys
     set_wt_git_config "$repo" "wt.baseBranch" "develop"
 
     unset WT_MAIN_REPO_ROOT WT_WORKTREES_BASE WT_IDEA_FILES_BASE WT_BASE_BRANCH
@@ -347,17 +349,15 @@ teardown() {
 
     assert_success
     [[ "$stderr" == *"incomplete git local config"* ]] || fail "Expected partial config warning, got: $stderr"
-    [[ "$stderr" == *"wt.mainRepoRoot"* ]] || fail "Expected missing key name in warning, got: $stderr"
+    [[ "$stderr" == *"wt.worktreesBase"* ]] || fail "Expected missing key name in warning, got: $stderr"
 }
 
 @test "wt_read_git_config warns listing specific missing keys" {
     local repo
     repo=$(create_mock_repo)
 
-    # Set 2 of 4 required keys
-    set_wt_git_config "$repo" \
-        "wt.mainRepoRoot" "/main" \
-        "wt.baseBranch" "develop"
+    # Set 1 of 3 required keys (baseBranch present, worktreesBase + ideaFilesBase missing)
+    set_wt_git_config "$repo" "wt.baseBranch" "develop"
 
     cd "$repo"
     run --separate-stderr bash -c '
@@ -369,17 +369,16 @@ teardown() {
     [[ "$stderr" == *"wt.worktreesBase"* ]] || fail "Expected wt.worktreesBase in missing list, got: $stderr"
     [[ "$stderr" == *"wt.ideaFilesBase"* ]] || fail "Expected wt.ideaFilesBase in missing list, got: $stderr"
     # These should NOT be listed as missing
-    [[ "$stderr" != *"wt.mainRepoRoot"* ]] || fail "wt.mainRepoRoot should not be listed as missing"
+    [[ "$stderr" != *"wt.mainRepoRoot"* ]] || fail "wt.mainRepoRoot should not be listed as missing (it is auto-derived)"
     [[ "$stderr" != *"wt.baseBranch"* ]] || fail "wt.baseBranch should not be listed as missing"
 }
 
-@test "wt_read_git_config requires all four core keys" {
+@test "wt_read_git_config requires all three core keys" {
     local repo
     repo=$(create_mock_repo)
 
-    # Set 3 of 4 required keys (missing ideaFilesBase)
+    # Set 2 of 3 required keys (missing ideaFilesBase)
     set_wt_git_config "$repo" \
-        "wt.mainRepoRoot" "/main" \
         "wt.worktreesBase" "/worktrees" \
         "wt.baseBranch" "develop"
 
@@ -403,7 +402,7 @@ teardown() {
     local repo
     repo=$(create_mock_repo)
 
-    set_wt_git_config_required "$repo" "/main" "/worktrees" "/idea" "develop"
+    set_wt_git_config_required "$repo" "/worktrees" "/idea" "develop"
     set_wt_git_config "$repo" \
         "wt.activeWorktree" "/active/wt" \
         "wt.metadataPatterns" ".idea .ijwb .vscode"
@@ -422,7 +421,7 @@ teardown() {
     local repo
     repo=$(create_mock_repo)
 
-    set_wt_git_config_required "$repo" "/main" "/worktrees" "/idea" "develop"
+    set_wt_git_config_required "$repo" "/worktrees" "/idea" "develop"
     set_wt_git_config "$repo" "wt.metadataPatterns" ".idea .ijwb .vscode"
 
     unset WT_METADATA_PATTERNS
@@ -442,7 +441,6 @@ teardown() {
     # git config normalizes section names to lowercase but preserves
     # subsection case. For our flat wt.* keys, git stores them lowercase.
     # We test by writing directly to .git/config with mixed case section.
-    git -C "$repo" config --local "wt.MAINREPOROOT" "/main"
     git -C "$repo" config --local "wt.WorktreesBase" "/worktrees"
     git -C "$repo" config --local "wt.ideafilesbase" "/idea"
     git -C "$repo" config --local "wt.BaseBranch" "develop"
@@ -452,7 +450,6 @@ teardown() {
     cd "$repo"
     wt_read_git_config
 
-    assert_equal "$WT_MAIN_REPO_ROOT" "/main"
     assert_equal "$WT_WORKTREES_BASE" "/worktrees"
     assert_equal "$WT_IDEA_FILES_BASE" "/idea"
     assert_equal "$WT_BASE_BRANCH" "develop"
@@ -464,7 +461,7 @@ teardown() {
     local repo
     repo=$(create_mock_repo)
 
-    set_wt_git_config_required "$repo" "/main" "/worktrees" "/idea" "develop"
+    set_wt_git_config_required "$repo" "/worktrees" "/idea" "develop"
 
     # Create a worktree
     create_branch "$repo" "feature-wt"
@@ -476,7 +473,9 @@ teardown() {
     cd "$wt_path"
     wt_read_git_config
 
-    assert_equal "$WT_MAIN_REPO_ROOT" "/main"
+    # mainRepoRoot auto-derived via git-common-dir resolves to the main repo,
+    # even when CWD is inside a worktree
+    assert_equal "$WT_MAIN_REPO_ROOT" "$repo"
     assert_equal "$WT_WORKTREES_BASE" "/worktrees"
     assert_equal "$WT_IDEA_FILES_BASE" "/idea"
     assert_equal "$WT_BASE_BRANCH" "develop"
@@ -492,7 +491,7 @@ teardown() {
     create_test_context "myctx" "$repo"
 
     # Set git config with different values
-    set_wt_git_config_required "$repo" "/git-main" "/git-wt" "/git-idea" "git-branch"
+    set_wt_git_config_required "$repo" "/git-wt" "/git-idea" "git-branch"
 
     # Clear all variables, then load in the correct order
     wt_clear_config_vars
@@ -501,8 +500,8 @@ teardown() {
     wt_read_git_config
     wt_read_config "$TEST_HOME/.wt/current" 2>/dev/null || true
 
-    # Git config should win for all four required keys
-    assert_equal "$WT_MAIN_REPO_ROOT" "/git-main"
+    # Git config should win — mainRepoRoot auto-derived, rest from git config
+    assert_equal "$WT_MAIN_REPO_ROOT" "$repo"
     assert_equal "$WT_WORKTREES_BASE" "/git-wt"
     assert_equal "$WT_IDEA_FILES_BASE" "/git-idea"
     assert_equal "$WT_BASE_BRANCH" "git-branch"
@@ -515,8 +514,8 @@ teardown() {
     # Set up .conf file with all values
     create_test_context "myctx" "$repo"
 
-    # Set all 4 required git config keys but no optional keys
-    set_wt_git_config_required "$repo" "/git-main" "/git-wt" "/git-idea" "git-branch"
+    # Set all 3 required git config keys but no optional keys
+    set_wt_git_config_required "$repo" "/git-wt" "/git-idea" "git-branch"
 
     # Clear all variables, then load in order
     wt_clear_config_vars
@@ -526,7 +525,7 @@ teardown() {
     wt_read_config "$TEST_HOME/.wt/current" 2>/dev/null || true
 
     # Git config wins for required keys
-    assert_equal "$WT_MAIN_REPO_ROOT" "/git-main"
+    assert_equal "$WT_MAIN_REPO_ROOT" "$repo"
     assert_equal "$WT_BASE_BRANCH" "git-branch"
 
     # .conf file fills optional keys (WT_ACTIVE_WORKTREE is set in the .conf)
@@ -542,10 +541,8 @@ teardown() {
     # Set up .conf file with all values
     create_test_context "myctx" "$repo"
 
-    # Set only 2 of 4 required git config keys (incomplete)
-    set_wt_git_config "$repo" \
-        "wt.mainRepoRoot" "/git-main" \
-        "wt.baseBranch" "git-branch"
+    # Set only 1 of 3 required git config keys (incomplete)
+    set_wt_git_config "$repo" "wt.baseBranch" "git-branch"
 
     # Clear all variables, then load in order
     wt_clear_config_vars
@@ -559,5 +556,56 @@ teardown() {
     norm_repo_path="$(cd "$repo" && pwd -P)"
     assert_equal "$WT_MAIN_REPO_ROOT" "$norm_repo_path"
     assert_equal "$WT_BASE_BRANCH" "main"
+}
+
+# --- Auto-derivation and explicit override of mainRepoRoot ---
+
+@test "wt_read_git_config auto-derives mainRepoRoot from git-common-dir" {
+    local repo
+    repo=$(create_mock_repo)
+
+    # Only set the 3 required keys, no wt.mainRepoRoot
+    set_wt_git_config_required "$repo" "/worktrees" "/idea" "develop"
+
+    unset WT_MAIN_REPO_ROOT
+
+    cd "$repo"
+    wt_read_git_config
+
+    assert_equal "$WT_MAIN_REPO_ROOT" "$repo"
+}
+
+@test "wt_read_git_config explicit mainRepoRoot overrides auto-derivation" {
+    local repo
+    repo=$(create_mock_repo)
+
+    set_wt_git_config_required "$repo" "/worktrees" "/idea" "develop"
+    set_wt_git_config "$repo" "wt.mainRepoRoot" "/custom/repo/root"
+
+    unset WT_MAIN_REPO_ROOT
+
+    cd "$repo"
+    wt_read_git_config
+
+    assert_equal "$WT_MAIN_REPO_ROOT" "/custom/repo/root"
+}
+
+@test "wt_read_git_config auto-derives mainRepoRoot correctly from worktree" {
+    local repo
+    repo=$(create_mock_repo)
+
+    set_wt_git_config_required "$repo" "/worktrees" "/idea" "develop"
+
+    create_branch "$repo" "feature-derive"
+    local wt_path="$BATS_TEST_TMPDIR/wt-derive"
+    create_worktree "$repo" "$wt_path" "feature-derive"
+
+    unset WT_MAIN_REPO_ROOT
+
+    # CWD is the worktree, but mainRepoRoot should resolve to the main repo
+    cd "$wt_path"
+    wt_read_git_config
+
+    assert_equal "$WT_MAIN_REPO_ROOT" "$repo"
 }
 
