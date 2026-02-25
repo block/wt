@@ -74,9 +74,16 @@ class WorktreePanel(private val project: Project) : JPanel(BorderLayout()), Data
 
         override fun prepareRenderer(renderer: TableCellRenderer, row: Int, column: Int): Component {
             val comp = super.prepareRenderer(renderer, row, column)
-            val wt = tableModel.getWorktreeAt(row)
-            if (wt != null && wt.isLinked && !isRowSelected(row)) {
-                comp.background = linkedRowBackground()
+            if (!isRowSelected(row)) {
+                val wt = tableModel.getWorktreeAt(row)
+                if (wt != null && wt.isLinked) {
+                    comp.background = linkedRowBackground()
+                } else {
+                    // Explicitly reset: DefaultTableCellRenderer caches setBackground() calls
+                    // in its unselectedBackground field, so the linked row's green tint leaks
+                    // to subsequent rows without this reset.
+                    comp.background = getBackground()
+                }
             }
             return comp
         }
