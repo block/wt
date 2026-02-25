@@ -88,9 +88,9 @@ wt_read_config() {
 # (git config --local in a worktree reads from the main repo automatically).
 #
 # Requires three core keys (worktreesBase, ideaFilesBase, baseBranch) to be
-# set. mainRepoRoot is auto-derived from git-common-dir (the main repo's
-# .git parent) but can be overridden via wt.mainRepoRoot. If partially
-# configured, prints a warning to stderr and applies nothing. Optional keys
+# set. mainRepoRoot is always auto-derived from git-common-dir (the main
+# repo's .git parent) and is not configurable. If partially configured,
+# prints a warning to stderr and applies nothing. Optional keys
 # (activeWorktree, metadataPatterns) are applied only when all required keys
 # are present.
 #
@@ -101,7 +101,7 @@ wt_read_git_config() {
   repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || return 0
 
   # Read all wt.* keys into local variables
-  local gc_main_repo_root="" gc_worktrees_base="" gc_idea_files_base=""
+  local gc_worktrees_base="" gc_idea_files_base=""
   local gc_active_worktree="" gc_base_branch="" gc_metadata_patterns=""
   local has_any=false
 
@@ -117,7 +117,6 @@ wt_read_git_config() {
     local lkey
     lkey="$(printf '%s' "$key" | tr '[:upper:]' '[:lower:]')"
     case "$lkey" in
-      wt.mainreporoot)      gc_main_repo_root="$value" ;;
       wt.worktreesbase)     gc_worktrees_base="$value" ;;
       wt.ideafilesbase)     gc_idea_files_base="$value" ;;
       wt.activeworktree)    gc_active_worktree="$value" ;;
@@ -142,15 +141,11 @@ wt_read_git_config() {
     return 0
   fi
 
-  # Auto-derive main repo root from git-common-dir (the main repo's .git
-  # parent) unless explicitly overridden via wt.mainRepoRoot.
+  # Derive main repo root from git-common-dir (the main repo's .git parent).
   # git-common-dir always points to the main repo's .git, even from worktrees.
-  if [[ -z "$gc_main_repo_root" ]]; then
-    gc_main_repo_root="$(cd "$(git rev-parse --git-common-dir)/.." && pwd -P)"
-  fi
+  WT_MAIN_REPO_ROOT="$(cd "$(git rev-parse --git-common-dir)/.." && pwd -P)"
 
   # All required keys present — apply unconditionally (highest priority)
-  WT_MAIN_REPO_ROOT="$gc_main_repo_root"
   WT_WORKTREES_BASE="$gc_worktrees_base"
   WT_IDEA_FILES_BASE="$gc_idea_files_base"
   WT_BASE_BRANCH="$gc_base_branch"

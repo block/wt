@@ -575,21 +575,6 @@ teardown() {
     assert_equal "$WT_MAIN_REPO_ROOT" "$repo"
 }
 
-@test "wt_read_git_config explicit mainRepoRoot overrides auto-derivation" {
-    local repo
-    repo=$(create_mock_repo)
-
-    set_wt_git_config_required "$repo" "/worktrees" "/idea" "develop"
-    set_wt_git_config "$repo" "wt.mainRepoRoot" "/custom/repo/root"
-
-    unset WT_MAIN_REPO_ROOT
-
-    cd "$repo"
-    wt_read_git_config
-
-    assert_equal "$WT_MAIN_REPO_ROOT" "/custom/repo/root"
-}
-
 @test "wt_read_git_config auto-derives mainRepoRoot correctly from worktree" {
     local repo
     repo=$(create_mock_repo)
