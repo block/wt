@@ -15,7 +15,7 @@ wt_show_help() {
   # Use WT_CONTEXT_NAME if set, otherwise empty
   local current_context="${WT_CONTEXT_NAME:-}"
 
-  cat <<'EOF'
+  command cat <<'EOF'
 wt — Unified Worktree Toolkit
 
 Usage: wt <command> [args]
@@ -76,12 +76,12 @@ EOF
 
   # Show context info if configured
   if [[ -n "$current_context" ]]; then
-    cat <<EOF
+    command cat <<EOF
 Current Context: $current_context
 EOF
   fi
 
-  cat <<EOF
+  command cat <<EOF
 
 Configuration (from ${current_context:-"defaults"}):
   WT_MAIN_REPO_ROOT     Main repository root
