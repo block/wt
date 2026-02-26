@@ -38,6 +38,8 @@
 
         <!-- Services -->
         <projectService
+                serviceImplementation="com.block.wt.services.ContextService"/>
+        <projectService
                 serviceImplementation="com.block.wt.services.WorktreeService"/>
         <projectService
                 serviceImplementation="com.block.wt.services.SymlinkSwitchService"/>
@@ -48,18 +50,11 @@
         <projectService
                 serviceImplementation="com.block.wt.services.ExternalChangeWatcher"/>
 
-        <applicationService
-                serviceImplementation="com.block.wt.services.ContextService"/>
-
         <!-- Status Bar Widgets -->
-        <statusBarWidgetFactory
-                id="WtContextWidget"
-                implementation="com.block.wt.ui.ContextStatusBarWidgetFactory"
-                order="after positionWidget"/>
         <statusBarWidgetFactory
                 id="WtWorktreeWidget"
                 implementation="com.block.wt.ui.WorktreeStatusBarWidgetFactory"
-                order="after WtContextWidget"/>
+                order="after positionWidget"/>
 
         <!-- Startup Activity -->
         <postStartupActivity
@@ -69,11 +64,6 @@
         <notificationGroup id="Worktree Manager"
                            displayType="BALLOON"/>
     </extensions>
-
-    <applicationListeners>
-        <listener class="com.block.wt.services.MetadataAutoExporter"
-                  topic="com.intellij.ide.AppLifecycleListener"/>
-    </applicationListeners>
 
     <actions>
         <!-- VCS Menu Actions -->
@@ -111,15 +101,10 @@
 
             <separator/>
 
-            <action id="Wt.SwitchContext"
-                    class="com.block.wt.actions.context.SwitchContextAction"
-                    text="Switch Context..."
-                    description="Switch to a different wt context (repository)"/>
-
             <action id="Wt.AddContext"
                     class="com.block.wt.actions.context.AddContextAction"
                     text="Add Context..."
-                    description="Add a new wt context for a repository"/>
+                    description="Add a new wt context for this project's repository"/>
 
             <separator/>
 
@@ -165,10 +150,6 @@
                     text="Open in Terminal"
                     icon="AllIcons.Actions.Execute"/>
             <separator/>
-            <action id="Wt.Toolbar.SwitchContext"
-                    class="com.block.wt.actions.context.SwitchContextAction"
-                    text="Switch Context"
-                    icon="AllIcons.Actions.GroupByModule"/>
             <action id="Wt.Toolbar.AddContext"
                     class="com.block.wt.actions.context.AddContextAction"
                     text="Add Context"

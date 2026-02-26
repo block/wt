@@ -43,14 +43,18 @@ abstract class WtAction : AnAction(), DumbAware {
 
 /**
  * Base action for actions that require a configured wt context.
+ * Greyed out when no context is auto-detected for the current project.
  */
 abstract class WtConfigAction : WtAction() {
     override fun isAvailable(e: AnActionEvent): Boolean {
-        return e.project != null && ContextService.getInstance().getCurrentConfig() != null
+        val project = e.project ?: return false
+        return ContextService.getInstance(project).getCurrentConfig() != null
     }
 
-    protected fun requireConfig(): ContextConfig? =
-        ContextService.getInstance().getCurrentConfig()
+    protected fun requireConfig(e: AnActionEvent): ContextConfig? {
+        val project = e.project ?: return null
+        return ContextService.getInstance(project).getCurrentConfig()
+    }
 }
 
 /**

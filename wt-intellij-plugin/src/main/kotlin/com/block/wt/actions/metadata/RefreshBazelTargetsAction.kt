@@ -10,7 +10,7 @@ class RefreshBazelTargetsAction : WtConfigAction() {
 
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
-        val config = requireConfig() ?: return
+        val config = requireConfig(e) ?: return
 
         runInBackground(project, "Refreshing Bazel Targets") { indicator ->
             indicator.text = "Refreshing Bazel targets..."

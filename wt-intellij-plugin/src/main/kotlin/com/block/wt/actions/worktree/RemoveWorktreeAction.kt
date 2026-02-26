@@ -1,6 +1,6 @@
 package com.block.wt.actions.worktree
 
-import com.block.wt.actions.WtAction
+import com.block.wt.actions.WtConfigAction
 import com.block.wt.model.WorktreeInfo
 import com.block.wt.progress.RemovalProgress
 import com.block.wt.progress.asScope
@@ -19,7 +19,7 @@ import com.intellij.openapi.ui.popup.JBPopupFactory
 import com.intellij.openapi.ui.popup.PopupStep
 import com.intellij.openapi.ui.popup.util.BaseListPopupStep
 
-class RemoveWorktreeAction : WtAction() {
+class RemoveWorktreeAction : WtConfigAction() {
 
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
@@ -68,7 +68,7 @@ class RemoveWorktreeAction : WtAction() {
     }
 
     private fun confirmAndRemove(project: Project, wt: WorktreeInfo, worktreeService: WorktreeService) {
-        val config = ContextService.getInstance().getCurrentConfig()
+        val config = ContextService.getInstance(project).getCurrentConfig()
         if (config != null && wt.path.normalizeSafe() == config.mainRepoRoot.normalizeSafe()) {
             Notifications.error(project, "Cannot Remove", "Cannot remove the main repository worktree")
             return

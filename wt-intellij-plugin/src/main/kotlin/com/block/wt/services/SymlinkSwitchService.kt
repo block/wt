@@ -47,9 +47,12 @@ class SymlinkSwitchService(
         indicator: ProgressIndicator? = null,
         scope: ProgressScope? = null,
     ) {
-        val contextService = ContextService.getInstance()
+        val contextService = ContextService.getInstance(project)
         val config = contextService.getCurrentConfig()
-            ?: throw IllegalStateException("No active wt context configured")
+        if (config == null) {
+            Notifications.error(project, "No Context", "No active wt context detected for this project")
+            return
+        }
 
         val symlinkPath = config.activeWorktree
         val projectRoot = project.basePath?.let { VfsUtil.findFileByIoFile(java.io.File(it), true) }

@@ -13,11 +13,8 @@ import com.intellij.openapi.actionSystem.DataKey
 import com.intellij.openapi.actionSystem.DataProvider
 import com.intellij.openapi.actionSystem.DefaultActionGroup
 import com.intellij.openapi.actionSystem.ex.ActionUtil
-import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
-import com.intellij.ui.ClickListener
 import com.intellij.ui.PopupHandler
-import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.dsl.builder.Align
 import com.intellij.ui.dsl.builder.panel
@@ -34,7 +31,6 @@ import java.awt.BorderLayout
 import java.awt.CardLayout
 import java.awt.Color
 import java.awt.Component
-import java.awt.Cursor
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import javax.swing.JLabel
@@ -98,15 +94,21 @@ class WorktreePanel(private val project: Project) : JPanel(BorderLayout()), Data
         val DATA_KEY: DataKey<WorktreePanel> = DataKey.create("WtWorktreePanel")
         private const val CARD_TABLE = "table"
         private const val CARD_EMPTY = "empty"
+        private const val CARD_LOADING = "loading"
     }
 
     init {
         setupTable()
+        setupLoadingState()
         setupEmptyState()
         setupToolbar()
         setupContextLabel()
         setupListeners()
+        cardLayout.show(centerPanel, CARD_LOADING)
         observeState()
+        // Panel may be created after startup activity completed; re-init to ensure fresh state
+        ContextService.getInstance(project).initialize()
+        WorktreeService.getInstance(project).refreshWorktreeList()
     }
 
     override fun getData(dataId: String): Any? {
@@ -140,6 +142,18 @@ class WorktreePanel(private val project: Project) : JPanel(BorderLayout()), Data
 
         centerPanel.add(JBScrollPane(table), CARD_TABLE)
         add(centerPanel, BorderLayout.CENTER)
+    }
+
+    private fun setupLoadingState() {
+        val loadingPanel = panel {
+            row {
+                label("Loading worktree context...")
+                    .align(Align.CENTER)
+            }
+        }.apply {
+            border = JBUI.Borders.empty(40, 20)
+        }
+        centerPanel.add(loadingPanel, CARD_LOADING)
     }
 
     private fun setupEmptyState() {
@@ -184,56 +198,15 @@ class WorktreePanel(private val project: Project) : JPanel(BorderLayout()), Data
     }
 
     private fun setupContextLabel() {
-        val config = ContextService.getInstance().getCurrentConfig()
+        val config = ContextService.getInstance(project).getCurrentConfig()
         updateContextLabelText(config?.name)
         contextLabel.border = javax.swing.BorderFactory.createEmptyBorder(2, 4, 2, 4)
-        contextLabel.cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
-        contextLabel.toolTipText = "Click to switch context"
-
-        object : ClickListener() {
-            override fun onClick(event: MouseEvent, clickCount: Int): Boolean {
-                showContextSwitchPopup()
-                return true
-            }
-        }.installOn(contextLabel)
 
         add(contextLabel, BorderLayout.SOUTH)
     }
 
     private fun updateContextLabelText(name: String?) {
-        contextLabel.text = if (name != null) "  Context: $name  [switch]" else "  No context  [click to switch]"
-    }
-
-    private fun showContextSwitchPopup() {
-        val contextService = ContextService.getInstance()
-
-        val popup = ContextPopupHelper.createContextSwitchPopup(
-            includeAddContext = true,
-            onSwitch = { selectedValue ->
-                contextService.switchContext(selectedValue)
-                val worktreeService = WorktreeService.getInstance(project)
-                worktreeService.refreshWorktreeList()
-
-                // Show setup dialog for the new context if needed
-                val newConfig = contextService.getCurrentConfig()
-                if (newConfig != null) {
-                    cs.launch {
-                        val worktrees = worktreeService.listWorktrees()
-                        ApplicationManager.getApplication().invokeLater {
-                            ContextSetupDialog.showIfNeeded(project, newConfig, worktrees)
-                        }
-                    }
-                }
-            },
-            onAddContext = {
-                val action = ActionManager.getInstance().getAction("Wt.AddContext")
-                if (action != null) {
-                    ActionUtil.invokeAction(action, this@WorktreePanel, ActionPlaces.TOOLWINDOW_CONTENT, null, null)
-                }
-            },
-        ) ?: return
-
-        popup.showUnderneathOf(contextLabel)
+        contextLabel.text = if (name != null) "  Context: $name" else "  No context"
     }
 
     private fun setupListeners() {
@@ -253,26 +226,26 @@ class WorktreePanel(private val project: Project) : JPanel(BorderLayout()), Data
 
     private fun observeState() {
         val worktreeService = WorktreeService.getInstance(project)
-        val contextService = ContextService.getInstance()
+        val contextService = ContextService.getInstance(project)
 
         cs.launch {
             combine(
                 worktreeService.worktrees,
-                contextService.currentContextName,
-            ) { worktrees, contextName ->
-                Pair(worktrees, contextName)
-            }.collectLatest { (worktrees, contextName) ->
+                contextService.config,
+                worktreeService.isLoading,
+            ) { worktrees, config, isLoading ->
+                Triple(worktrees, config, isLoading)
+            }.collectLatest { (worktrees, config, isLoading) ->
                 // Update worktreesBase for relative paths
-                val config = contextService.getCurrentConfig()
                 tableModel.worktreesBase = config?.worktreesBase
                 tableModel.setWorktrees(worktrees)
-                updateContextLabelText(contextName)
+                updateContextLabelText(config?.name)
 
-                // Show empty state or table
-                if (contextName == null && worktrees.isEmpty()) {
-                    cardLayout.show(centerPanel, CARD_EMPTY)
-                } else {
-                    cardLayout.show(centerPanel, CARD_TABLE)
+                // Show loading until first refresh completes, then empty or table
+                when {
+                    isLoading && worktrees.isEmpty() -> cardLayout.show(centerPanel, CARD_LOADING)
+                    config == null && worktrees.isEmpty() -> cardLayout.show(centerPanel, CARD_EMPTY)
+                    else -> cardLayout.show(centerPanel, CARD_TABLE)
                 }
             }
         }
@@ -318,7 +291,7 @@ class WorktreePanel(private val project: Project) : JPanel(BorderLayout()), Data
         }
 
         val marker = ProvisionMarkerService.readProvisionMarker(wt.path) ?: return "Provisioned"
-        val currentContextName = ContextService.getInstance().getCurrentConfig()?.name
+        val currentContextName = ContextService.getInstance(project).getCurrentConfig()?.name
         val otherContexts = marker.provisions
             .map { it.context }
             .filter { it != marker.current }

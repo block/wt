@@ -1,6 +1,6 @@
 package com.block.wt.actions.worktree
 
-import com.block.wt.actions.WtAction
+import com.block.wt.actions.WtConfigAction
 import com.block.wt.progress.asScope
 import com.block.wt.provision.ProvisionHelper
 import com.block.wt.git.GitBranchHelper
@@ -12,7 +12,7 @@ import com.block.wt.ui.Notifications
 import com.intellij.openapi.actionSystem.AnActionEvent
 import java.nio.file.Path
 
-class CreateWorktreeAction : WtAction() {
+class CreateWorktreeAction : WtConfigAction() {
 
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
@@ -26,7 +26,7 @@ class CreateWorktreeAction : WtAction() {
 
         runInBackground(project, "Creating Worktree") { indicator ->
             val worktreeService = WorktreeService.getInstance(project)
-            val contextService = ContextService.getInstance()
+            val contextService = ContextService.getInstance(project)
             val config = contextService.getCurrentConfig()
 
             if (createNewBranch && config != null) {

@@ -34,7 +34,7 @@ object ProvisionSwitchHelper {
         }
 
         // Provision prompt: only when the worktree is not provisioned by the current context
-        val contextService = ContextService.getInstance()
+        val contextService = ContextService.getInstance(project)
         val config = contextService.getCurrentConfig()
         val currentContextName = config?.name
 
@@ -109,7 +109,7 @@ object ProvisionSwitchHelper {
     }
 
     private fun provisionAndSwitch(project: Project, wt: WorktreeInfo) {
-        val config = ContextService.getInstance().getCurrentConfig() ?: return
+        val config = ContextService.getInstance(project).getCurrentConfig() ?: return
 
         ProgressManager.getInstance().run(object : Task.Backgroundable(
             project, "Provisioning & Switching Worktree", true

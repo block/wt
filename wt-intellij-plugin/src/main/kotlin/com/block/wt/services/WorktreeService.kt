@@ -42,7 +42,7 @@ class WorktreeService(
     private val gitClient by lazy { GitClient(processRunner) }
     private val enrichers: List<WorktreeEnricher> by lazy {
         listOf(
-            ProvisionStatusEnricher(ContextService.getInstance()),
+            ProvisionStatusEnricher(ContextService.getInstance(project)),
             AgentStatusEnricher(agentDetection),
         )
     }
@@ -57,8 +57,8 @@ class WorktreeService(
     private val statusMutex = Mutex()
 
     fun refreshWorktreeList() {
+        _isLoading.value = true
         cs.launch {
-            _isLoading.value = true
             try {
                 val list = listWorktrees()
                 _worktrees.value = list
@@ -209,7 +209,7 @@ class WorktreeService(
 
     suspend fun getMergedBranches(): List<String> {
         val repoRoot = getMainRepoRoot() ?: return emptyList()
-        val contextService = ContextService.getInstance()
+        val contextService = ContextService.getInstance(project)
         val baseBranch = contextService.getCurrentConfig()?.baseBranch ?: "main"
         return gitClient.getMergedBranches(repoRoot, baseBranch)
     }
@@ -238,7 +238,7 @@ class WorktreeService(
     // --- Repo root resolution ---
 
     fun getMainRepoRoot(): Path? {
-        val contextService = ContextService.getInstance()
+        val contextService = ContextService.getInstance(project)
         val config = contextService.getCurrentConfig()
         if (config != null) return config.mainRepoRoot
 
@@ -248,7 +248,7 @@ class WorktreeService(
     }
 
     private fun getLinkedWorktreePath(): Path? {
-        val contextService = ContextService.getInstance()
+        val contextService = ContextService.getInstance(project)
         val config = contextService.getCurrentConfig() ?: return null
         val symlinkPath = config.activeWorktree
         return PathHelper.readSymlink(symlinkPath)?.normalizeSafe()

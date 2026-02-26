@@ -10,7 +10,7 @@ class ImportMetadataAction : WtConfigAction() {
 
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
-        val config = requireConfig() ?: return
+        val config = requireConfig(e) ?: return
 
         val target = if (PathHelper.isSymlink(config.activeWorktree)) {
             val raw = PathHelper.readSymlink(config.activeWorktree) ?: config.activeWorktree

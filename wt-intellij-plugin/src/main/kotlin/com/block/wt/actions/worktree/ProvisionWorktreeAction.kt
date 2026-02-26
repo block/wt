@@ -30,7 +30,7 @@ class ProvisionWorktreeAction : WtTableAction() {
         val project = e.project ?: return
         val wt = getSelectedPanel(e)?.getSelectedWorktree() ?: return
 
-        val config = ContextService.getInstance().getCurrentConfig()
+        val config = ContextService.getInstance(project).getCurrentConfig()
         val currentContextName = config?.name
 
         if (currentContextName == null) {

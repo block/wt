@@ -201,14 +201,30 @@ main() {
     echo
   fi
 
-  cat <<'EOF'
+  # Determine the best rc file to show in the reload instruction
+  local reload_file=""
+  local zshrc="${ZDOTDIR:-$HOME}/.zshrc"
+  if [[ -f "$zshrc" ]]; then
+    reload_file="$zshrc"
+  else
+    for candidate in "$HOME/.bashrc" "$HOME/.bash_profile"; do
+      if [[ -f "$candidate" ]]; then
+        reload_file="$candidate"
+        break
+      fi
+    done
+  fi
+  # Replace $HOME with ~ for display
+  local reload_display="${reload_file/#$HOME/\~}"
+
+  cat <<EOF
 ════════════════════════════════════════════════════════════════════════════════
   Installation Complete!
 ════════════════════════════════════════════════════════════════════════════════
 
 Reload your shell to activate:
 
-    source ~/.zshrc    # or ~/.bashrc
+    source $reload_display
 
 Then run:
 

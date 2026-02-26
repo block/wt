@@ -31,7 +31,7 @@ class ExternalChangeWatcher(
     fun startWatching() {
         stopWatching()
 
-        lastContextName = ContextService.getInstance().getCurrentConfig()?.name
+        lastContextName = ContextService.getInstance(project).getCurrentConfig()?.name
 
         watchJob = cs.launch(Dispatchers.IO) {
             try {
@@ -52,7 +52,7 @@ class ExternalChangeWatcher(
                 }
 
                 // Watch the symlink's parent directory for symlink changes
-                val config = ContextService.getInstance().getCurrentConfig()
+                val config = ContextService.getInstance(project).getCurrentConfig()
                 val symlinkParent = config?.activeWorktree?.parent
                 if (symlinkParent != null && java.nio.file.Files.isDirectory(symlinkParent)) {
                     symlinkParent.register(
@@ -87,7 +87,7 @@ class ExternalChangeWatcher(
                         val context = event.context() as? Path ?: continue
                         val fileName = context.fileName?.toString() ?: continue
 
-                        if (fileName == "current" || fileName.endsWith(".conf") ||
+                        if (fileName.endsWith(".conf") ||
                             fileName == config?.activeWorktree?.fileName?.toString()
                         ) {
                             relevant = true
@@ -124,11 +124,11 @@ class ExternalChangeWatcher(
         debounceJob = cs.launch {
             delay(WtPluginSettings.getInstance().state.debounceDelayMs)
             log.info("External change detected, refreshing")
-            ContextService.getInstance().reload()
+            ContextService.getInstance(project).reload()
             WorktreeService.getInstance(project).refreshWorktreeList()
 
             // Re-register watches if the context changed (different watched paths)
-            val currentContextName = ContextService.getInstance().getCurrentConfig()?.name
+            val currentContextName = ContextService.getInstance(project).getCurrentConfig()?.name
             if (currentContextName != lastContextName) {
                 log.info("Context changed from '$lastContextName' to '$currentContextName', re-registering watches")
                 startWatching()

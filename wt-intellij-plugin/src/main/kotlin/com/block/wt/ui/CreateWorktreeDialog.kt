@@ -49,7 +49,7 @@ class CreateWorktreeDialog(private val project: Project) : DialogWrapper(project
     }
 
     private fun updatePath() {
-        val config = ContextService.getInstance().getCurrentConfig() ?: return
+        val config = ContextService.getInstance(project).getCurrentConfig() ?: return
         if (branchField.text.isNotBlank()) {
             pathField.text = GitBranchHelper.worktreePathForBranch(config.worktreesBase, branchField.text).toString()
         }

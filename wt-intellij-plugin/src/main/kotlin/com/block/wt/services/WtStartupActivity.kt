@@ -13,8 +13,8 @@ import com.intellij.ui.jcef.JBCefApp
 
 class WtStartupActivity : ProjectActivity {
     override suspend fun execute(project: Project) {
-        // Initialize context service
-        ContextService.getInstance().initialize()
+        // Initialize context service (project-level, auto-detects context)
+        ContextService.getInstance(project).initialize()
 
         // Start watching for external changes
         ExternalChangeWatcher.getInstance(project).startWatching()
@@ -24,7 +24,7 @@ class WtStartupActivity : ProjectActivity {
         worktreeService.refreshWorktreeList()
 
         // Show context setup dialog if this context hasn't been set up yet
-        val config = ContextService.getInstance().getCurrentConfig()
+        val config = ContextService.getInstance(project).getCurrentConfig()
         if (config != null) {
             val worktrees = worktreeService.listWorktrees()
             ApplicationManager.getApplication().invokeLater {

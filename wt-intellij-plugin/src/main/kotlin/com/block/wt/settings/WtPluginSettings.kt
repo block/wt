@@ -20,7 +20,6 @@ class WtPluginSettings : PersistentStateComponent<WtPluginSettings.State> {
         var confirmBeforeSwitch: Boolean = false,
         var confirmBeforeRemove: Boolean = true,
         var statusLoadingEnabled: Boolean = true,
-        var autoExportOnShutdown: Boolean = false,
         var debounceDelayMs: Long = 500,
         var promptProvisionOnSwitch: Boolean = true,
         var autoRefreshIntervalSeconds: Int = 30,

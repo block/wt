@@ -49,17 +49,6 @@ object ConfigFileHelper {
         )
     }
 
-    fun readCurrentContext(): String? {
-        val file = PathHelper.currentFile
-        return if (file.exists()) file.readText().trim().ifBlank { null } else null
-    }
-
-    fun setCurrentContext(name: String) {
-        val file = PathHelper.currentFile
-        Files.createDirectories(file.parent)
-        file.writeText(name + "\n")
-    }
-
     fun listConfigFiles(): List<Path> {
         val reposDir = PathHelper.reposDir
         if (!Files.isDirectory(reposDir)) return emptyList()

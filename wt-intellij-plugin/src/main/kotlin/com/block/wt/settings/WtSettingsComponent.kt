@@ -14,7 +14,6 @@ class WtSettingsComponent {
     private var confirmSwitch = settings.state.confirmBeforeSwitch
     private var confirmRemove = settings.state.confirmBeforeRemove
     private var statusLoading = settings.state.statusLoadingEnabled
-    private var autoExport = settings.state.autoExportOnShutdown
     private var promptProvision = settings.state.promptProvisionOnSwitch
     private var autoRefreshInterval = settings.state.autoRefreshIntervalSeconds
 
@@ -32,11 +31,6 @@ class WtSettingsComponent {
                 checkBox("Load status indicators (dirty, ahead/behind) asynchronously")
                     .bindSelected(::statusLoading)
                     .comment("Disable to speed up worktree list loading for repos with many worktrees")
-            }
-            row {
-                checkBox("Auto-export metadata to vault on IDE shutdown")
-                    .bindSelected(::autoExport)
-                    .comment("Keeps the metadata vault up-to-date automatically")
             }
             row {
                 checkBox("Prompt to provision when switching to non-provisioned worktrees")
@@ -69,7 +63,6 @@ class WtSettingsComponent {
             confirmSwitch != settings.state.confirmBeforeSwitch ||
             confirmRemove != settings.state.confirmBeforeRemove ||
             statusLoading != settings.state.statusLoadingEnabled ||
-            autoExport != settings.state.autoExportOnShutdown ||
             promptProvision != settings.state.promptProvisionOnSwitch ||
             autoRefreshInterval != settings.state.autoRefreshIntervalSeconds
     }
@@ -81,7 +74,6 @@ class WtSettingsComponent {
             confirmBeforeSwitch = confirmSwitch,
             confirmBeforeRemove = confirmRemove,
             statusLoadingEnabled = statusLoading,
-            autoExportOnShutdown = autoExport,
             promptProvisionOnSwitch = promptProvision,
             autoRefreshIntervalSeconds = autoRefreshInterval,
         ))
@@ -93,7 +85,6 @@ class WtSettingsComponent {
         confirmSwitch = settings.state.confirmBeforeSwitch
         confirmRemove = settings.state.confirmBeforeRemove
         statusLoading = settings.state.statusLoadingEnabled
-        autoExport = settings.state.autoExportOnShutdown
         promptProvision = settings.state.promptProvisionOnSwitch
         autoRefreshInterval = settings.state.autoRefreshIntervalSeconds
     }

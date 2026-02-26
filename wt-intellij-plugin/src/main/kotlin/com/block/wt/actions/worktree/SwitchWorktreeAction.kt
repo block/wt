@@ -1,6 +1,6 @@
 package com.block.wt.actions.worktree
 
-import com.block.wt.actions.WtAction
+import com.block.wt.actions.WtConfigAction
 import com.block.wt.provision.ProvisionSwitchHelper
 import com.block.wt.services.WorktreeService
 import com.block.wt.ui.WorktreePanel
@@ -10,7 +10,7 @@ import com.intellij.openapi.ui.popup.JBPopupFactory
 import com.intellij.openapi.ui.popup.PopupStep
 import com.intellij.openapi.ui.popup.util.BaseListPopupStep
 
-class SwitchWorktreeAction : WtAction() {
+class SwitchWorktreeAction : WtConfigAction() {
 
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return

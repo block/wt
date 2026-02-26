@@ -1,6 +1,6 @@
 package com.block.wt.actions.util
 
-import com.block.wt.actions.WtAction
+import com.block.wt.actions.WtConfigAction
 import com.block.wt.services.WorktreeService
 import com.block.wt.ui.Notifications
 import com.block.wt.ui.WorktreePanel
@@ -8,7 +8,7 @@ import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.wm.ToolWindowManager
 import org.jetbrains.plugins.terminal.TerminalToolWindowManager
 
-class OpenInTerminalAction : WtAction() {
+class OpenInTerminalAction : WtConfigAction() {
 
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return

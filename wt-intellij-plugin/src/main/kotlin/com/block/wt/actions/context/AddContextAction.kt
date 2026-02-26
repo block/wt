@@ -50,8 +50,7 @@ class AddContextAction : WtAction() {
                     baseBranch = baseBranch,
                     metadataPatterns = patterns,
                 )
-                ContextService.getInstance().addContext(config)
-                ContextService.getInstance().switchContext(contextName)
+                ContextService.getInstance(project).addContext(config)
 
                 if (patterns.isNotEmpty()) {
                     indicator.text = "Exporting metadata..."

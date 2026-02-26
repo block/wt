@@ -3,11 +3,9 @@ package com.block.wt.ui
 import com.block.wt.model.MetadataPattern
 import com.block.wt.util.PathHelper
 import com.block.wt.util.ProcessHelper
-import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
-import com.intellij.openapi.ui.TextFieldWithBrowseButton
 import com.intellij.openapi.ui.ValidationInfo
 import com.intellij.ui.components.JBCheckBox
 import com.intellij.ui.components.JBLabel
@@ -21,7 +19,7 @@ import javax.swing.event.DocumentListener
 
 class AddContextDialog(private val project: Project?) : DialogWrapper(project) {
 
-    private val repoPathField = TextFieldWithBrowseButton()
+    private val repoPathField = JBTextField().apply { isEditable = false }
     private val contextNameField = JBTextField()
     private val baseBranchField = JBTextField()
     private val activeWorktreeField = JBTextField()
@@ -49,26 +47,20 @@ class AddContextDialog(private val project: Project?) : DialogWrapper(project) {
     init {
         title = "Add Context"
         init()
-        setupBrowseButton()
+        prefillFromProject()
         setupAutoDerivation()
     }
 
-    private fun setupBrowseButton() {
-        repoPathField.addBrowseFolderListener(
-            "Select Repository",
-            "Choose the root directory of the git repository",
-            project,
-            FileChooserDescriptorFactory.createSingleFolderDescriptor()
-        )
+    private fun prefillFromProject() {
+        val basePath = project?.basePath ?: return
+        // Resolve to git root (follow symlinks, find actual repo root)
+        val projectPath = Path.of(basePath)
+        val resolved = runCatching { projectPath.toRealPath() }.getOrElse { projectPath.normalize() }
+        repoPathField.text = resolved.toString()
+        rederive()
     }
 
     private fun setupAutoDerivation() {
-        val listener = object : DocumentListener {
-            override fun insertUpdate(e: DocumentEvent) = rederive()
-            override fun removeUpdate(e: DocumentEvent) = rederive()
-            override fun changedUpdate(e: DocumentEvent) = rederive()
-        }
-        repoPathField.textField.document.addDocumentListener(listener)
         contextNameField.document.addDocumentListener(object : DocumentListener {
             override fun insertUpdate(e: DocumentEvent) = rederivePaths()
             override fun removeUpdate(e: DocumentEvent) = rederivePaths()

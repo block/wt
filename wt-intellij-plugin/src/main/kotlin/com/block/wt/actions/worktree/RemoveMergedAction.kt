@@ -1,6 +1,6 @@
 package com.block.wt.actions.worktree
 
-import com.block.wt.actions.WtAction
+import com.block.wt.actions.WtConfigAction
 import com.block.wt.progress.RemovalProgress
 import com.block.wt.progress.asScope
 import com.block.wt.services.WorktreeService
@@ -12,7 +12,7 @@ import com.intellij.openapi.progress.Task
 import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.progress.runBlockingCancellable
 
-class RemoveMergedAction : WtAction() {
+class RemoveMergedAction : WtConfigAction() {
 
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
