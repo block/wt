@@ -87,6 +87,8 @@ wt_read_config() {
 # If CWD is inside a worktree, reads from the main repo's .git/config
 # (git config --local in a worktree reads from the main repo automatically).
 #
+# Gated by wt.enabled=true — repos must explicitly opt in to local config.
+#
 # Requires three core keys (worktreesBase, ideaFilesBase, baseBranch) to be
 # set. mainRepoRoot is always auto-derived from git-common-dir (the main
 # repo's .git parent) and is not configurable. If partially configured,
@@ -99,6 +101,11 @@ wt_read_git_config() {
   # Only proceed if we're inside a git repo or worktree
   local repo_root
   repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || return 0
+
+  # Require wt.enabled=true as an explicit opt-in
+  local enabled
+  enabled="$(git config --local --get wt.enabled 2>/dev/null)" || true
+  [[ "$enabled" == "true" ]] || return 0
 
   # Read all wt.* keys into local variables
   local gc_worktrees_base="" gc_idea_files_base=""

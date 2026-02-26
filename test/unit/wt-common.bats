@@ -309,6 +309,43 @@ teardown() {
     assert_equal "${WT_MAIN_REPO_ROOT:-}" ""
 }
 
+@test "wt_read_git_config does nothing when wt.enabled is not true" {
+    local repo
+    repo=$(create_mock_repo)
+
+    # Set all required keys but don't enable
+    set_wt_git_config "$repo" \
+        "wt.worktreesBase" "/worktrees" \
+        "wt.ideaFilesBase" "/idea" \
+        "wt.baseBranch" "develop"
+
+    unset WT_MAIN_REPO_ROOT WT_WORKTREES_BASE WT_IDEA_FILES_BASE WT_BASE_BRANCH
+
+    cd "$repo"
+    wt_read_git_config
+
+    assert_equal "${WT_WORKTREES_BASE:-}" ""
+    assert_equal "${WT_BASE_BRANCH:-}" ""
+}
+
+@test "wt_read_git_config does nothing when wt.enabled is false" {
+    local repo
+    repo=$(create_mock_repo)
+
+    set_wt_git_config "$repo" \
+        "wt.enabled" "false" \
+        "wt.worktreesBase" "/worktrees" \
+        "wt.ideaFilesBase" "/idea" \
+        "wt.baseBranch" "develop"
+
+    unset WT_MAIN_REPO_ROOT WT_WORKTREES_BASE WT_IDEA_FILES_BASE WT_BASE_BRANCH
+
+    cd "$repo"
+    wt_read_git_config
+
+    assert_equal "${WT_WORKTREES_BASE:-}" ""
+}
+
 @test "wt_read_git_config supersedes env variables" {
     local repo
     repo=$(create_mock_repo)
@@ -334,8 +371,8 @@ teardown() {
     local repo
     repo=$(create_mock_repo)
 
-    # Set only one of three required keys
-    set_wt_git_config "$repo" "wt.baseBranch" "develop"
+    # Set only one of three required keys (plus enabled gate)
+    set_wt_git_config "$repo" "wt.enabled" "true" "wt.baseBranch" "develop"
 
     unset WT_MAIN_REPO_ROOT WT_WORKTREES_BASE WT_IDEA_FILES_BASE WT_BASE_BRANCH
 
@@ -357,7 +394,7 @@ teardown() {
     repo=$(create_mock_repo)
 
     # Set 1 of 3 required keys (baseBranch present, worktreesBase + ideaFilesBase missing)
-    set_wt_git_config "$repo" "wt.baseBranch" "develop"
+    set_wt_git_config "$repo" "wt.enabled" "true" "wt.baseBranch" "develop"
 
     cd "$repo"
     run --separate-stderr bash -c '
@@ -379,6 +416,7 @@ teardown() {
 
     # Set 2 of 3 required keys (missing ideaFilesBase)
     set_wt_git_config "$repo" \
+        "wt.enabled" "true" \
         "wt.worktreesBase" "/worktrees" \
         "wt.baseBranch" "develop"
 
@@ -441,6 +479,7 @@ teardown() {
     # git config normalizes section names to lowercase but preserves
     # subsection case. For our flat wt.* keys, git stores them lowercase.
     # We test by writing directly to .git/config with mixed case section.
+    git -C "$repo" config --local "wt.enabled" "true"
     git -C "$repo" config --local "wt.WorktreesBase" "/worktrees"
     git -C "$repo" config --local "wt.ideafilesbase" "/idea"
     git -C "$repo" config --local "wt.BaseBranch" "develop"
@@ -541,8 +580,8 @@ teardown() {
     # Set up .conf file with all values
     create_test_context "myctx" "$repo"
 
-    # Set only 1 of 3 required git config keys (incomplete)
-    set_wt_git_config "$repo" "wt.baseBranch" "git-branch"
+    # Set only 1 of 3 required git config keys (incomplete, but enabled)
+    set_wt_git_config "$repo" "wt.enabled" "true" "wt.baseBranch" "git-branch"
 
     # Clear all variables, then load in order
     wt_clear_config_vars

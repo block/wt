@@ -223,12 +223,13 @@ set_wt_git_config() {
     done
 }
 
-# Set all three required wt.* git config keys in a repository
+# Set wt.enabled + all three required wt.* git config keys in a repository
 # (mainRepoRoot is auto-derived from git-common-dir and not required)
 # Usage: set_wt_git_config_required <repo_path> <worktrees_base> <idea_files_base> <base_branch>
 set_wt_git_config_required() {
     local repo_path="$1"
     set_wt_git_config "$repo_path" \
+        "wt.enabled" "true" \
         "wt.worktreesBase" "$2" \
         "wt.ideaFilesBase" "$3" \
         "wt.baseBranch" "$4"
