@@ -83,7 +83,88 @@ wt_read_config() {
   done < <(grep -E '^WT_[A-Z_]+=' "$config_file" 2>/dev/null)
 }
 
-# Load config from current file, then apply fallback defaults
+# Read wt.* keys from the repo's local git config.
+# If CWD is inside a worktree, reads from the main repo's .git/config
+# (git config --local in a worktree reads from the main repo automatically).
+#
+# Gated by wt.enabled=true — repos must explicitly opt in to local config.
+#
+# Requires three core keys (worktreesBase, ideaFilesBase, baseBranch) to be
+# set. mainRepoRoot is always auto-derived from git-common-dir (the main
+# repo's .git parent) and is not configurable. If partially configured,
+# prints a warning to stderr and applies nothing. Optional keys
+# (activeWorktree, metadataPatterns) are applied only when all required keys
+# are present.
+#
+# Sets variables unconditionally — git local config has highest priority.
+wt_read_git_config() {
+  # Only proceed if we're inside a git repo or worktree
+  local repo_root
+  repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || return 0
+
+  # Require wt.enabled=true as an explicit opt-in
+  local enabled
+  enabled="$(git config --local --get wt.enabled 2>/dev/null)" || true
+  [[ "$enabled" == "true" ]] || return 0
+
+  # Read all wt.* keys into local variables
+  local gc_worktrees_base="" gc_idea_files_base=""
+  local gc_active_worktree="" gc_base_branch="" gc_metadata_patterns=""
+  local has_any=false
+
+  local key value line lkey
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    key="${line%% *}"
+    value="${line#* }"
+    has_any=true
+
+    # git config keys are case-insensitive; lowercase for matching
+    # (use tr for bash 3.2 compatibility — ${key,,} requires bash 4.0+)
+    lkey="$(printf '%s' "$key" | tr '[:upper:]' '[:lower:]')"
+    case "$lkey" in
+      wt.worktreesbase)     gc_worktrees_base="$value" ;;
+      wt.ideafilesbase)     gc_idea_files_base="$value" ;;
+      wt.activeworktree)    gc_active_worktree="$value" ;;
+      wt.basebranch)        gc_base_branch="$value" ;;
+      wt.metadatapatterns)  gc_metadata_patterns="$value" ;;
+    esac
+  done < <(git config --local --get-regexp '^wt\.' 2>/dev/null)
+
+  # Nothing found — not a wt-configured repo, silently return
+  [[ "$has_any" == "false" ]] && return 0
+
+  # Validate: all three required keys must be present
+  local -a missing=()
+  [[ -z "$gc_worktrees_base" ]]  && missing+=("wt.worktreesBase")
+  [[ -z "$gc_idea_files_base" ]] && missing+=("wt.ideaFilesBase")
+  [[ -z "$gc_base_branch" ]]     && missing+=("wt.baseBranch")
+
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    printf "wt: incomplete git local config in %s — missing: %s\n" \
+      "$repo_root" "${missing[*]}" >&2
+    printf "wt: git local config ignored; falling back to context config\n" >&2
+    return 0
+  fi
+
+  # Derive main repo root from git-common-dir (the main repo's .git parent).
+  # git-common-dir always points to the main repo's .git, even from worktrees.
+  WT_MAIN_REPO_ROOT="$(cd "$(git rev-parse --git-common-dir)/.." && pwd -P)"
+
+  # All required keys present — apply unconditionally (highest priority)
+  WT_WORKTREES_BASE="$gc_worktrees_base"
+  WT_IDEA_FILES_BASE="$gc_idea_files_base"
+  WT_BASE_BRANCH="$gc_base_branch"
+
+  # Optional keys: apply if present
+  [[ -n "$gc_active_worktree" ]]   && WT_ACTIVE_WORKTREE="$gc_active_worktree"
+  [[ -n "$gc_metadata_patterns" ]] && WT_METADATA_PATTERNS="$gc_metadata_patterns"
+
+  return 0
+}
+
+# Load config: git local config first (highest priority), then context .conf file
+wt_read_git_config
 wt_read_config "$HOME/.wt/current" 2>/dev/null || true
 
 # Fallback defaults (used when no context is configured or config missing values)

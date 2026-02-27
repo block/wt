@@ -11,6 +11,7 @@
 wt_show_help() {
   # Force reload config to pick up context changes in current shell
   wt_read_config "$HOME/.wt/current" "force" 2>/dev/null || true
+  wt_read_git_config
 
   # Use WT_CONTEXT_NAME if set, otherwise empty
   local current_context="${WT_CONTEXT_NAME:-}"
