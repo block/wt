@@ -154,16 +154,15 @@ teardown() {
     current=$(cat "$TEST_HOME/.wt/current")
     assert_equal "$current" "second-repo"
 
-    # Load and verify variables (wt_load_context_config reads from ~/.wt/current)
+    # Load and verify variables
     source "$TEST_HOME/.wt/lib/wt-common"
-    source "$TEST_HOME/.wt/lib/wt-context"
-    wt_load_context_config
+    wt_read_config --mode=context --force
     assert_equal "$WT_MAIN_REPO_ROOT" "$REPO2"
 
     # Switch back
     run "$TEST_HOME/.wt/bin/wt-context" "workflow-test"
     assert_success
-    wt_load_context_config
+    wt_read_config --mode=context --force
     assert_equal "$WT_MAIN_REPO_ROOT" "$REPO"
 }
 

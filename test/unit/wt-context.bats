@@ -171,10 +171,10 @@ teardown() {
 }
 
 # =============================================================================
-# Tests for wt_load_context_config()
+# Tests for wt_read_config --mode=context
 # =============================================================================
 
-@test "wt_load_context_config sets WT_* variables" {
+@test "wt_read_config --mode=context sets WT_* variables" {
     local repo
     repo=$(create_mock_repo)
     # create_test_context sets up the context AND sets it as current (writes to ~/.wt/current)
@@ -183,7 +183,7 @@ teardown() {
     # Clear any existing values
     unset WT_MAIN_REPO_ROOT WT_WORKTREES_BASE WT_ACTIVE_WORKTREE WT_IDEA_FILES_BASE WT_BASE_BRANCH
 
-    wt_load_context_config
+    wt_read_config --mode=context --force
 
     assert_equal "$WT_MAIN_REPO_ROOT" "$repo"
     assert_equal "$WT_BASE_BRANCH" "main"
@@ -192,12 +192,12 @@ teardown() {
     assert [ -n "$WT_IDEA_FILES_BASE" ]
 }
 
-@test "wt_load_context_config returns failure when current file points to missing context" {
+@test "wt_read_config --mode=context returns failure when current file points to missing context" {
     echo "nonexistent-context" > "$TEST_HOME/.wt/current"
     unset WT_MAIN_REPO_ROOT WT_WORKTREES_BASE WT_ACTIVE_WORKTREE WT_IDEA_FILES_BASE WT_BASE_BRANCH
 
     # Should fail because nonexistent-context.conf doesn't exist
-    run wt_load_context_config
+    run wt_read_config --mode=context --force
     assert_failure
 }
 
@@ -274,7 +274,7 @@ teardown() {
     assert_output "workflow-test"
 
     unset WT_MAIN_REPO_ROOT WT_WORKTREES_BASE WT_ACTIVE_WORKTREE WT_IDEA_FILES_BASE WT_BASE_BRANCH
-    wt_load_context_config
+    wt_read_config --mode=context --force
     assert_equal "$WT_MAIN_REPO_ROOT" "$repo"
 }
 

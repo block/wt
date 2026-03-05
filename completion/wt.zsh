@@ -307,7 +307,7 @@ compdef _wt_metadata_import wt-metadata-import
 
 _wt_completion() {
   # Force reload config to pick up context changes in current shell
-  wt_read_config "$HOME/.wt/current" "force" 2>/dev/null || true
+  wt_read_config --mode=context --force || true
 
   local -a commands
   commands=(

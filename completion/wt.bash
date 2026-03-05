@@ -312,7 +312,7 @@ type wt-metadata-import >/dev/null 2>&1 && complete -F _wt_metadata_import_compl
 
 _wt_completion_bash() {
   # Force reload config to pick up context changes in current shell
-  wt_read_config "$HOME/.wt/current" "force" 2>/dev/null || true
+  wt_read_config --mode=context --force || true
   local cur
   COMPREPLY=()
   cur="${COMP_WORDS[COMP_CWORD]}"
