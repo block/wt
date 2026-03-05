@@ -280,14 +280,15 @@ teardown() {
     assert_equal "$WT_BASE_BRANCH" "develop"
 }
 
-@test "wt_read_git_config does nothing outside a git repo" {
+@test "wt_read_git_config returns failure outside a git repo" {
     local non_git_dir="$BATS_TEST_TMPDIR/not-a-repo"
     mkdir -p "$non_git_dir"
 
     unset WT_MAIN_REPO_ROOT WT_WORKTREES_BASE WT_IDEA_FILES_BASE WT_BASE_BRANCH
 
     cd "$non_git_dir"
-    wt_read_git_config
+    run wt_read_git_config
+    assert_failure
 
     assert_equal "${WT_MAIN_REPO_ROOT:-}" ""
     assert_equal "${WT_WORKTREES_BASE:-}" ""
@@ -295,7 +296,7 @@ teardown() {
     assert_equal "${WT_BASE_BRANCH:-}" ""
 }
 
-@test "wt_read_git_config does nothing when no wt keys are set" {
+@test "wt_read_git_config returns failure when no wt keys are set" {
     local repo
     repo=$(create_mock_repo)
 
@@ -304,12 +305,12 @@ teardown() {
     cd "$repo"
     run --separate-stderr wt_read_git_config
 
-    assert_success
+    assert_failure
     assert_equal "$stderr" ""
     assert_equal "${WT_MAIN_REPO_ROOT:-}" ""
 }
 
-@test "wt_read_git_config does nothing when wt.enabled is not true" {
+@test "wt_read_git_config returns failure when wt.enabled is not true" {
     local repo
     repo=$(create_mock_repo)
 
@@ -322,13 +323,14 @@ teardown() {
     unset WT_MAIN_REPO_ROOT WT_WORKTREES_BASE WT_IDEA_FILES_BASE WT_BASE_BRANCH
 
     cd "$repo"
-    wt_read_git_config
+    run wt_read_git_config
+    assert_failure
 
     assert_equal "${WT_WORKTREES_BASE:-}" ""
     assert_equal "${WT_BASE_BRANCH:-}" ""
 }
 
-@test "wt_read_git_config does nothing when wt.enabled is false" {
+@test "wt_read_git_config returns failure when wt.enabled is false" {
     local repo
     repo=$(create_mock_repo)
 
@@ -341,7 +343,8 @@ teardown() {
     unset WT_MAIN_REPO_ROOT WT_WORKTREES_BASE WT_IDEA_FILES_BASE WT_BASE_BRANCH
 
     cd "$repo"
-    wt_read_git_config
+    run wt_read_git_config
+    assert_failure
 
     assert_equal "${WT_WORKTREES_BASE:-}" ""
 }
@@ -379,7 +382,7 @@ teardown() {
     cd "$repo"
     run --separate-stderr bash -c '
         source "'"$TEST_HOME/.wt/lib/wt-common"'"
-        wt_read_git_config
+        wt_read_git_config || true
         echo "WT_BASE_BRANCH=${WT_BASE_BRANCH:-UNSET}"
         echo "WT_MAIN_REPO_ROOT=${WT_MAIN_REPO_ROOT:-UNSET}"
     '
@@ -399,7 +402,7 @@ teardown() {
     cd "$repo"
     run --separate-stderr bash -c '
         source "'"$TEST_HOME/.wt/lib/wt-common"'"
-        wt_read_git_config
+        wt_read_git_config || true
     '
 
     assert_success
@@ -410,7 +413,7 @@ teardown() {
     [[ "$stderr" != *"wt.baseBranch"* ]] || fail "wt.baseBranch should not be listed as missing"
 }
 
-@test "wt_read_git_config requires all three core keys" {
+@test "wt_read_git_config returns failure on incomplete config" {
     local repo
     repo=$(create_mock_repo)
 
@@ -426,10 +429,9 @@ teardown() {
     run --separate-stderr bash -c '
         source "'"$TEST_HOME/.wt/lib/wt-common"'"
         wt_read_git_config
-        echo "MAIN=${WT_MAIN_REPO_ROOT:-UNSET}"
     '
 
-    assert_success
+    assert_failure
     [[ "$stderr" == *"incomplete git local config"* ]] || fail "Expected partial config warning, got: $stderr"
     [[ "$stderr" == *"wt.ideaFilesBase"* ]] || fail "Expected wt.ideaFilesBase in missing list, got: $stderr"
 }
@@ -532,12 +534,8 @@ teardown() {
     # Set git config with different values
     set_wt_git_config_required "$repo" "/git-wt" "/git-idea" "git-branch"
 
-    # Clear all variables, then load in the correct order
-    wt_clear_config_vars
-
     cd "$repo"
-    wt_read_git_config
-    wt_read_config "$TEST_HOME/.wt/current" 2>/dev/null || true
+    wt_read_config --force
 
     # Git config should win — mainRepoRoot auto-derived, rest from git config
     assert_equal "$WT_MAIN_REPO_ROOT" "$repo"
@@ -556,12 +554,8 @@ teardown() {
     # Set all 3 required git config keys but no optional keys
     set_wt_git_config_required "$repo" "/git-wt" "/git-idea" "git-branch"
 
-    # Clear all variables, then load in order
-    wt_clear_config_vars
-
     cd "$repo"
-    wt_read_git_config
-    wt_read_config "$TEST_HOME/.wt/current" 2>/dev/null || true
+    wt_read_config --force
 
     # Git config wins for required keys
     assert_equal "$WT_MAIN_REPO_ROOT" "$repo"
@@ -583,12 +577,8 @@ teardown() {
     # Set only 1 of 3 required git config keys (incomplete, but enabled)
     set_wt_git_config "$repo" "wt.enabled" "true" "wt.baseBranch" "git-branch"
 
-    # Clear all variables, then load in order
-    wt_clear_config_vars
-
     cd "$repo"
-    wt_read_git_config 2>/dev/null
-    wt_read_config "$TEST_HOME/.wt/current" 2>/dev/null || true
+    wt_read_config --force 2>/dev/null
 
     # Since git config was incomplete, .conf values should be used
     local norm_repo_path
@@ -631,5 +621,131 @@ teardown() {
     wt_read_git_config
 
     assert_equal "$WT_MAIN_REPO_ROOT" "$repo"
+}
+
+# =============================================================================
+# Tests for wt_read_config() orchestrator
+# =============================================================================
+
+# --- Default mode (ordered) ---
+
+@test "wt_read_config default mode loads git config then context" {
+    local repo
+    repo=$(create_mock_repo)
+
+    create_test_context "myctx" "$repo"
+    set_wt_git_config_required "$repo" "/git-wt" "/git-idea" "git-branch"
+
+    cd "$repo"
+    wt_read_config --force
+
+    # Git config wins for required keys
+    assert_equal "$WT_WORKTREES_BASE" "/git-wt"
+    assert_equal "$WT_BASE_BRANCH" "git-branch"
+    # Context fills gaps (WT_ACTIVE_WORKTREE from .conf)
+    assert [ -n "$WT_ACTIVE_WORKTREE" ]
+}
+
+@test "wt_read_config default mode falls back to context when not in git repo" {
+    local repo
+    repo=$(create_mock_repo)
+    create_test_context "myctx" "$repo"
+
+    local non_git_dir="$BATS_TEST_TMPDIR/not-a-repo"
+    mkdir -p "$non_git_dir"
+
+    cd "$non_git_dir"
+    wt_read_config --force
+
+    # Should get context values since git config is unavailable
+    assert_equal "$WT_MAIN_REPO_ROOT" "$repo"
+    assert_equal "$WT_BASE_BRANCH" "main"
+}
+
+@test "wt_read_config default mode falls back to context when wt.enabled is not true" {
+    local repo
+    repo=$(create_mock_repo)
+    create_test_context "myctx" "$repo"
+
+    # Set git config but don't enable
+    set_wt_git_config "$repo" \
+        "wt.worktreesBase" "/git-wt" \
+        "wt.ideaFilesBase" "/git-idea" \
+        "wt.baseBranch" "git-branch"
+
+    cd "$repo"
+    wt_read_config --force
+
+    # Should get context values since git config is not enabled
+    assert_equal "$WT_BASE_BRANCH" "main"
+}
+
+# --- --mode=git ---
+
+@test "wt_read_config --mode=git loads only git config" {
+    local repo
+    repo=$(create_mock_repo)
+
+    create_test_context "myctx" "$repo"
+    set_wt_git_config_required "$repo" "/git-wt" "/git-idea" "git-branch"
+
+    cd "$repo"
+    wt_read_config --mode=git --force
+
+    assert_equal "$WT_WORKTREES_BASE" "/git-wt"
+    # Context values should NOT be loaded
+    assert_equal "${WT_CONTEXT_NAME:-}" ""
+}
+
+# --- --mode=context ---
+
+@test "wt_read_config --mode=context loads only context config" {
+    local repo
+    repo=$(create_mock_repo)
+
+    create_test_context "myctx" "$repo"
+    set_wt_git_config_required "$repo" "/git-wt" "/git-idea" "git-branch"
+
+    cd "$repo"
+    wt_read_config --mode=context --force
+
+    # Should get context values, NOT git config
+    assert_equal "$WT_BASE_BRANCH" "main"
+    assert_equal "$WT_CONTEXT_NAME" "myctx"
+}
+
+# --- --force ---
+
+@test "wt_read_config --force clears existing variables" {
+    export WT_BASE_BRANCH="stale-value"
+    export WT_WORKTREES_BASE="stale-wt"
+
+    local non_git_dir="$BATS_TEST_TMPDIR/not-a-repo"
+    mkdir -p "$non_git_dir"
+    cd "$non_git_dir"
+
+    # No context configured, no git config — force should clear vars
+    # (returns non-zero since both sources fail, but vars are still cleared)
+    rm -f "$HOME/.wt/current"
+    wt_read_config --force || true
+
+    # Variables should be cleared (not "stale-value")
+    assert_equal "${WT_BASE_BRANCH:-}" ""
+    assert_equal "${WT_WORKTREES_BASE:-}" ""
+}
+
+@test "wt_read_config without --force preserves existing variables" {
+    local repo
+    repo=$(create_mock_repo)
+    create_test_context "myctx" "$repo"
+
+    export WT_BASE_BRANCH="pre-existing"
+
+    cd "$repo"
+    wt_read_config
+
+    # Without force, pre-existing env var should be preserved
+    # (wt_read_context_config only sets vars not already set)
+    assert_equal "$WT_BASE_BRANCH" "pre-existing"
 }
 
