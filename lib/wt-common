@@ -172,6 +172,7 @@ wt_read_git_config() {
 # Flags:
 #   --force  — clear all WT_* variables before loading
 #
+# shellcheck disable=SC2120  # args are optional; callers in other files pass --mode/--force
 wt_read_config() {
   local mode="ordered"
   local force=false
