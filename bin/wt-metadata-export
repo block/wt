@@ -47,6 +47,7 @@ else
   echo "Error: Cannot find wt-common" >&2
   exit 1
 fi
+wt_require_valid_config || exit 1
 
 usage() {
   cat >&2 <<EOF

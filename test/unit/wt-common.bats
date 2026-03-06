@@ -749,3 +749,122 @@ teardown() {
     assert_equal "$WT_BASE_BRANCH" "pre-existing"
 }
 
+# =============================================================================
+# Tests for _wt_is_valid_path_config()
+# =============================================================================
+
+@test "_wt_is_valid_path_config accepts absolute path" {
+    run _wt_is_valid_path_config "/home/user/worktrees"
+    assert_success
+}
+
+@test "_wt_is_valid_path_config accepts absolute path with spaces" {
+    run _wt_is_valid_path_config "/tmp/my worktrees"
+    assert_success
+}
+
+@test "_wt_is_valid_path_config rejects relative path" {
+    run _wt_is_valid_path_config "worktrees/foo"
+    assert_failure
+}
+
+@test "_wt_is_valid_path_config rejects dot-relative path" {
+    run _wt_is_valid_path_config "./worktrees"
+    assert_failure
+}
+
+@test "_wt_is_valid_path_config rejects parent-relative path" {
+    run _wt_is_valid_path_config "../worktrees"
+    assert_failure
+}
+
+@test "_wt_is_valid_path_config rejects glob with asterisk" {
+    run _wt_is_valid_path_config "/tmp/wt-*"
+    assert_failure
+}
+
+@test "_wt_is_valid_path_config rejects glob with question mark" {
+    run _wt_is_valid_path_config "/tmp/wt-?"
+    assert_failure
+}
+
+@test "_wt_is_valid_path_config rejects glob with bracket" {
+    run _wt_is_valid_path_config "/tmp/wt-[0-9]"
+    assert_failure
+}
+
+@test "_wt_is_valid_path_config rejects empty string" {
+    run _wt_is_valid_path_config ""
+    assert_failure
+}
+
+# =============================================================================
+# Tests for wt_require_valid_config()
+# =============================================================================
+
+@test "wt_require_valid_config passes when all paths are absolute" {
+    export WT_MAIN_REPO_ROOT="/home/user/repo"
+    export WT_WORKTREES_BASE="/home/user/worktrees"
+    export WT_IDEA_FILES_BASE="/home/user/idea-files"
+
+    run --separate-stderr wt_require_valid_config
+    assert_success
+    assert_equal "$stderr" ""
+}
+
+@test "wt_require_valid_config fails for relative WT_MAIN_REPO_ROOT" {
+    export WT_MAIN_REPO_ROOT="relative/repo"
+    export WT_WORKTREES_BASE="/home/user/worktrees"
+    export WT_IDEA_FILES_BASE="/home/user/idea-files"
+
+    run --separate-stderr wt_require_valid_config
+    assert_failure
+    [[ "$stderr" == *"WT_MAIN_REPO_ROOT"* ]]
+    [[ "$stderr" == *"relative/repo"* ]]
+}
+
+@test "wt_require_valid_config fails for glob in WT_WORKTREES_BASE" {
+    export WT_MAIN_REPO_ROOT="/home/user/repo"
+    export WT_WORKTREES_BASE="/home/user/wt-*"
+    export WT_IDEA_FILES_BASE="/home/user/idea-files"
+
+    run --separate-stderr wt_require_valid_config
+    assert_failure
+    [[ "$stderr" == *"WT_WORKTREES_BASE"* ]]
+}
+
+@test "wt_require_valid_config reports all invalid vars" {
+    export WT_MAIN_REPO_ROOT="relative/repo"
+    export WT_WORKTREES_BASE="../worktrees"
+    export WT_IDEA_FILES_BASE="/valid/path"
+
+    run --separate-stderr wt_require_valid_config
+    assert_failure
+    [[ "$stderr" == *"WT_MAIN_REPO_ROOT"* ]]
+    [[ "$stderr" == *"WT_WORKTREES_BASE"* ]]
+}
+
+@test "wt_require_valid_config shows config file path when context is set" {
+    export WT_MAIN_REPO_ROOT="relative/repo"
+    export WT_WORKTREES_BASE="/valid/path"
+    export WT_IDEA_FILES_BASE="/valid/path"
+    export WT_CONTEXT_NAME="mycontext"
+
+    # Create the config file so the message references it
+    mkdir -p "$HOME/.wt/repos"
+    echo 'WT_MAIN_REPO_ROOT="relative/repo"' > "$HOME/.wt/repos/mycontext.conf"
+
+    run --separate-stderr wt_require_valid_config
+    assert_failure
+    [[ "$stderr" == *"mycontext.conf"* ]]
+}
+
+@test "wt_require_valid_config skips empty variables" {
+    unset WT_MAIN_REPO_ROOT
+    unset WT_WORKTREES_BASE
+    unset WT_IDEA_FILES_BASE
+
+    run --separate-stderr wt_require_valid_config
+    assert_success
+}
+
