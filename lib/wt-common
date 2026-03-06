@@ -248,6 +248,60 @@ _wt_expand_path() {
   echo "${path/#\~\//$HOME/}"
 }
 
+# Check if a path value is valid for a directory config variable.
+# Valid means: absolute path (starts with /) and contains no glob characters.
+# Args: $1 = path value
+# Returns: 0 if valid, 1 if invalid
+_wt_is_valid_path_config() {
+  local path="$1"
+
+  # Must be absolute
+  [[ "$path" != /* ]] && return 1
+
+  # Must not contain glob metacharacters
+  # shellcheck disable=SC2254  # intentional glob check via case pattern
+  case "$path" in
+    *\**|*\?*|*\[*) return 1 ;;
+  esac
+
+  return 0
+}
+
+# Validate that all directory config variables are absolute paths without globs.
+# Prints actionable error messages to stderr on failure.
+# Returns: 0 if all valid, 1 if any invalid
+#
+# This is called by bin/wt-* scripts after bootstrap. It is NOT called
+# during shell startup (wt.sh sourcing) to avoid breaking the user's shell.
+wt_require_valid_config() {
+  local rc=0
+  local var val
+
+  for var in WT_MAIN_REPO_ROOT WT_WORKTREES_BASE WT_IDEA_FILES_BASE; do
+    eval "val=\"\${$var:-}\""
+    if [[ -z "$val" ]]; then
+      continue  # empty/unset — fallback defaults handle this
+    fi
+    if ! _wt_is_valid_path_config "$val"; then
+      error "$var must be an absolute path (no globs): $val"
+      rc=1
+    fi
+  done
+
+  if [[ $rc -ne 0 ]]; then
+    local config_file=""
+    if [[ -n "${WT_CONTEXT_NAME:-}" ]]; then
+      config_file="$HOME/.wt/repos/${WT_CONTEXT_NAME}.conf"
+    fi
+    if [[ -n "$config_file" && -f "$config_file" ]]; then
+      printf "  Fix the value(s) in: %s\n" "$config_file" >&2
+    else
+      printf "  Check your context config or git local config (wt.* keys)\n" >&2
+    fi
+  fi
+
+  return $rc
+}
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Color support (only if output is a TTY)
