@@ -15,6 +15,10 @@ teardown() {
 # Tests for _WT_ROOT consistency
 # =============================================================================
 
+@test "wt.sh dispatches adopt subcommand" {
+    grep -q 'adopt)' "$PROJECT_ROOT/wt.sh"
+}
+
 @test "_WT_ROOT default in wt.sh matches INSTALL_DIR in install.sh" {
     # Extract the default path from wt.sh: _WT_ROOT="${_WT_ROOT:-$HOME/.wt}"
     local wt_line

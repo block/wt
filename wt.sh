@@ -91,6 +91,7 @@ wt() {
 
   case "$cmd" in
     add)             _wt_run wt-add "$@" ;;
+    adopt)           _wt_run wt-adopt "$@" ;;
     switch)          _wt_run wt-switch "$@" ;;
     remove)          _wt_run wt-remove "$@" ;;
     list)            _wt_run wt-list "$@" ;;

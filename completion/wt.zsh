@@ -294,6 +294,7 @@ fi
 # Register standalone wt-* completions
 # ═══════════════════════════════════════════════════════════════════════════════
 
+compdef _wt_switch wt-adopt
 compdef _wt_switch wt-switch
 compdef _wt_remove wt-remove
 compdef _wt_cd wt-cd
@@ -312,6 +313,7 @@ _wt_completion() {
   local -a commands
   commands=(
     'add:Create a new worktree for a branch'
+    'adopt:Adopt an existing worktree into wt management'
     'switch:Switch the active worktree symlink'
     'remove:Remove a worktree'
     'list:List all worktrees with status'
@@ -343,6 +345,7 @@ _wt_completion() {
           branches=("${(f)$(git branch -a 2>/dev/null | sed 's/^[* ]*//' | sed 's|remotes/origin/||')}")
           (( ${#branches[@]} > 0 )) && _describe 'branch' branches
           ;;
+        adopt)                  _wt_switch ;;
         switch|cd)              _wt_switch ;;
         remove)                 _wt_remove ;;
         context)                _wt_context ;;

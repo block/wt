@@ -79,6 +79,9 @@ else
 fi
 wt_require_valid_config || exit 1
 
+# Source wt-adopt library for adoption treatment
+wt_source wt-adopt
+
 usage() {
   echo "Usage: $(basename "$0") [git worktree add arguments...]"
   echo
@@ -140,81 +143,6 @@ while [[ $i -lt ${#ARGS[@]} ]]; do
   i=$((i + 1))
 done
 
-# Helper: install project metadata for a created worktree
-install_metadata_for_worktree() {
-  local worktree_path="$1"
-
-  # Normalize to absolute (worktree now exists)
-  local worktree_path_abs
-  worktree_path_abs="$(cd "$worktree_path" && pwd)"
-
-  echo "Installing project metadata into worktree: $worktree_path_abs"
-
-  # Find wt-metadata-import: try script directory first, then PATH
-  local metadata_import=""
-  if [[ -f "$SCRIPT_DIR/wt-metadata-import" ]]; then
-    metadata_import="$SCRIPT_DIR/wt-metadata-import"
-  elif command -v wt-metadata-import >/dev/null 2>&1; then
-    metadata_import="wt-metadata-import"
-  else
-    error "Cannot find wt-metadata-import"
-    return 1
-  fi
-
-  "$metadata_import" -y "$WT_IDEA_FILES_BASE" "$worktree_path_abs"
-}
-
-# Helper: install Bazel output symlinks (bazel-out, bazel-bin, etc.) for a created worktree
-#
-# Bazel stores build outputs in a central cache directory (typically under /private/var/tmp).
-# The symlinks (bazel-out, bazel-bin, etc.) in the repo root point to this shared cache.
-# By copying these symlinks to new worktrees, we enable:
-#   1. Faster IntelliJ/IDE sync (no rebuild required)
-#   2. Shared build cache across worktrees
-#   3. Immediate access to compiled artifacts
-install_bazel_symlinks_for_worktree() {
-  local worktree_path="$1"
-
-  # Normalize to absolute (worktree now exists)
-  local worktree_path_abs
-  worktree_path_abs="$(cd "$worktree_path" && pwd)"
-
-  # List of Bazel symlinks to copy from main repo
-  # These are the most important ones for IntelliJ sync performance
-  local bazel_symlinks=("bazel-out" "bazel-bin" "bazel-testlogs" "bazel-genfiles")
-  
-  local main_repo_abs
-  main_repo_abs="$(cd "$WT_MAIN_REPO_ROOT" && pwd)"
-
-  echo "Installing Bazel symlinks into worktree: $worktree_path_abs"
-
-  for symlink_name in "${bazel_symlinks[@]}"; do
-    local src_link="$main_repo_abs/$symlink_name"
-    local dst_link="$worktree_path_abs/$symlink_name"
-
-    # Check if source symlink exists in main repo
-    if [[ -L "$src_link" ]]; then
-      # Get the target of the symlink
-      local target
-      target="$(readlink "$src_link")"
-
-      # If the target is relative, make it absolute based on main repo location
-      if [[ "$target" != /* ]]; then
-        target="$main_repo_abs/$target"
-      fi
-
-      # Remove existing symlink/file in worktree if present
-      if [[ -L "$dst_link" || -e "$dst_link" ]]; then
-        rm -rf "$dst_link"
-      fi
-
-      # Create symlink pointing to the same target
-      ln -s "$target" "$dst_link"
-      echo "  ✓ $symlink_name -> $target"
-    fi
-  done
-}
-
 ########################################
 # Fast path: NOT creating a new branch #
 ########################################
@@ -266,8 +194,7 @@ if [[ $creating_new_branch -eq 0 ]]; then
     echo "Creating worktree for existing branch '$local_branch' at: $worktree_path"
     git worktree add -- "$worktree_path" "$local_branch"
 
-    install_metadata_for_worktree "$worktree_path"
-    install_bazel_symlinks_for_worktree "$worktree_path"
+    wt_adopt_worktree "$(cd "$worktree_path" && pwd)"
     success "git worktree add completed successfully."
     exit 0
   fi
@@ -288,8 +215,7 @@ if [[ $creating_new_branch -eq 0 ]]; then
   info "Not creating a new branch; running: git worktree add ${ARGS[*]}"
   git worktree add "${ARGS[@]}"
 
-  install_metadata_for_worktree "$worktree_path"
-  install_bazel_symlinks_for_worktree "$worktree_path"
+  wt_adopt_worktree "$(cd "$worktree_path" && pwd)"
   success "git worktree add completed successfully."
   exit 0
 fi
@@ -475,8 +401,7 @@ else
   git worktree add "${FINAL_ARGS[@]}"
 fi
 
-install_metadata_for_worktree "$worktree_path"
-install_bazel_symlinks_for_worktree "$worktree_path"
+wt_adopt_worktree "$(cd "$worktree_path" && pwd)"
 
 success "git worktree add completed successfully."
 exit 0
