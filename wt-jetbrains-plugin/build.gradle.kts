@@ -18,7 +18,7 @@ kotlin {
 }
 
 repositories {
-    maven(url = "https://maven.global.square/artifactory/square-public")
+    mavenCentral()
     intellijPlatform {
         defaultRepositories()
     }
