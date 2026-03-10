@@ -77,23 +77,9 @@ class SymlinkSwitchService(
                 PathHelper.atomicSetSymlink(symlinkPath, newTarget)
             }
 
-            // Phase 3: Reload editors (20%–40%)
-            scope?.fraction(0.20)
-            scope?.text("Reloading editors...")
-            indicator?.text = "Reloading editors..."
-            app.invokeAndWait({
-                WriteAction.run<Nothing> {
-                    val fdm = FileDocumentManager.getInstance()
-                    for (openFile in FileEditorManager.getInstance(project).openFiles) {
-                        val doc = fdm.getCachedDocument(openFile) ?: continue
-                        fdm.reloadFromDisk(doc)
-                    }
-                }
-            }, ModalityState.defaultModalityState())
-
-            // Phase 4: VFS refresh (40%–65%)
+            // Phase 3: VFS refresh (20%–45%)
             // Re-resolve projectRoot AFTER symlink swap so VFS picks up the new target
-            scope?.fraction(0.40)
+            scope?.fraction(0.20)
             scope?.text("Refreshing file system...")
             indicator?.text = "Refreshing file system..."
             val projectRoot = project.basePath?.let { VfsUtil.findFileByIoFile(java.io.File(it), true) }
@@ -101,7 +87,23 @@ class SymlinkSwitchService(
                 projectRoot.refresh(false, true)
                 VfsUtil.markDirtyAndRefresh(false, true, true, projectRoot)
             }
-            VirtualFileManager.getInstance().asyncRefresh {}
+
+            // Phase 4: Reload editors (45%–65%)
+            // Must happen AFTER VFS refresh so documents reload from new worktree content
+            scope?.fraction(0.45)
+            scope?.text("Reloading editors...")
+            indicator?.text = "Reloading editors..."
+            app.invokeAndWait({
+                WriteAction.run<Nothing> {
+                    val fdm = FileDocumentManager.getInstance()
+                    for (openFile in FileEditorManager.getInstance(project).openFiles) {
+                        // Force VFS to re-read this file's content from disk (not from cache)
+                        openFile.refresh(false, false)
+                        val doc = fdm.getCachedDocument(openFile) ?: continue
+                        fdm.reloadFromDisk(doc)
+                    }
+                }
+            }, ModalityState.defaultModalityState())
 
             // Phase 5: Git state (65%–85%)
             scope?.fraction(0.65)

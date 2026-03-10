@@ -1,5 +1,6 @@
 package com.block.wt.agent
 
+import com.block.wt.util.PlatformUtil
 import com.intellij.openapi.diagnostic.Logger
 import java.nio.file.Files
 import java.nio.file.Path
@@ -51,7 +52,7 @@ object AgentDetector : AgentDetection {
      * Returns empty set on failure (Windows, permission denied, lsof not found, etc.)
      */
     private fun detectViaLsof(): Set<Path> {
-        if (isWindows()) return emptySet()
+        if (PlatformUtil.isWindows()) return emptySet()
 
         return try {
             val lsofPath = if (Files.exists(Path.of("/usr/sbin/lsof"))) "/usr/sbin/lsof"
@@ -132,7 +133,7 @@ object AgentDetector : AgentDetection {
 
     /** Best-effort reverse of encodePath. Lossy, so we validate via round-trip. */
     private fun decodeDirToPath(encoded: String): Path? {
-        if (isWindows()) return null
+        if (PlatformUtil.isWindows()) return null
         val candidate = "/" + encoded.replace("-", "/")
         return try {
             val path = Path.of(candidate).normalize()
@@ -142,5 +143,4 @@ object AgentDetector : AgentDetection {
         }
     }
 
-    private fun isWindows(): Boolean = System.getProperty("os.name").lowercase().contains("win")
 }

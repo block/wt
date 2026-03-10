@@ -25,6 +25,8 @@ class WtPluginSettings : PersistentStateComponent<WtPluginSettings.State> {
         var autoRefreshIntervalSeconds: Int = 30,
         var setupCompletedContexts: MutableList<String> = mutableListOf(),
         var lastWelcomeVersion: String = "",
+        var enhancedSessionDetection: Boolean = true,
+        var agentTerminalNavigation: Boolean = true,
     )
 
     @Volatile

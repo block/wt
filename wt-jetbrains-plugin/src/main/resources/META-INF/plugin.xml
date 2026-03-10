@@ -165,10 +165,6 @@
                     text="Open in Terminal"
                     icon="AllIcons.Actions.Execute"/>
             <separator/>
-            <action id="Wt.Toolbar.AddContext"
-                    class="com.block.wt.actions.context.AddContextAction"
-                    text="Add Context"
-                    icon="AllIcons.General.Add"/>
             <action id="Wt.Toolbar.ShowContextConfig"
                     class="com.block.wt.actions.context.ShowContextConfigAction"
                     text="Show Context Config"
@@ -183,7 +179,11 @@
         <!-- Right-click context menu on worktree table rows -->
         <group id="Wt.WorktreeRowContextMenu" text="Worktree">
             <reference ref="Wt.Toolbar.Switch"/>
+            <reference ref="Wt.Toolbar.Create"/>
             <reference ref="Wt.Toolbar.OpenTerminal"/>
+            <action id="Wt.Context.NavigateToAgent"
+                    class="com.block.wt.experiment.terminalnav.NavigateToAgentTerminalAction"
+                    text="Go to Agent Terminal"/>
             <separator/>
             <action id="Wt.Context.RevealInFinder"
                     class="com.block.wt.actions.util.RevealInFinderAction"
@@ -192,19 +192,29 @@
             <action id="Wt.Context.CopyPath"
                     class="com.block.wt.actions.util.CopyWorktreePathAction"
                     text="Copy Path"/>
+            <action id="Wt.Context.CopyBranch"
+                    class="com.block.wt.actions.util.CopyBranchNameAction"
+                    text="Copy Branch Name"/>
             <separator/>
             <action id="Wt.Context.ProvisionWorktree"
                     class="com.block.wt.actions.worktree.ProvisionWorktreeAction"
                     text="Provision Worktree..."
                     icon="AllIcons.Actions.Download"/>
             <reference ref="Wt.Toolbar.Remove"/>
+            <action id="Wt.Context.RemoveMerged"
+                    class="com.block.wt.actions.worktree.RemoveMergedAction"
+                    text="Remove Merged Worktrees..."/>
             <separator/>
-            <action id="Wt.Context.ExportMetadata"
-                    class="com.block.wt.actions.metadata.ExportMetadataAction"
-                    text="Export Metadata to Vault"/>
-            <action id="Wt.Context.ImportMetadata"
-                    class="com.block.wt.actions.metadata.ImportMetadataAction"
-                    text="Import Metadata from Vault"/>
+            <group id="Wt.Context.MetadataSubmenu" text="Metadata" popup="true">
+                <action id="Wt.Context.ExportMetadata"
+                        class="com.block.wt.actions.metadata.ExportMetadataAction"
+                        text="Export to Vault (main only)"/>
+                <action id="Wt.Context.ImportMetadata"
+                        class="com.block.wt.actions.metadata.ImportMetadataAction"
+                        text="Import from Vault"/>
+            </group>
+            <separator/>
+            <reference ref="Wt.Toolbar.Refresh"/>
         </group>
     </actions>
 </idea-plugin>

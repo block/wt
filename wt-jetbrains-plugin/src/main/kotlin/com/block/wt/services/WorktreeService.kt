@@ -2,6 +2,8 @@ package com.block.wt.services
 
 import com.block.wt.agent.AgentDetection
 import com.block.wt.agent.AgentDetector
+import com.block.wt.experiment.sessiondetection.EnhancedAgentDetector
+import com.block.wt.experiment.sessiondetection.EnhancedAgentStatusEnricher
 import com.block.wt.git.GitParser
 import com.block.wt.model.WorktreeInfo
 import com.block.wt.model.WorktreeStatus
@@ -40,10 +42,16 @@ class WorktreeService(
     internal var agentDetection: AgentDetection = AgentDetector
 
     private val gitClient by lazy { GitClient(processRunner) }
+    private val prLoader by lazy { PullRequestLoader(processRunner) }
     private val enrichers: List<WorktreeEnricher> by lazy {
+        val agentEnricher = if (WtPluginSettings.getInstance().state.enhancedSessionDetection) {
+            EnhancedAgentStatusEnricher(EnhancedAgentDetector(agentDetection))
+        } else {
+            AgentStatusEnricher(agentDetection)
+        }
         listOf(
             ProvisionStatusEnricher(ContextService.getInstance(project)),
-            AgentStatusEnricher(agentDetection),
+            agentEnricher,
         )
     }
     private val refreshScheduler = WorktreeRefreshScheduler(cs) { refreshWorktreeList() }
@@ -61,7 +69,17 @@ class WorktreeService(
         cs.launch {
             try {
                 val list = listWorktrees()
-                _worktrees.value = list
+                // Carry forward previous PR info to avoid flicker (blank → loaded)
+                val previousByPath = _worktrees.value.associateBy { it.path }
+                val listWithPrCarryForward = list.map { wt ->
+                    val prev = previousByPath[wt.path]
+                    if (prev != null && wt.branch == prev.branch) {
+                        wt.copy(prInfo = prev.prInfo)
+                    } else {
+                        wt
+                    }
+                }
+                _worktrees.value = listWithPrCarryForward
                 lastRefreshTime = System.currentTimeMillis()
 
                 // Async-load status indicators (skip if disabled in settings)
@@ -79,6 +97,28 @@ class WorktreeService(
                     }
                 }
                 statusJobs.awaitAll()
+
+                // Detect repo slug for "Create PR" links (before PR jobs so it's available on click)
+                val repoRoot = getMainRepoRoot()
+                if (repoRoot != null) {
+                    _repoSlug = prLoader.detectRepoSlug(repoRoot)
+                }
+
+                // Async-load PR info for each worktree
+                val currentList = _worktrees.value
+                val prJobs = currentList.withIndex().map { (index, wt) ->
+                    async {
+                        val prInfo = prLoader.loadPRInfo(wt)
+                        statusMutex.withLock {
+                            val current = _worktrees.value.toMutableList()
+                            if (index < current.size && current[index].path == wt.path) {
+                                current[index] = current[index].copy(prInfo = prInfo)
+                                _worktrees.value = current
+                            }
+                        }
+                    }
+                }
+                prJobs.awaitAll()
             } finally {
                 _isLoading.value = false
             }
@@ -125,58 +165,16 @@ class WorktreeService(
         parseGitStatusOutput(wt, result.stdout)
     }
 
-    /**
-     * Parses `git status --porcelain=v1 -b` output.
-     *
-     * Format:
-     * ```
-     * ## branch...origin/branch [ahead 1, behind 2]
-     * M  staged-file.txt
-     *  M unstaged-file.txt
-     * ?? untracked.txt
-     * UU conflicting.txt
-     * ```
-     */
-    internal fun parseGitStatusOutput(wt: WorktreeInfo, output: String): WorktreeInfo {
-        var staged = 0; var modified = 0; var untracked = 0; var conflicts = 0
-        var ahead: Int? = null; var behind: Int? = null
+    internal fun parseGitStatusOutput(wt: WorktreeInfo, output: String): WorktreeInfo =
+        parseGitStatus(wt, output)
 
-        for (line in output.lines()) {
-            if (line.startsWith("## ")) {
-                // Parse branch line: "## branch...origin/branch [ahead 1, behind 2]"
-                val bracketContent = line.substringAfter("[", "").substringBefore("]", "")
-                if (bracketContent.isNotEmpty()) {
-                    for (part in bracketContent.split(",")) {
-                        val trimmed = part.trim()
-                        if (trimmed.startsWith("ahead ")) {
-                            ahead = trimmed.removePrefix("ahead ").trim().toIntOrNull()
-                        } else if (trimmed.startsWith("behind ")) {
-                            behind = trimmed.removePrefix("behind ").trim().toIntOrNull()
-                        }
-                    }
-                }
-                continue
-            }
-            if (line.length < 2) continue
-            val x = line[0] // staged status
-            val y = line[1] // unstaged status
+    // --- PR info ---
 
-            // Conflicts: UU, AA, DD, AU, UA, DU, UD
-            if ((x == 'U' || y == 'U') || (x == 'A' && y == 'A') || (x == 'D' && y == 'D')) {
-                conflicts++; continue
-            }
-            // Untracked
-            if (x == '?' && y == '?') { untracked++; continue }
-            // Staged changes (X column)
-            if (x in "MADRC") staged++
-            // Unstaged changes (Y column)
-            if (y in "MD") modified++
-        }
+    @Volatile
+    private var _repoSlug: String? = null
 
-        return wt.copy(
-            status = WorktreeStatus.Loaded(staged, modified, untracked, conflicts, ahead, behind),
-        )
-    }
+    /** The GitHub owner/repo slug (e.g. "block/wt"), available after first refresh. */
+    val repoSlug: String? get() = _repoSlug
 
     // --- Facade delegates to GitClient ---
 
@@ -257,4 +255,57 @@ class WorktreeService(
     companion object {
         fun getInstance(project: Project): WorktreeService = project.service()
     }
+}
+
+/**
+ * Parses `git status --porcelain=v1 -b` output.
+ *
+ * Format:
+ * ```
+ * ## branch...origin/branch [ahead 1, behind 2]
+ * M  staged-file.txt
+ *  M unstaged-file.txt
+ * ?? untracked.txt
+ * UU conflicting.txt
+ * ```
+ */
+internal fun parseGitStatus(wt: WorktreeInfo, output: String): WorktreeInfo {
+    var staged = 0; var modified = 0; var untracked = 0; var conflicts = 0
+    var ahead: Int? = null; var behind: Int? = null
+
+    for (line in output.lines()) {
+        if (line.startsWith("## ")) {
+            // Parse branch line: "## branch...origin/branch [ahead 1, behind 2]"
+            val bracketContent = line.substringAfter("[", "").substringBefore("]", "")
+            if (bracketContent.isNotEmpty()) {
+                for (part in bracketContent.split(",")) {
+                    val trimmed = part.trim()
+                    if (trimmed.startsWith("ahead ")) {
+                        ahead = trimmed.removePrefix("ahead ").trim().toIntOrNull()
+                    } else if (trimmed.startsWith("behind ")) {
+                        behind = trimmed.removePrefix("behind ").trim().toIntOrNull()
+                    }
+                }
+            }
+            continue
+        }
+        if (line.length < 2) continue
+        val x = line[0] // staged status
+        val y = line[1] // unstaged status
+
+        // Conflicts: UU, AA, DD, AU, UA, DU, UD
+        if ((x == 'U' || y == 'U') || (x == 'A' && y == 'A') || (x == 'D' && y == 'D')) {
+            conflicts++; continue
+        }
+        // Untracked
+        if (x == '?' && y == '?') { untracked++; continue }
+        // Staged changes (X column)
+        if (x in "MADRC") staged++
+        // Unstaged changes (Y column)
+        if (y in "MD") modified++
+    }
+
+    return wt.copy(
+        status = WorktreeStatus.Loaded(staged, modified, untracked, conflicts, ahead, behind),
+    )
 }

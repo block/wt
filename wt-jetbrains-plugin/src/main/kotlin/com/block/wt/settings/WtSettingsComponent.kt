@@ -16,6 +16,8 @@ class WtSettingsComponent {
     private var statusLoading = settings.state.statusLoadingEnabled
     private var promptProvision = settings.state.promptProvisionOnSwitch
     private var autoRefreshInterval = settings.state.autoRefreshIntervalSeconds
+    private var enhancedSessionDetection = settings.state.enhancedSessionDetection
+    private var agentTerminalNavigation = settings.state.agentTerminalNavigation
 
     val panel: JPanel = panel {
         group("General") {
@@ -43,6 +45,16 @@ class WtSettingsComponent {
                     .comment("Periodically refreshes the worktree list to detect external changes")
             }
         }
+        group("Experiments") {
+            row {
+                checkBox("Enhanced agent session detection (lifecycle states, lock file validation)")
+                    .bindSelected(::enhancedSessionDetection)
+            }
+            row {
+                checkBox("Navigate to agent terminal on click (macOS)")
+                    .bindSelected(::agentTerminalNavigation)
+            }
+        }
         group("Confirmations") {
             row {
                 checkBox("Confirm before switching worktrees")
@@ -64,7 +76,9 @@ class WtSettingsComponent {
             confirmRemove != settings.state.confirmBeforeRemove ||
             statusLoading != settings.state.statusLoadingEnabled ||
             promptProvision != settings.state.promptProvisionOnSwitch ||
-            autoRefreshInterval != settings.state.autoRefreshIntervalSeconds
+            autoRefreshInterval != settings.state.autoRefreshIntervalSeconds ||
+            enhancedSessionDetection != settings.state.enhancedSessionDetection ||
+            agentTerminalNavigation != settings.state.agentTerminalNavigation
     }
 
     fun apply() {
@@ -76,6 +90,8 @@ class WtSettingsComponent {
             statusLoadingEnabled = statusLoading,
             promptProvisionOnSwitch = promptProvision,
             autoRefreshIntervalSeconds = autoRefreshInterval,
+            enhancedSessionDetection = enhancedSessionDetection,
+            agentTerminalNavigation = agentTerminalNavigation,
         ))
     }
 
@@ -87,5 +103,7 @@ class WtSettingsComponent {
         statusLoading = settings.state.statusLoadingEnabled
         promptProvision = settings.state.promptProvisionOnSwitch
         autoRefreshInterval = settings.state.autoRefreshIntervalSeconds
+        enhancedSessionDetection = settings.state.enhancedSessionDetection
+        agentTerminalNavigation = settings.state.agentTerminalNavigation
     }
 }
