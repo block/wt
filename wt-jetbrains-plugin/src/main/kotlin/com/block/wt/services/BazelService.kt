@@ -25,6 +25,29 @@ class BazelService(
         val BAZEL_SYMLINKS = listOf("bazel-out", "bazel-bin", "bazel-testlogs", "bazel-genfiles")
 
         fun getInstance(project: Project): BazelService = project.service()
+
+        internal fun parseDirectoriesSection(projectViewFile: Path): List<String> {
+            val lines = projectViewFile.readText().lines()
+            val directories = mutableListOf<String>()
+            var inDirectoriesSection = false
+
+            for (line in lines) {
+                val trimmed = line.trim()
+                when {
+                    trimmed == "directories:" -> inDirectoriesSection = true
+                    inDirectoriesSection && trimmed.isBlank() -> continue
+                    inDirectoriesSection && !trimmed.startsWith("#") && !trimmed.startsWith("-") -> {
+                        if (trimmed.endsWith(":")) {
+                            // New section started
+                            break
+                        }
+                        directories.add(trimmed)
+                    }
+                }
+            }
+
+            return directories
+        }
     }
 
     suspend fun installBazelSymlinks(
@@ -132,26 +155,4 @@ class BazelService(
         return if (projectView.exists()) projectView else null
     }
 
-    internal fun parseDirectoriesSection(projectViewFile: Path): List<String> {
-        val lines = projectViewFile.readText().lines()
-        val directories = mutableListOf<String>()
-        var inDirectoriesSection = false
-
-        for (line in lines) {
-            val trimmed = line.trim()
-            when {
-                trimmed == "directories:" -> inDirectoriesSection = true
-                inDirectoriesSection && trimmed.isBlank() -> continue
-                inDirectoriesSection && !trimmed.startsWith("#") && !trimmed.startsWith("-") -> {
-                    if (trimmed.endsWith(":")) {
-                        // New section started
-                        break
-                    }
-                    directories.add(trimmed)
-                }
-            }
-        }
-
-        return directories
-    }
 }

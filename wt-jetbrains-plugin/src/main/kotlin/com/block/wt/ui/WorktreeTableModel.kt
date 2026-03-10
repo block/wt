@@ -1,7 +1,11 @@
 package com.block.wt.ui
 
+import com.block.wt.experiment.sessiondetection.AgentSessionState
+import com.block.wt.experiment.sessiondetection.AgentTerminalKind
+import com.block.wt.model.PullRequestInfo
 import com.block.wt.model.WorktreeInfo
 import com.block.wt.model.WorktreeStatus
+import com.block.wt.util.DurationFormat
 import java.nio.file.Path
 import javax.swing.table.AbstractTableModel
 
@@ -15,9 +19,10 @@ class WorktreeTableModel : AbstractTableModel() {
         const val COL_BRANCH = 1
         const val COL_STATUS = 2
         const val COL_AGENT = 3
-        const val COL_PROVISIONED = 4
+        const val COL_PR = 4
+        const val COL_PROVISIONED = 5
 
-        val COLUMN_NAMES = arrayOf("Path", "Branch", "Status", "Agent", "Provisioned")
+        val COLUMN_NAMES = arrayOf("Path", "Branch", "Status", "Agent", "PR", "Provisioned")
     }
 
     fun setWorktrees(newWorktrees: List<WorktreeInfo>) {
@@ -46,9 +51,8 @@ class WorktreeTableModel : AbstractTableModel() {
                 if (wt.isMain) append(" [main]")
             }
             COL_STATUS -> formatStatus(wt)
-            COL_AGENT -> if (wt.hasActiveAgent) {
-                "\uD83E\uDD16 " + wt.activeAgentSessionIds.joinToString(", ") { it.take(8) }
-            } else ""
+            COL_AGENT -> formatAgent(wt)
+            COL_PR -> formatPR(wt)
             COL_PROVISIONED -> when {
                 wt.isProvisionedByCurrentContext -> "✓"
                 wt.isProvisioned -> "~"
@@ -56,6 +60,61 @@ class WorktreeTableModel : AbstractTableModel() {
             }
             else -> null
         }
+    }
+
+    private fun formatAgent(wt: WorktreeInfo): String {
+        val sessions = wt.agentSessions
+        if (sessions.isNotEmpty()) {
+            return formatEnhancedAgent(wt)
+        }
+        // Fallback: legacy display
+        return if (wt.hasActiveAgent) {
+            "\uD83E\uDD16 " + wt.activeAgentSessionIds.joinToString(", ") { it.take(8) }
+        } else ""
+    }
+
+    private fun formatEnhancedAgent(wt: WorktreeInfo): String {
+        val sessions = wt.agentSessions
+        if (sessions.isEmpty()) return ""
+
+        val now = System.currentTimeMillis()
+        val lines = sessions.map { session ->
+            val terminal = if (session.terminalKind != AgentTerminalKind.UNKNOWN) {
+                " · ${session.terminalKind.displayName}"
+            } else ""
+            when (session.state) {
+                AgentSessionState.RUNNING -> {
+                    val elapsed = DurationFormat.compact(now - session.sessionStartMs)
+                    "\uD83E\uDD16 running ($elapsed)$terminal"
+                }
+                AgentSessionState.IDLE -> {
+                    val ago = DurationFormat.compact(now - session.lastActivityMs)
+                    "\uD83D\uDCA4 idle ($ago ago)$terminal"
+                }
+            }
+        }
+
+        return lines.joinToString("\n")
+    }
+
+    /**
+     * Returns the session index at the given Y offset within a multi-session agent cell.
+     * Used by the click handler to determine which session was clicked.
+     */
+    fun getSessionIndexAtOffset(wt: WorktreeInfo, yOffsetInCell: Int, rowHeight: Int): Int {
+        val sessions = wt.agentSessions
+        if (sessions.size <= 1) return 0
+        val lineHeight = rowHeight / sessions.size
+        return (yOffsetInCell / lineHeight).coerceIn(0, sessions.size - 1)
+    }
+
+    private fun formatPR(wt: WorktreeInfo): String = when (wt.prInfo) {
+        is PullRequestInfo.NotLoaded -> ""
+        is PullRequestInfo.NoPR -> "Create PR"
+        is PullRequestInfo.Open -> "#${wt.prInfo.number}"
+        is PullRequestInfo.Draft -> "#${wt.prInfo.number}"
+        is PullRequestInfo.Merged -> "#${wt.prInfo.number}"
+        is PullRequestInfo.Closed -> "#${wt.prInfo.number}"
     }
 
     private fun formatStatus(wt: WorktreeInfo): String {

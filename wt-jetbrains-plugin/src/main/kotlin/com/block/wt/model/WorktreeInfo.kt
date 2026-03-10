@@ -1,7 +1,17 @@
 package com.block.wt.model
 
+import com.block.wt.experiment.sessiondetection.AgentSessionInfo
 import com.block.wt.util.relativizeAgainst
 import java.nio.file.Path
+
+sealed class PullRequestInfo {
+    data object NotLoaded : PullRequestInfo()
+    data object NoPR : PullRequestInfo()
+    data class Open(val number: Int, val url: String, val title: String) : PullRequestInfo()
+    data class Draft(val number: Int, val url: String, val title: String) : PullRequestInfo()
+    data class Merged(val number: Int, val url: String, val title: String) : PullRequestInfo()
+    data class Closed(val number: Int, val url: String, val title: String) : PullRequestInfo()
+}
 
 sealed class WorktreeStatus {
     data object NotLoaded : WorktreeStatus()
@@ -28,6 +38,8 @@ data class WorktreeInfo(
     val isProvisioned: Boolean = false,
     val isProvisionedByCurrentContext: Boolean = false,
     val activeAgentSessionIds: List<String> = emptyList(),
+    val agentSessions: List<AgentSessionInfo> = emptyList(),
+    val prInfo: PullRequestInfo = PullRequestInfo.NotLoaded,
 ) {
     val hasActiveAgent: Boolean get() = activeAgentSessionIds.isNotEmpty()
 

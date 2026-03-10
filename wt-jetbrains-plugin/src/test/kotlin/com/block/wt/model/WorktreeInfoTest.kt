@@ -216,6 +216,47 @@ class WorktreeInfoTest {
     }
 
     @Test
+    fun testShortPath() {
+        val wt = WorktreeInfo(
+            path = Path.of("/Users/test/worktrees/feature"),
+            branch = "feature",
+            head = "abc123",
+        )
+        assertEquals("feature", wt.shortPath)
+    }
+
+    @Test
+    fun testShortPathRootPath() {
+        val wt = WorktreeInfo(
+            path = Path.of("/"),
+            branch = "main",
+            head = "abc123",
+        )
+        // Root path has no fileName, falls back to toString
+        assertEquals("/", wt.shortPath)
+    }
+
+    @Test
+    fun testRelativePathWithBase() {
+        val wt = WorktreeInfo(
+            path = Path.of("/Users/test/worktrees/feature"),
+            branch = "feature",
+            head = "abc123",
+        )
+        assertEquals("feature", wt.relativePath(Path.of("/Users/test/worktrees")))
+    }
+
+    @Test
+    fun testRelativePathWithoutBase() {
+        val wt = WorktreeInfo(
+            path = Path.of("/Users/test/worktrees/feature"),
+            branch = "feature",
+            head = "abc123",
+        )
+        assertEquals("/Users/test/worktrees/feature", wt.relativePath(null))
+    }
+
+    @Test
     fun testWorktreePathForBranch() {
         val base = Path.of("/worktrees")
         assertEquals(

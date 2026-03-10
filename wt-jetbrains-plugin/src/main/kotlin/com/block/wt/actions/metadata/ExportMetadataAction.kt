@@ -3,10 +3,19 @@ package com.block.wt.actions.metadata
 import com.block.wt.actions.WtConfigAction
 import com.block.wt.services.MetadataService
 import com.block.wt.ui.Notifications
+import com.block.wt.ui.WorktreePanel
 import com.block.wt.util.PathHelper
 import com.intellij.openapi.actionSystem.AnActionEvent
 
 class ExportMetadataAction : WtConfigAction() {
+
+    override fun isAvailable(e: AnActionEvent): Boolean {
+        if (!super.isAvailable(e)) return false
+        // Export only from the main worktree — symlinks from feature worktrees
+        // become dead when the feature worktree is deleted.
+        val wt = e.getData(WorktreePanel.DATA_KEY)?.getSelectedWorktree()
+        return wt == null || wt.isMain
+    }
 
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
