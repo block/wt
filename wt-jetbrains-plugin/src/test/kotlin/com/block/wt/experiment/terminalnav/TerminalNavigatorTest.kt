@@ -61,4 +61,27 @@ class TerminalNavigatorTest {
         val ppid = TerminalNavigator.getParentPid(999999999L)
         assertTrue(ppid == null)
     }
+
+    // --- IDE launcher comm detection ---
+
+    @Test
+    fun testIsIdeLauncherCommPositive() {
+        assertTrue(TerminalNavigator.isIdeLauncherComm("/Applications/IntelliJ IDEA.app/Contents/MacOS/idea"))
+        assertTrue(TerminalNavigator.isIdeLauncherComm("/usr/local/bin/goland"))
+        assertTrue(TerminalNavigator.isIdeLauncherComm("/snap/pycharm-professional/current/bin/pycharm"))
+        assertTrue(TerminalNavigator.isIdeLauncherComm("/opt/webstorm/bin/webstorm"))
+        assertTrue(TerminalNavigator.isIdeLauncherComm("/usr/bin/clion"))
+        assertTrue(TerminalNavigator.isIdeLauncherComm("/Applications/Rider.app/Contents/MacOS/rider"))
+        assertTrue(TerminalNavigator.isIdeLauncherComm("rubymine"))
+        assertTrue(TerminalNavigator.isIdeLauncherComm("/opt/phpstorm/bin/phpstorm"))
+        assertTrue(TerminalNavigator.isIdeLauncherComm("/Applications/Android Studio.app/Contents/MacOS/studio"))
+    }
+
+    @Test
+    fun testIsIdeLauncherCommNegative() {
+        assertFalse(TerminalNavigator.isIdeLauncherComm("zsh"))
+        assertFalse(TerminalNavigator.isIdeLauncherComm("claude"))
+        assertFalse(TerminalNavigator.isIdeLauncherComm("python3"))
+        assertFalse(TerminalNavigator.isIdeLauncherComm(""))
+    }
 }

@@ -9,7 +9,7 @@ enum class AgentTerminalKind {
     INTELLIJ, ITERM2, TERMINAL_APP, UNKNOWN;
 
     val displayName: String get() = when (this) {
-        INTELLIJ -> "IntelliJ"
+        INTELLIJ -> "IDE"
         ITERM2 -> "iTerm"
         TERMINAL_APP -> "Terminal"
         UNKNOWN -> ""

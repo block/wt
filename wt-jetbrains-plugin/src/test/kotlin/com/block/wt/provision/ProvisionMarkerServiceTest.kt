@@ -51,7 +51,7 @@ class ProvisionMarkerServiceTest {
             assertEquals("java", marker!!.current)
             assertEquals(1, marker.provisions.size)
             assertEquals("java", marker.provisions[0].context)
-            assertEquals("intellij-plugin", marker.provisions[0].provisionedBy)
+            assertEquals("jetbrains-plugin", marker.provisions[0].provisionedBy)
         } finally {
             deleteRecursive(dir)
         }

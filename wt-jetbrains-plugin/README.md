@@ -1,4 +1,4 @@
-# Worktree Manager - IntelliJ Plugin
+# Worktree Manager - JetBrains Plugin
 
 Native git worktree management for all JetBrains IDEs, using atomic symlink switching for sub-second context switches. This is the IDE companion to the [wt CLI](http://go/wt).
 
@@ -15,7 +15,7 @@ Native git worktree management for all JetBrains IDEs, using atomic symlink swit
 ./gradlew buildPlugin
 ```
 
-Then **Settings > Plugins > gear icon > Install Plugin from Disk...** and select `build/distributions/wt-intellij-plugin-0.1.0.zip`.
+Then **Settings > Plugins > gear icon > Install Plugin from Disk...** and select `build/distributions/wt-jetbrains-plugin-0.1.1.zip`.
 
 To update, rebuild and reinstall. The old version is replaced automatically.
 

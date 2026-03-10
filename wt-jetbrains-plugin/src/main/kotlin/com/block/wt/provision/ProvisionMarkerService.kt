@@ -76,7 +76,7 @@ object ProvisionMarkerService {
         val now = Instant.now().toString()
 
         val provisions = (existing?.provisions?.filter { it.context != contextName } ?: emptyList()) +
-            ProvisionEntry(context = contextName, provisionedAt = now, provisionedBy = "intellij-plugin")
+            ProvisionEntry(context = contextName, provisionedAt = now, provisionedBy = "jetbrains-plugin")
 
         val marker = ProvisionMarker(current = contextName, provisions = provisions)
         return try {

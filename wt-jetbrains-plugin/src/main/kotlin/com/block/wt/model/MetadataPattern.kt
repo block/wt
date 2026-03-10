@@ -6,8 +6,8 @@ data class MetadataPattern(
 ) {
     companion object {
         val KNOWN_PATTERNS: List<MetadataPattern> = listOf(
-            MetadataPattern(".idea", "IntelliJ IDEA project settings"),
-            MetadataPattern(".ijwb", "IntelliJ with Bazel plugin settings"),
+            MetadataPattern(".idea", "JetBrains IDE project settings"),
+            MetadataPattern(".ijwb", "IntelliJ Bazel plugin settings"),
             MetadataPattern(".aswb", "Android Studio with Bazel plugin settings"),
             MetadataPattern(".clwb", "CLion with Bazel plugin settings"),
             MetadataPattern(".bazelproject", "Bazel project view file"),

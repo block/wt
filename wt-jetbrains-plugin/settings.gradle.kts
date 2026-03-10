@@ -1,4 +1,4 @@
-rootProject.name = "wt-intellij-plugin"
+rootProject.name = "wt-jetbrains-plugin"
 
 plugins {
     id("org.gradle.toolchains.foojay-resolver-convention") version "0.9.0"

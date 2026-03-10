@@ -15,6 +15,17 @@ object TerminalNavigator {
     private val log = Logger.getInstance(TerminalNavigator::class.java)
     private val TTY_PATTERN = Regex("^ttys\\d+$")
 
+    private val IDE_BINARY_NAMES = setOf(
+        "idea", "goland", "pycharm", "webstorm", "clion",
+        "rider", "rubymine", "phpstorm", "appcode", "datagrip",
+        "dataspell", "fleet", "studio",
+    )
+
+    internal fun isIdeLauncherComm(comm: String): Boolean {
+        val binaryName = comm.substringAfterLast("/").lowercase()
+        return binaryName in IDE_BINARY_NAMES
+    }
+
     enum class TerminalKind { INTELLIJ, ITERM2, TERMINAL_APP, UNKNOWN }
 
     fun navigateToTerminal(project: Project, pid: Long, tty: String?) {
@@ -205,20 +216,20 @@ object TerminalNavigator {
      */
     private fun findIdeaNativePid(): Long? {
         return try {
-            // Walk up from the current JVM process to find the idea launcher
+            // Walk up from the current JVM process to find the IDE launcher
             var pid = ProcessHandle.current().pid()
             val visited = mutableSetOf<Long>()
             while (pid > 1 && visited.add(pid)) {
                 val comm = getProcessComm(pid)
-                if (comm != null && comm.lowercase().contains("/idea")) {
+                if (comm != null && isIdeLauncherComm(comm)) {
                     return pid
                 }
                 val ppid = getParentPid(pid)
                 if (ppid == null || ppid == pid) break
                 pid = ppid
             }
-            // Fallback: search by process name
-            findPidByComm("idea")
+            // Fallback: search by process name across all known IDE binaries
+            IDE_BINARY_NAMES.firstNotNullOfOrNull { findPidByComm(it) }
         } catch (_: Exception) { null }
     }
 
