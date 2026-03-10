@@ -3,11 +3,13 @@ name: Plugin Build
 on:
   pull_request:
     paths:
-      - 'wt-intellij-plugin/**'
+      - 'wt-jetbrains-plugin/**'
+      - '.github/workflows/plugin-build.yml'
   push:
     branches: [main]
     paths:
-      - 'wt-intellij-plugin/**'
+      - 'wt-jetbrains-plugin/**'
+      - '.github/workflows/plugin-build.yml'
 
 jobs:
   build:
@@ -21,5 +23,5 @@ jobs:
           java-version: 17
 
       - name: Build and test
-        working-directory: wt-intellij-plugin
+        working-directory: wt-jetbrains-plugin
         run: ./gradlew build --no-build-cache
