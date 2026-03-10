@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+#
+# wt-adopt — Adopt an existing worktree into wt management
+# ==========================================================
+#
+# Takes any existing git worktree and gives it the "wt treatment":
+# imports metadata from the vault, installs Bazel symlinks, and places
+# a marker file so wt commands recognize it as managed.
+#
+# Usage:
+#   wt-adopt                    # Adopt the worktree at CWD
+#   wt-adopt <worktree-path>    # Adopt the specified worktree
+#   wt-adopt <branch-name>      # Adopt the worktree for the given branch
+#
+# Notes:
+#   - The main repository cannot be adopted (only worktrees).
+#   - Re-adopting an already-adopted worktree is a noop.
+#     In an interactive shell, offers to re-run the treatment.
+#
+
+set -euo pipefail
+
+# Resolve script and lib directories
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIB_DIR="$SCRIPT_DIR/../lib"
+
+# Bootstrap: source wt-common from lib/
+if [[ -f "$LIB_DIR/wt-common" ]]; then
+  . "$LIB_DIR/wt-common"
+elif [[ -f "$HOME/.wt/lib/wt-common" ]]; then
+  . "$HOME/.wt/lib/wt-common"
+else
+  echo "Error: Cannot find wt-common" >&2
+  exit 1
+fi
+wt_require_valid_config || exit 1
+
+# Source wt-adopt library
+wt_source wt-adopt
+
+usage() {
+  cat <<EOF
+Usage: $(basename "$0") [worktree-path|branch-name]
+
+Adopt an existing worktree into wt management.
+
+Modes:
+  $(basename "$0")                          # Adopt worktree at current directory
+  $(basename "$0") <worktree-path|branch>   # Adopt specified worktree
+EOF
+}
+
+TARGET_WORKTREE=""
+
+if [[ $# -gt 1 ]]; then
+  usage >&2
+  exit 1
+fi
+
+if [[ $# -eq 1 ]]; then
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      TARGET_WORKTREE="$1"
+      ;;
+  esac
+fi
+
+# Show context banner if contexts are configured
+wt_show_context_banner
+
+# Resolve target worktree
+if [[ -z "$TARGET_WORKTREE" ]]; then
+  # No argument: use CWD
+  TARGET_WORKTREE="$(pwd -P)"
+else
+  TARGET_WORKTREE="$(wt_resolve_and_validate "$TARGET_WORKTREE")" || exit 1
+fi
+
+# Validate it's a git worktree or repo
+if ! git -C "$TARGET_WORKTREE" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  error "Not a git repository or worktree: $TARGET_WORKTREE"
+  exit 1
+fi
+
+# Block adoption of the main repo
+if wt_is_main_repo "$TARGET_WORKTREE"; then
+  error "Cannot adopt the main repository. Only worktrees can be adopted."
+  exit 1
+fi
+
+# Check if already adopted
+if wt_is_adopted "$TARGET_WORKTREE"; then
+  info "Worktree is already adopted: $TARGET_WORKTREE"
+
+  # Offer to re-run treatment if interactive
+  if [[ -t 0 && -t 2 ]]; then
+    if prompt_confirm "Re-run adoption treatment (metadata + Bazel symlinks)? [y/N]" "n"; then
+      wt_adopt_worktree "$TARGET_WORKTREE"
+    fi
+  fi
+  exit 0
+fi
+
+# Run adoption
+wt_adopt_worktree "$TARGET_WORKTREE"

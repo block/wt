@@ -272,3 +272,25 @@ skip_if_no_git() {
         skip "Test requires git"
     fi
 }
+
+# Check if a worktree has the adoption marker
+assert_is_adopted() {
+    local worktree="$1"
+    local git_dir
+    git_dir="$(git -C "$worktree" rev-parse --git-dir)"
+    if [[ "$git_dir" != /* ]]; then
+        git_dir="$(cd "$worktree" && cd "$git_dir" && pwd -P)"
+    fi
+    assert [ -f "$git_dir/wt/adopted" ]
+}
+
+# Check that a worktree does NOT have the adoption marker
+refute_is_adopted() {
+    local worktree="$1"
+    local git_dir
+    git_dir="$(git -C "$worktree" rev-parse --git-dir)"
+    if [[ "$git_dir" != /* ]]; then
+        git_dir="$(cd "$worktree" && cd "$git_dir" && pwd -P)"
+    fi
+    assert [ ! -f "$git_dir/wt/adopted" ]
+}

@@ -299,6 +299,7 @@ _wt_metadata_import_complete() {
 
 # --- Wire up standalone wt-* completions (only if commands exist on PATH) ---
 type wt-add >/dev/null 2>&1 && complete -F _wt_add_complete wt-add
+type wt-adopt >/dev/null 2>&1 && complete -F _wt_switch_complete wt-adopt
 type wt-switch >/dev/null 2>&1 && complete -F _wt_switch_complete wt-switch
 type wt-remove >/dev/null 2>&1 && complete -F _wt_remove_complete wt-remove
 type wt-cd >/dev/null 2>&1 && complete -F _wt_cd_complete wt-cd
@@ -318,7 +319,7 @@ _wt_completion_bash() {
   cur="${COMP_WORDS[COMP_CWORD]}"
 
   if [[ ${COMP_CWORD} -eq 1 ]]; then
-    local commands="add switch remove list cd context metadata-export metadata-import ijwb-export ijwb-import help"
+    local commands="add adopt switch remove list cd context metadata-export metadata-import ijwb-export ijwb-import help"
     COMPREPLY=($(compgen -W "$commands" -- "$cur"))
   else
     case "${COMP_WORDS[1]}" in
@@ -326,6 +327,14 @@ _wt_completion_bash() {
         local branches
         branches=$(git branch -a 2>/dev/null | sed 's/^[* ]*//' | sed 's|remotes/origin/||')
         COMPREPLY=($(compgen -W "$branches" -- "$cur"))
+        ;;
+      adopt)
+        local branches
+        branches="$(wt_worktree_branch_list)"
+        if [[ -n "$branches" ]]; then
+          local IFS=$'\n'
+          COMPREPLY+=($(compgen -W "$branches" -- "$cur"))
+        fi
         ;;
       switch|cd)
         local branches

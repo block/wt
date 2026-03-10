@@ -1,0 +1,160 @@
+#!/usr/bin/env bash
+#
+# wt-adopt — Adoption helpers for worktree management
+# ====================================================
+#
+# Provides functions for adopting existing worktrees into wt management.
+# "Adopting" means: importing metadata, installing Bazel symlinks, and
+# placing a marker file so wt knows this worktree is managed.
+#
+# Marker file location:
+#   $(git rev-parse --git-dir)/wt/adopted
+#
+# This resolves to:
+#   - .git/worktrees/<name>/wt/adopted  (for worktrees)
+#   - .git/wt/adopted                    (for the main repo — but adoption is blocked)
+#
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Marker file helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Check if a worktree has been adopted by wt.
+# Args: $1 = worktree path (default: CWD)
+# Returns: 0 if adopted, 1 if not
+wt_is_adopted() {
+  local worktree_path="${1:-.}"
+  local git_dir
+  git_dir="$(git -C "$worktree_path" rev-parse --git-dir 2>/dev/null)" || return 1
+
+  # Resolve to absolute path
+  if [[ "$git_dir" != /* ]]; then
+    git_dir="$(cd "$worktree_path" && cd "$git_dir" && pwd -P)"
+  fi
+
+  [[ -f "$git_dir/wt/adopted" ]]
+}
+
+# Mark a worktree as adopted.
+# Args: $1 = worktree path (default: CWD)
+# Returns: 0 on success, 1 on failure
+wt_mark_adopted() {
+  local worktree_path="${1:-.}"
+  local git_dir
+  git_dir="$(git -C "$worktree_path" rev-parse --git-dir 2>/dev/null)" || return 1
+
+  if [[ "$git_dir" != /* ]]; then
+    git_dir="$(cd "$worktree_path" && cd "$git_dir" && pwd -P)"
+  fi
+
+  mkdir -p "$git_dir/wt"
+  touch "$git_dir/wt/adopted"
+}
+
+# Remove adoption marker from a worktree.
+# Args: $1 = worktree path (default: CWD)
+# Returns: 0 on success, 1 on failure
+wt_unmark_adopted() {
+  local worktree_path="${1:-.}"
+  local git_dir
+  git_dir="$(git -C "$worktree_path" rev-parse --git-dir 2>/dev/null)" || return 1
+
+  if [[ "$git_dir" != /* ]]; then
+    git_dir="$(cd "$worktree_path" && cd "$git_dir" && pwd -P)"
+  fi
+
+  rm -f "$git_dir/wt/adopted"
+  rmdir "$git_dir/wt" 2>/dev/null || true
+}
+
+# Check if a path is the main repository (not a worktree).
+# In the main repo, git-dir and git-common-dir resolve to the same place.
+# In a worktree, git-dir is .git/worktrees/<name>, common-dir is .git.
+# Args: $1 = path (default: CWD)
+# Returns: 0 if main repo, 1 if worktree or not a git repo
+wt_is_main_repo() {
+  local path="${1:-.}"
+  local git_dir common_dir
+  git_dir="$(git -C "$path" rev-parse --git-dir 2>/dev/null)" || return 1
+  common_dir="$(git -C "$path" rev-parse --git-common-dir 2>/dev/null)" || return 1
+
+  # Resolve both to absolute physical paths for comparison
+  local abs_git_dir abs_common_dir
+  abs_git_dir="$(cd "$path" && cd "$git_dir" && pwd -P)"
+  abs_common_dir="$(cd "$path" && cd "$common_dir" && pwd -P)"
+
+  [[ "$abs_git_dir" == "$abs_common_dir" ]]
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Treatment functions
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Install Bazel output symlinks into a worktree.
+# Copies bazel-out, bazel-bin, etc. from the main repo so the worktree
+# shares the build cache (faster IDE sync, no rebuild needed).
+# Args: $1 = worktree path (absolute)
+wt_install_bazel_symlinks() {
+  local worktree_path="$1"
+
+  local bazel_symlinks=("bazel-out" "bazel-bin" "bazel-testlogs" "bazel-genfiles")
+
+  local main_repo_abs
+  main_repo_abs="$(cd "$WT_MAIN_REPO_ROOT" && pwd)"
+
+  info "Installing Bazel symlinks into worktree: $worktree_path"
+
+  for symlink_name in "${bazel_symlinks[@]}"; do
+    local src_link="$main_repo_abs/$symlink_name"
+    local dst_link="$worktree_path/$symlink_name"
+
+    if [[ -L "$src_link" ]]; then
+      local target
+      target="$(readlink "$src_link")"
+
+      if [[ "$target" != /* ]]; then
+        target="$main_repo_abs/$target"
+      fi
+
+      if [[ -L "$dst_link" || -e "$dst_link" ]]; then
+        rm -rf "$dst_link"
+      fi
+
+      ln -s "$target" "$dst_link"
+      echo "  ✓ $symlink_name -> $target"
+    fi
+  done
+}
+
+# Run the full adoption treatment on a worktree.
+# 1. Import metadata from vault
+# 2. Install Bazel symlinks
+# 3. Place adoption marker
+# Args: $1 = worktree path (absolute)
+# Requires: WT_IDEA_FILES_BASE to be set
+wt_adopt_worktree() {
+  local worktree_path="$1"
+
+  # 1. Import metadata
+  local metadata_import=""
+  if [[ -n "${SCRIPT_DIR:-}" && -x "$SCRIPT_DIR/wt-metadata-import" ]]; then
+    metadata_import="$SCRIPT_DIR/wt-metadata-import"
+  elif [[ -x "$HOME/.wt/bin/wt-metadata-import" ]]; then
+    metadata_import="$HOME/.wt/bin/wt-metadata-import"
+  elif command -v wt-metadata-import >/dev/null 2>&1; then
+    metadata_import="wt-metadata-import"
+  fi
+
+  if [[ -n "$metadata_import" && -d "${WT_IDEA_FILES_BASE:-}" ]]; then
+    info "Importing metadata into worktree: $worktree_path"
+    "$metadata_import" -y "$WT_IDEA_FILES_BASE" "$worktree_path"
+  fi
+
+  # 2. Install Bazel symlinks
+  wt_install_bazel_symlinks "$worktree_path"
+
+  # 3. Mark as adopted
+  wt_mark_adopted "$worktree_path"
+
+  success "Worktree adopted: $worktree_path"
+}

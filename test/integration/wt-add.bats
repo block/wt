@@ -32,6 +32,7 @@ teardown() {
     run "$TEST_HOME/.wt/bin/wt-add" existing-branch
     assert_success
     assert_is_worktree "$WT_WORKTREES_BASE/existing-branch"
+    assert_is_adopted "$WT_WORKTREES_BASE/existing-branch"
     local branch=$(cd "$WT_WORKTREES_BASE/existing-branch" && git branch --show-current)
     assert_equal "$branch" "existing-branch"
 }
@@ -43,6 +44,7 @@ teardown() {
     run "$TEST_HOME/.wt/bin/wt-add" "$custom_path" feature-path
     assert_success
     assert_is_worktree "$custom_path"
+    assert_is_adopted "$custom_path"
     local branch=$(cd "$custom_path" && git branch --show-current)
     assert_equal "$branch" "feature-path"
 }
@@ -55,6 +57,7 @@ teardown() {
     run "$TEST_HOME/.wt/bin/wt-add" -b new-feature
     assert_success
     assert_is_worktree "$WT_WORKTREES_BASE/new-feature"
+    assert_is_adopted "$WT_WORKTREES_BASE/new-feature"
     local branch=$(cd "$WT_WORKTREES_BASE/new-feature" && git branch --show-current)
     assert_equal "$branch" "new-feature"
 }
