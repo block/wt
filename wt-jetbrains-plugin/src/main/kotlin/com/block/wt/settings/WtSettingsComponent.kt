@@ -1,109 +1,72 @@
 package com.block.wt.settings
 
+import com.intellij.openapi.ui.DialogPanel
 import com.intellij.ui.dsl.builder.bindIntValue
 import com.intellij.ui.dsl.builder.bindSelected
 import com.intellij.ui.dsl.builder.panel
 import javax.swing.JComponent
-import javax.swing.JPanel
 
 class WtSettingsComponent {
 
     private val settings = WtPluginSettings.getInstance()
-    private var showStatusBar = settings.state.showStatusBarWidget
-    private var autoRefresh = settings.state.autoRefreshOnExternalChange
-    private var confirmSwitch = settings.state.confirmBeforeSwitch
-    private var confirmRemove = settings.state.confirmBeforeRemove
-    private var statusLoading = settings.state.statusLoadingEnabled
-    private var promptProvision = settings.state.promptProvisionOnSwitch
-    private var autoRefreshInterval = settings.state.autoRefreshIntervalSeconds
-    private var enhancedSessionDetection = settings.state.enhancedSessionDetection
-    private var agentTerminalNavigation = settings.state.agentTerminalNavigation
 
-    val panel: JPanel = panel {
+    val panel: DialogPanel = panel {
         group("General") {
             row {
                 checkBox("Show context widget in status bar")
-                    .bindSelected(::showStatusBar)
+                    .bindSelected(settings.state::showStatusBarWidget)
             }
             row {
                 checkBox("Auto-refresh on external changes (CLI usage)")
-                    .bindSelected(::autoRefresh)
+                    .bindSelected(settings.state::autoRefreshOnExternalChange)
             }
             row {
                 checkBox("Load status indicators (dirty, ahead/behind) asynchronously")
-                    .bindSelected(::statusLoading)
+                    .bindSelected(settings.state::statusLoadingEnabled)
                     .comment("Disable to speed up worktree list loading for repos with many worktrees")
             }
             row {
                 checkBox("Prompt to provision when switching to non-provisioned worktrees")
-                    .bindSelected(::promptProvision)
+                    .bindSelected(settings.state::promptProvisionOnSwitch)
                     .comment("Shows Provision & Switch / Switch Only / Cancel dialog")
             }
             row("Auto-refresh interval (seconds, 0 to disable):") {
                 spinner(0..600, 5)
-                    .bindIntValue(::autoRefreshInterval)
+                    .bindIntValue(settings.state::autoRefreshIntervalSeconds)
                     .comment("Periodically refreshes the worktree list to detect external changes")
             }
         }
         group("Experiments") {
             row {
                 checkBox("Enhanced agent session detection (lifecycle states, lock file validation)")
-                    .bindSelected(::enhancedSessionDetection)
+                    .bindSelected(settings.state::enhancedSessionDetection)
             }
             row {
                 checkBox("Navigate to agent terminal on click (macOS)")
-                    .bindSelected(::agentTerminalNavigation)
+                    .bindSelected(settings.state::agentTerminalNavigation)
             }
         }
         group("Confirmations") {
             row {
                 checkBox("Confirm before switching worktrees")
-                    .bindSelected(::confirmSwitch)
+                    .bindSelected(settings.state::confirmBeforeSwitch)
             }
             row {
                 checkBox("Confirm before removing worktrees")
-                    .bindSelected(::confirmRemove)
+                    .bindSelected(settings.state::confirmBeforeRemove)
             }
         }
     }
 
     fun getComponent(): JComponent = panel
 
-    fun isModified(): Boolean {
-        return showStatusBar != settings.state.showStatusBarWidget ||
-            autoRefresh != settings.state.autoRefreshOnExternalChange ||
-            confirmSwitch != settings.state.confirmBeforeSwitch ||
-            confirmRemove != settings.state.confirmBeforeRemove ||
-            statusLoading != settings.state.statusLoadingEnabled ||
-            promptProvision != settings.state.promptProvisionOnSwitch ||
-            autoRefreshInterval != settings.state.autoRefreshIntervalSeconds ||
-            enhancedSessionDetection != settings.state.enhancedSessionDetection ||
-            agentTerminalNavigation != settings.state.agentTerminalNavigation
-    }
+    fun isModified(): Boolean = panel.isModified()
 
     fun apply() {
-        settings.loadState(settings.state.copy(
-            showStatusBarWidget = showStatusBar,
-            autoRefreshOnExternalChange = autoRefresh,
-            confirmBeforeSwitch = confirmSwitch,
-            confirmBeforeRemove = confirmRemove,
-            statusLoadingEnabled = statusLoading,
-            promptProvisionOnSwitch = promptProvision,
-            autoRefreshIntervalSeconds = autoRefreshInterval,
-            enhancedSessionDetection = enhancedSessionDetection,
-            agentTerminalNavigation = agentTerminalNavigation,
-        ))
+        panel.apply()
     }
 
     fun reset() {
-        showStatusBar = settings.state.showStatusBarWidget
-        autoRefresh = settings.state.autoRefreshOnExternalChange
-        confirmSwitch = settings.state.confirmBeforeSwitch
-        confirmRemove = settings.state.confirmBeforeRemove
-        statusLoading = settings.state.statusLoadingEnabled
-        promptProvision = settings.state.promptProvisionOnSwitch
-        autoRefreshInterval = settings.state.autoRefreshIntervalSeconds
-        enhancedSessionDetection = settings.state.enhancedSessionDetection
-        agentTerminalNavigation = settings.state.agentTerminalNavigation
+        panel.reset()
     }
 }
