@@ -87,6 +87,76 @@ wt_is_main_repo() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Conflict detection
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Check for existing files in a worktree that would be overwritten by adoption.
+#
+# Scans:
+#   - The vault (WT_IDEA_FILES_BASE) for metadata matching WT_METADATA_PATTERNS,
+#     then checks if the corresponding target paths exist in the worktree.
+#     This mirrors the same vault-scanning logic used by wt-metadata-import.
+#   - Bazel output directories that are real directories (not symlinks —
+#     symlinks are always safe to replace)
+#
+# Args: $1 = worktree path (absolute)
+# Outputs: conflicting relative paths to stdout (one per line)
+# Returns: 0 if conflicts found, 1 if no conflicts
+wt_check_adoption_conflicts() {
+  local worktree_path="$1"
+  local -a conflicts=()
+  local vault="${WT_IDEA_FILES_BASE:-}"
+
+  # Check metadata patterns by scanning the vault (same as wt-metadata-import)
+  if [[ -n "$vault" && -d "$vault" ]]; then
+    for pattern in ${WT_METADATA_PATTERNS:-}; do
+      while IFS= read -r -d '' meta_src; do
+        # Compute relative path from vault root (mirrors import_pattern logic)
+        local parent_src
+        parent_src="$(dirname "$meta_src")"
+        local rel_path=""
+        if [[ "$parent_src" != "$vault" ]]; then
+          rel_path="${parent_src#"$vault"/}"
+        fi
+
+        # Map to corresponding target in worktree
+        local target_meta
+        if [[ -z "$rel_path" ]]; then
+          target_meta="$worktree_path/$pattern"
+        else
+          target_meta="$worktree_path/$rel_path/$pattern"
+        fi
+
+        # Check if target already exists
+        if [[ -e "$target_meta" || -L "$target_meta" ]]; then
+          if [[ -z "$rel_path" ]]; then
+            conflicts+=("$pattern")
+          else
+            conflicts+=("$rel_path/$pattern")
+          fi
+        fi
+      done < <(find -L "$vault" \( -type l -o -type d \) -name "$pattern" -print0 2>/dev/null)
+    done
+  fi
+
+  # Check Bazel dirs (only real dirs, not symlinks)
+  local -a bazel_names=("bazel-out" "bazel-bin" "bazel-testlogs" "bazel-genfiles")
+  for name in "${bazel_names[@]}"; do
+    local target="$worktree_path/$name"
+    if [[ -d "$target" && ! -L "$target" ]]; then
+      conflicts+=("$name (real directory)")
+    fi
+  done
+
+  if [[ ${#conflicts[@]} -eq 0 ]]; then
+    return 1
+  fi
+
+  printf '%s\n' "${conflicts[@]}"
+  return 0
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Treatment functions
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -127,33 +197,94 @@ wt_install_bazel_symlinks() {
 }
 
 # Run the full adoption treatment on a worktree.
-# 1. Import metadata from vault
-# 2. Install Bazel symlinks
-# 3. Place adoption marker
-# Args: $1 = worktree path (absolute)
+# 1. Check for conflicting files (unless --force)
+# 2. Import metadata from vault (unless keep_existing)
+# 3. Install Bazel symlinks (always)
+# 4. Place adoption marker
+#
+# Args: [--force] <worktree_path>
+#   --force: skip conflict check (used by wt-add for fresh worktrees)
 # Requires: WT_IDEA_FILES_BASE to be set
+# Returns: 0 on success, 1 if aborted due to conflicts
 wt_adopt_worktree() {
-  local worktree_path="$1"
+  local worktree_path=""
+  local force=false
 
-  # 1. Import metadata
-  local metadata_import=""
-  if [[ -n "${SCRIPT_DIR:-}" && -x "$SCRIPT_DIR/wt-metadata-import" ]]; then
-    metadata_import="$SCRIPT_DIR/wt-metadata-import"
-  elif [[ -x "$HOME/.wt/bin/wt-metadata-import" ]]; then
-    metadata_import="$HOME/.wt/bin/wt-metadata-import"
-  elif command -v wt-metadata-import >/dev/null 2>&1; then
-    metadata_import="wt-metadata-import"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --force) force=true ;;
+      *) worktree_path="$1" ;;
+    esac
+    shift
+  done
+
+  local keep_existing=false
+
+  # 1. Conflict check
+  if [[ "$force" != true ]]; then
+    local conflict_list
+    if conflict_list="$(wt_check_adoption_conflicts "$worktree_path")"; then
+      warn "The following files in the worktree will be overwritten by adoption:"
+      while IFS= read -r item; do
+        echo "  - $item" >&2
+      done <<< "$conflict_list"
+      echo >&2
+
+      if [[ -t 0 && -t 2 ]]; then
+        echo "  [O]verwrite — replace with vault contents" >&2
+        echo "  [K]eep     — adopt without importing metadata (Bazel symlinks still installed)" >&2
+        echo "  [A]bort    — cancel adoption" >&2
+        echo >&2
+
+        local response
+        if ! read -erp "Choose [O/K/A]: " response; then
+          echo >&2
+          return 1
+        fi
+
+        case "$response" in
+          [oO]|[oO][vV]*)
+            # Overwrite — proceed with full treatment
+            ;;
+          [kK]|[kK][eE]*)
+            # Keep — skip metadata import
+            keep_existing=true
+            ;;
+          *)
+            echo "Aborted." >&2
+            return 1
+            ;;
+        esac
+      else
+        error "Aborting: worktree has existing files that would be overwritten (use --force to override)"
+        return 1
+      fi
+    fi
   fi
 
-  if [[ -n "$metadata_import" && -d "${WT_IDEA_FILES_BASE:-}" ]]; then
-    info "Importing metadata into worktree: $worktree_path"
-    "$metadata_import" -y "$WT_IDEA_FILES_BASE" "$worktree_path"
+  # 2. Import metadata (unless keeping existing files)
+  if [[ "$keep_existing" != true ]]; then
+    local metadata_import=""
+    if [[ -n "${SCRIPT_DIR:-}" && -x "$SCRIPT_DIR/wt-metadata-import" ]]; then
+      metadata_import="$SCRIPT_DIR/wt-metadata-import"
+    elif [[ -x "$HOME/.wt/bin/wt-metadata-import" ]]; then
+      metadata_import="$HOME/.wt/bin/wt-metadata-import"
+    elif command -v wt-metadata-import >/dev/null 2>&1; then
+      metadata_import="wt-metadata-import"
+    fi
+
+    if [[ -n "$metadata_import" && -d "${WT_IDEA_FILES_BASE:-}" ]]; then
+      info "Importing metadata into worktree: $worktree_path"
+      "$metadata_import" -y "$WT_IDEA_FILES_BASE" "$worktree_path"
+    fi
+  else
+    info "Keeping existing metadata files"
   fi
 
-  # 2. Install Bazel symlinks
+  # 3. Install Bazel symlinks (always — even with keep_existing)
   wt_install_bazel_symlinks "$worktree_path"
 
-  # 3. Mark as adopted
+  # 4. Mark as adopted
   wt_mark_adopted "$worktree_path"
 
   success "Worktree adopted: $worktree_path"

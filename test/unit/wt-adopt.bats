@@ -123,3 +123,79 @@ teardown() {
     assert [ ! -L "$WORKTREE/bazel-out" ]
     assert [ ! -L "$WORKTREE/bazel-bin" ]
 }
+
+# =============================================================================
+# wt_check_adoption_conflicts
+# =============================================================================
+
+@test "wt_check_adoption_conflicts returns 1 when no conflicts" {
+    export WT_METADATA_PATTERNS=".idea"
+    # Empty vault, empty worktree
+    mkdir -p "$BATS_TEST_TMPDIR/vault"
+    export WT_IDEA_FILES_BASE="$BATS_TEST_TMPDIR/vault"
+
+    run wt_check_adoption_conflicts "$WORKTREE"
+    assert_failure  # return 1 = no conflicts
+}
+
+@test "wt_check_adoption_conflicts detects metadata from vault scan" {
+    export WT_METADATA_PATTERNS=".idea"
+    mkdir -p "$BATS_TEST_TMPDIR/vault/.idea"
+    export WT_IDEA_FILES_BASE="$BATS_TEST_TMPDIR/vault"
+
+    # Create matching .idea in worktree
+    mkdir -p "$WORKTREE/.idea"
+
+    run wt_check_adoption_conflicts "$WORKTREE"
+    assert_success  # return 0 = conflicts found
+    assert_output --partial ".idea"
+}
+
+@test "wt_check_adoption_conflicts detects nested metadata from vault" {
+    export WT_METADATA_PATTERNS=".ijwb"
+    mkdir -p "$BATS_TEST_TMPDIR/vault/subdir/.ijwb"
+    export WT_IDEA_FILES_BASE="$BATS_TEST_TMPDIR/vault"
+
+    # Create matching nested path in worktree
+    mkdir -p "$WORKTREE/subdir/.ijwb"
+
+    run wt_check_adoption_conflicts "$WORKTREE"
+    assert_success
+    assert_output --partial "subdir/.ijwb"
+}
+
+@test "wt_check_adoption_conflicts skips metadata not in vault" {
+    export WT_METADATA_PATTERNS=".idea"
+    # Vault exists but does NOT contain .idea
+    mkdir -p "$BATS_TEST_TMPDIR/vault"
+    export WT_IDEA_FILES_BASE="$BATS_TEST_TMPDIR/vault"
+
+    # Worktree has .idea but vault doesn't → no conflict
+    mkdir -p "$WORKTREE/.idea"
+
+    run wt_check_adoption_conflicts "$WORKTREE"
+    assert_failure  # no conflicts
+}
+
+@test "wt_check_adoption_conflicts ignores bazel symlinks" {
+    export WT_METADATA_PATTERNS=""
+    export WT_IDEA_FILES_BASE=""
+
+    # Create bazel-out as a symlink in worktree
+    ln -s "/some/target" "$WORKTREE/bazel-out"
+
+    run wt_check_adoption_conflicts "$WORKTREE"
+    assert_failure  # no conflicts (symlinks are safe)
+}
+
+@test "wt_check_adoption_conflicts detects bazel real directory" {
+    export WT_METADATA_PATTERNS=""
+    export WT_IDEA_FILES_BASE=""
+
+    # Create bazel-out as a real directory in worktree
+    mkdir -p "$WORKTREE/bazel-out"
+
+    run wt_check_adoption_conflicts "$WORKTREE"
+    assert_success
+    assert_output --partial "bazel-out (real directory)"
+}

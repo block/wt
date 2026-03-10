@@ -11,11 +11,14 @@
 #   wt-adopt                    # Adopt the worktree at CWD
 #   wt-adopt <worktree-path>    # Adopt the specified worktree
 #   wt-adopt <branch-name>      # Adopt the worktree for the given branch
+#   wt-adopt --redo             # Re-run adoption treatment on current worktree
+#   wt-adopt --force            # Skip conflict checks, overwrite without prompting
 #
 # Notes:
 #   - The main repository cannot be adopted (only worktrees).
-#   - Re-adopting an already-adopted worktree is a noop.
-#     In an interactive shell, offers to re-run the treatment.
+#   - Re-adopting an already-adopted worktree requires --redo or --force.
+#   - If the worktree has existing metadata, interactive sessions prompt
+#     with overwrite/keep/abort; non-interactive sessions abort.
 #
 
 set -euo pipefail
@@ -40,41 +43,63 @@ wt_source wt-adopt
 
 usage() {
   cat <<EOF
-Usage: $(basename "$0") [worktree-path|branch-name]
+Usage: $(basename "$0") [options] [worktree-path|branch-name]
 
 Adopt an existing worktree into wt management.
+
+Options:
+  --force       Skip conflict checks (overwrite without prompting)
+  --redo        Re-run adoption treatment on already-adopted worktree
+  -h, --help    Show this help
 
 Modes:
   $(basename "$0")                          # Adopt worktree at current directory
   $(basename "$0") <worktree-path|branch>   # Adopt specified worktree
+  $(basename "$0") --redo                   # Re-adopt current worktree
+  $(basename "$0") --redo --force           # Re-adopt, overwrite without prompting
 EOF
 }
 
 TARGET_WORKTREE=""
+FORCE=false
+REDO=false
 
-if [[ $# -gt 1 ]]; then
-  usage >&2
-  exit 1
-fi
-
-if [[ $# -eq 1 ]]; then
+while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)
       usage
       exit 0
       ;;
+    --force)
+      FORCE=true
+      shift
+      ;;
+    --redo)
+      REDO=true
+      shift
+      ;;
+    -*)
+      error "Unknown option: $1"
+      usage >&2
+      exit 1
+      ;;
     *)
+      if [[ -n "$TARGET_WORKTREE" ]]; then
+        error "Too many arguments"
+        usage >&2
+        exit 1
+      fi
       TARGET_WORKTREE="$1"
+      shift
       ;;
   esac
-fi
+done
 
 # Show context banner if contexts are configured
 wt_show_context_banner
 
 # Resolve target worktree
 if [[ -z "$TARGET_WORKTREE" ]]; then
-  # No argument: use CWD
   TARGET_WORKTREE="$(pwd -P)"
 else
   TARGET_WORKTREE="$(wt_resolve_and_validate "$TARGET_WORKTREE")" || exit 1
@@ -92,18 +117,24 @@ if wt_is_main_repo "$TARGET_WORKTREE"; then
   exit 1
 fi
 
+# Build args for wt_adopt_worktree
+adopt_args=()
+if [[ "$FORCE" == true ]]; then
+  adopt_args+=("--force")
+fi
+adopt_args+=("$TARGET_WORKTREE")
+
 # Check if already adopted
 if wt_is_adopted "$TARGET_WORKTREE"; then
-  info "Worktree is already adopted: $TARGET_WORKTREE"
-
-  # Offer to re-run treatment if interactive
-  if [[ -t 0 && -t 2 ]]; then
-    if prompt_confirm "Re-run adoption treatment (metadata + Bazel symlinks)? [y/N]" "n"; then
-      wt_adopt_worktree "$TARGET_WORKTREE"
-    fi
+  if [[ "$REDO" == true || "$FORCE" == true ]]; then
+    info "Re-running adoption treatment: $TARGET_WORKTREE"
+    wt_adopt_worktree "${adopt_args[@]}"
+  else
+    info "Worktree is already adopted: $TARGET_WORKTREE"
+    info "Use --redo to re-run adoption treatment, or --force to force."
   fi
   exit 0
 fi
 
 # Run adoption
-wt_adopt_worktree "$TARGET_WORKTREE"
+wt_adopt_worktree "${adopt_args[@]}"
