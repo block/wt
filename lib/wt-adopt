@@ -191,7 +191,7 @@ wt_install_bazel_symlinks() {
       fi
 
       ln -s "$target" "$dst_link"
-      echo "  ✓ $symlink_name -> $target"
+      info "  $symlink_name -> $target"
     fi
   done
 }
@@ -275,7 +275,10 @@ wt_adopt_worktree() {
 
     if [[ -n "$metadata_import" && -d "${WT_IDEA_FILES_BASE:-}" ]]; then
       info "Importing metadata into worktree: $worktree_path"
-      "$metadata_import" -y "$WT_IDEA_FILES_BASE" "$worktree_path"
+      if ! "$metadata_import" -y "$WT_IDEA_FILES_BASE" "$worktree_path"; then
+        error "Metadata import failed — worktree not adopted"
+        return 1
+      fi
     fi
   else
     info "Keeping existing metadata files"

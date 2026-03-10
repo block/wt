@@ -194,7 +194,7 @@ if [[ $creating_new_branch -eq 0 ]]; then
     echo "Creating worktree for existing branch '$local_branch' at: $worktree_path"
     git worktree add -- "$worktree_path" "$local_branch"
 
-    wt_adopt_worktree --force "$(cd "$worktree_path" && pwd)"
+    wt_adopt_worktree --force "$(cd "$worktree_path" && pwd -P)"
     success "git worktree add completed successfully."
     exit 0
   fi
@@ -215,7 +215,7 @@ if [[ $creating_new_branch -eq 0 ]]; then
   info "Not creating a new branch; running: git worktree add ${ARGS[*]}"
   git worktree add "${ARGS[@]}"
 
-  wt_adopt_worktree --force "$(cd "$worktree_path" && pwd)"
+  wt_adopt_worktree --force "$(cd "$worktree_path" && pwd -P)"
   success "git worktree add completed successfully."
   exit 0
 fi
@@ -401,7 +401,7 @@ else
   git worktree add "${FINAL_ARGS[@]}"
 fi
 
-wt_adopt_worktree --force "$(cd "$worktree_path" && pwd)"
+wt_adopt_worktree --force "$(cd "$worktree_path" && pwd -P)"
 
 success "git worktree add completed successfully."
 exit 0

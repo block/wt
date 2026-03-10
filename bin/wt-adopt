@@ -100,7 +100,11 @@ wt_show_context_banner
 
 # Resolve target worktree
 if [[ -z "$TARGET_WORKTREE" ]]; then
-  TARGET_WORKTREE="$(pwd -P)"
+  # Resolve to worktree root, not CWD (user may be in a subdirectory)
+  TARGET_WORKTREE="$(git rev-parse --show-toplevel 2>/dev/null)" || {
+    error "Not inside a git repository"
+    exit 1
+  }
 else
   TARGET_WORKTREE="$(wt_resolve_and_validate "$TARGET_WORKTREE")" || exit 1
 fi

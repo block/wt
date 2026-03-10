@@ -369,3 +369,54 @@ teardown() {
     # Bazel symlinks should still be installed
     assert [ -L "$wt/bazel-out" ]
 }
+
+# =============================================================================
+# Subdirectory adoption (CWD resolves to worktree root)
+# =============================================================================
+
+@test "adopt from subdirectory resolves to worktree root" {
+    create_branch "$REPO" "subdir-test"
+    local wt="$BATS_TEST_TMPDIR/wt/subdir-test"
+    create_worktree "$REPO" "$wt" "subdir-test"
+    wt="$(cd "$wt" && pwd -P)"
+
+    # Create a subdirectory inside the worktree
+    mkdir -p "$wt/some/deep/subdir"
+
+    # Run wt-adopt from the subdirectory (no arguments = CWD mode)
+    run bash -c 'cd "'"$wt/some/deep/subdir"'" && "'"$TEST_HOME/.wt/bin/wt-adopt"'"'
+    assert_success
+    assert_is_adopted "$wt"
+}
+
+# =============================================================================
+# Metadata import failure prevents adoption
+# =============================================================================
+
+@test "adopt fails and does not stamp marker when metadata import fails" {
+    sed -i.bak 's/WT_METADATA_PATTERNS=""/WT_METADATA_PATTERNS=".idea"/' \
+        "$TEST_HOME/.wt/repos/test.conf"
+
+    # Create vault so the -d check passes
+    mkdir -p "$WT_IDEA_FILES_BASE/.idea"
+
+    # Replace wt-metadata-import with a stub that always fails
+    cat > "$TEST_HOME/.wt/bin/wt-metadata-import" <<'STUB'
+#!/usr/bin/env bash
+echo "simulated import failure" >&2
+exit 1
+STUB
+    chmod +x "$TEST_HOME/.wt/bin/wt-metadata-import"
+
+    create_branch "$REPO" "import-fail"
+    local wt="$BATS_TEST_TMPDIR/wt/import-fail"
+    create_worktree "$REPO" "$wt" "import-fail"
+    wt="$(cd "$wt" && pwd -P)"
+
+    run "$TEST_HOME/.wt/bin/wt-adopt" --force "$wt"
+    assert_failure
+    assert_output --partial "import failed"
+
+    # Should NOT be adopted
+    refute_is_adopted "$wt"
+}
