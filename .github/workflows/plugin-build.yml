@@ -22,6 +22,10 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - name: Build and test
+      - name: Build
         working-directory: wt-jetbrains-plugin
         run: ./gradlew build --no-build-cache
+
+      - name: Test
+        working-directory: wt-jetbrains-plugin
+        run: ./gradlew test --no-build-cache
