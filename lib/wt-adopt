@@ -87,6 +87,14 @@ wt_is_main_repo() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Check if the current session is interactive (stdin and stderr are TTYs).
+# Extracted as a function so tests can override it.
+_wt_is_interactive() { [[ -t 0 && -t 2 ]]; }
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Conflict detection
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -230,7 +238,7 @@ wt_adopt_worktree() {
       done <<< "$conflict_list"
       echo >&2
 
-      if [[ -t 0 && -t 2 ]]; then
+      if _wt_is_interactive; then
         echo "  [O]verwrite — replace with vault contents" >&2
         echo "  [K]eep     — adopt without importing metadata (Bazel symlinks still installed)" >&2
         echo "  [A]bort    — cancel adoption" >&2
