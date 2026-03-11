@@ -331,6 +331,8 @@ teardown() {
 # =============================================================================
 
 @test "adopt keep preserves existing metadata but installs bazel symlinks" {
+    command -v expect >/dev/null 2>&1 || skip "expect not available"
+
     # Set up patterns and vault
     sed -i.bak 's/WT_METADATA_PATTERNS=""/WT_METADATA_PATTERNS=".idea"/' \
         "$TEST_HOME/.wt/repos/test.conf"
