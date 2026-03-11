@@ -331,8 +331,6 @@ teardown() {
 # =============================================================================
 
 @test "adopt keep preserves existing metadata but installs bazel symlinks" {
-    command -v expect >/dev/null 2>&1 || skip "expect not available"
-
     # Set up patterns and vault
     sed -i.bak 's/WT_METADATA_PATTERNS=""/WT_METADATA_PATTERNS=".idea"/' \
         "$TEST_HOME/.wt/repos/test.conf"
@@ -351,15 +349,13 @@ teardown() {
     mkdir -p "$wt/.idea"
     echo "my-precious-config" > "$wt/.idea/workspace.xml"
 
-    # Use expect(1) to simulate a TTY so the interactive prompt appears.
-    # This sends "k" when the O/K/A prompt is shown.
-    run expect -c '
-        spawn "'"$TEST_HOME/.wt/bin/wt-adopt"'" "'"$wt"'"
-        expect "Choose"
-        send "k\r"
-        expect eof
-        catch wait result
-        exit [lindex $result 3]
+    # Override _wt_is_interactive so the prompt appears even in a pipe,
+    # then pipe "k" (keep) to choose the keep-existing-files option.
+    run bash -c '
+        source "'"$TEST_HOME/.wt/lib/wt-common"'"
+        source "'"$TEST_HOME/.wt/lib/wt-adopt"'"
+        _wt_is_interactive() { return 0; }
+        echo "k" | wt_adopt_worktree "'"$wt"'"
     '
     assert_success
     assert_is_adopted "$wt"
