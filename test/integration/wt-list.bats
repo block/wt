@@ -163,6 +163,80 @@ teardown() {
 # Edge cases
 # =============================================================================
 
+# =============================================================================
+# Porcelain mode tests (--porcelain)
+# =============================================================================
+
+@test "wt-list --porcelain outputs worktree lines" {
+    run "$TEST_HOME/.wt/bin/wt-list" --porcelain
+    assert_success
+    assert_output --partial "worktree $REPO"
+    assert_output --partial "branch refs/heads/main"
+}
+
+@test "wt-list --porcelain includes wt.adopted for adopted worktrees" {
+    source "$TEST_HOME/.wt/lib/wt-adopt"
+
+    create_branch "$REPO" "feature-adopted"
+    local wt_path="$WT_WORKTREES_BASE/feature-adopted"
+    create_worktree "$REPO" "$wt_path" "feature-adopted"
+    local norm_wt_path
+    norm_wt_path="$(cd "$wt_path" && pwd -P)"
+    wt_mark_adopted "$norm_wt_path"
+
+    run "$TEST_HOME/.wt/bin/wt-list" --porcelain
+    assert_success
+    assert_output --partial "wt.adopted"
+}
+
+@test "wt-list --porcelain includes wt.active when active symlink exists" {
+    create_branch "$REPO" "feature-active"
+    local wt_path="$WT_WORKTREES_BASE/feature-active"
+    create_worktree "$REPO" "$wt_path" "feature-active"
+    local norm_wt_path
+    norm_wt_path="$(cd "$wt_path" && pwd -P)"
+
+    ln -s "$norm_wt_path" "$WT_ACTIVE_WORKTREE"
+
+    run "$TEST_HOME/.wt/bin/wt-list" --porcelain
+    assert_success
+    assert_output --partial "wt.active"
+}
+
+@test "wt-list --porcelain does not include color codes" {
+    run "$TEST_HOME/.wt/bin/wt-list" --porcelain
+    assert_success
+
+    # ANSI escape codes start with \033[ or \e[
+    if echo "$output" | grep -qP '\033\['; then
+        fail "Porcelain output should not contain ANSI color codes"
+    fi
+}
+
+@test "wt-list --porcelain -v includes wt.dirty for dirty worktree" {
+    make_repo_dirty "$REPO"
+
+    run "$TEST_HOME/.wt/bin/wt-list" --porcelain -v
+    assert_success
+    assert_output --partial "wt.dirty"
+}
+
+@test "wt-list --porcelain -v does not include wt.dirty for clean worktree" {
+    run "$TEST_HOME/.wt/bin/wt-list" --porcelain -v
+    assert_success
+    refute_output --partial "wt.dirty"
+}
+
+@test "wt-list --porcelain shows --porcelain in help" {
+    run "$TEST_HOME/.wt/bin/wt-list" -h
+    assert_success
+    assert_output --partial "--porcelain"
+}
+
+# =============================================================================
+# Edge cases
+# =============================================================================
+
 @test "wt-list handles worktree with special characters in path" {
     # Create a branch and worktree with spaces in directory name
     create_branch "$REPO" "feature-spaces"
