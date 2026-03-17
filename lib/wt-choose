@@ -58,6 +58,13 @@ else
   exit 1
 fi
 
+# Source wt-adopt for adoption status checks
+if [[ -f "$LIB_DIR/wt-adopt" ]]; then
+  . "$LIB_DIR/wt-adopt"
+elif [[ -f "$HOME/.wt/lib/wt-adopt" ]]; then
+  . "$HOME/.wt/lib/wt-adopt"
+fi
+
 # Interactively pick a worktree from WT_MAIN_REPO_ROOT
 # Runs in a subshell to avoid changing the caller's working directory
 # Args: $1 = "exclude_main" to exclude the main repository from selection
@@ -116,13 +123,34 @@ select_git_worktree() {
 
     local i=1
     for wt in "${WORKTREES[@]}"; do
-      # Determine prefix (* for currently linked worktree)
-      local prefix="  "
+      local is_linked=false is_unadopted=false
       if [[ -n "$linked_worktree" && "$wt" == "$linked_worktree" ]]; then
-        prefix="${GREEN}*${NC} "
+        is_linked=true
       fi
+      if [[ "$wt" != "$main_repo_abs" ]] && ! wt_is_adopted "$wt" 2>/dev/null; then
+        is_unadopted=true
+      fi
+
+      # Determine prefix: * for linked, ? for unadopted, space otherwise
+      local prefix="  "
+      if [[ "$is_linked" == true ]]; then
+        prefix="${GREEN}*${NC} "
+      elif [[ "$is_unadopted" == true ]]; then
+        prefix="${YELLOW}?${NC} "
+      fi
+
+      # Build unadopted badge (red if also linked, yellow otherwise)
+      local unadopted_badge=""
+      if [[ "$is_unadopted" == true ]]; then
+        if [[ "$is_linked" == true ]]; then
+          unadopted_badge="${RED}[unadopted]${NC} "
+        else
+          unadopted_badge="${YELLOW}[unadopted]${NC} "
+        fi
+      fi
+
       # Use shared formatting with number prefix (fast mode - no status checks)
-      printf "%s%2d) %s\n" "$prefix" "$i" "$(wt_format_worktree "$wt" "$main_repo_abs" "$linked_worktree" "false")" >&2
+      printf "%s%2d) %s%s\n" "$prefix" "$i" "$(wt_format_worktree "$wt" "$main_repo_abs" "$linked_worktree" "false")" "$unadopted_badge" >&2
       i=$((i + 1))
     done
 
