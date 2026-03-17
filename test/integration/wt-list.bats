@@ -164,6 +164,81 @@ teardown() {
 # =============================================================================
 
 # =============================================================================
+# Unadopted indicator tests
+# =============================================================================
+
+@test "wt-list shows [unadopted] for non-adopted worktree" {
+    create_branch "$REPO" "feature-raw"
+    local wt_path="$WT_WORKTREES_BASE/feature-raw"
+    create_worktree "$REPO" "$wt_path" "feature-raw"
+    # Worktree is NOT adopted — no wt_mark_adopted call
+
+    run "$TEST_HOME/.wt/bin/wt-list"
+    assert_success
+
+    local raw_line
+    raw_line=$(echo "$output" | grep "feature-raw" | head -1)
+    [[ "$raw_line" == *"[unadopted]"* ]] || fail "Expected [unadopted] on unadopted worktree line, got: $raw_line"
+}
+
+@test "wt-list shows ? prefix for unadopted worktree" {
+    create_branch "$REPO" "feature-raw"
+    local wt_path="$WT_WORKTREES_BASE/feature-raw"
+    create_worktree "$REPO" "$wt_path" "feature-raw"
+
+    run "$TEST_HOME/.wt/bin/wt-list"
+    assert_success
+
+    local raw_line
+    raw_line=$(echo "$output" | grep "feature-raw" | head -1)
+    [[ "$raw_line" == *"?"* ]] || fail "Expected ? prefix on unadopted worktree line, got: $raw_line"
+}
+
+@test "wt-list does not show [unadopted] for adopted worktree" {
+    source "$TEST_HOME/.wt/lib/wt-adopt"
+
+    create_branch "$REPO" "feature-adopted"
+    local wt_path="$WT_WORKTREES_BASE/feature-adopted"
+    create_worktree "$REPO" "$wt_path" "feature-adopted"
+    local norm_wt_path
+    norm_wt_path="$(cd "$wt_path" && pwd -P)"
+    wt_mark_adopted "$norm_wt_path"
+
+    run "$TEST_HOME/.wt/bin/wt-list"
+    assert_success
+    refute_output --partial "[unadopted]"
+}
+
+@test "wt-list does not show [unadopted] for main repo" {
+    run "$TEST_HOME/.wt/bin/wt-list"
+    assert_success
+
+    local main_line
+    main_line=$(echo "$output" | grep -F "$REPO" | grep "\[main\]" | head -1)
+    [[ "$main_line" != *"[unadopted]"* ]] || fail "Main repo should not show [unadopted], got: $main_line"
+}
+
+@test "wt-list shows * prefix and [unadopted] for linked unadopted worktree" {
+    create_branch "$REPO" "feature-linked-raw"
+    local wt_path="$WT_WORKTREES_BASE/feature-linked-raw"
+    create_worktree "$REPO" "$wt_path" "feature-linked-raw"
+    local norm_wt_path
+    norm_wt_path="$(cd "$wt_path" && pwd -P)"
+
+    # Link but don't adopt
+    ln -s "$norm_wt_path" "$WT_ACTIVE_WORKTREE"
+
+    run "$TEST_HOME/.wt/bin/wt-list"
+    assert_success
+
+    local linked_line
+    linked_line=$(echo "$output" | grep "feature-linked-raw" | head -1)
+    [[ "$linked_line" == *"*"* ]] || fail "Expected * prefix on linked line, got: $linked_line"
+    [[ "$linked_line" == *"[linked]"* ]] || fail "Expected [linked] on linked line, got: $linked_line"
+    [[ "$linked_line" == *"[unadopted]"* ]] || fail "Expected [unadopted] on linked unadopted line, got: $linked_line"
+}
+
+# =============================================================================
 # Porcelain mode tests (--porcelain)
 # =============================================================================
 
