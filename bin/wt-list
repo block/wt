@@ -46,22 +46,28 @@ wt_require_valid_config || exit 1
 
 usage() {
   cat <<EOF
-Usage: $(basename "$0") [-v|--verbose]
+Usage: $(basename "$0") [-v|--verbose] [--porcelain]
 
 List all git worktrees with status indicators.
 
 Options:
   -v, --verbose   Show dirty/ahead/behind status (slower)
+  --porcelain     Machine-readable output (augmented git worktree list --porcelain)
   -h, --help      Show this help message
 EOF
 }
 
 # Parse arguments
 VERBOSE=false
+PORCELAIN=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -v|--verbose)
       VERBOSE=true
+      shift
+      ;;
+    --porcelain)
+      PORCELAIN=true
       shift
       ;;
     -h|--help)
@@ -75,6 +81,16 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+# Porcelain mode: output augmented porcelain directly
+if [[ "$PORCELAIN" == true ]]; then
+  if [[ "$VERBOSE" == true ]]; then
+    wt_list_porcelain --verbose
+  else
+    wt_list_porcelain
+  fi
+  exit $?
+fi
 
 # Show context banner if contexts are configured
 wt_show_context_banner
