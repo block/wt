@@ -101,7 +101,7 @@ select_git_worktree() {
       case "$line" in
         worktree\ *)
           wt="${line#worktree }"
-          wt_abs="$(cd "$wt" && pwd)"
+          wt_abs="$(cd "$wt" 2>/dev/null && pwd -P)" || continue
           # Skip main repo if exclude_main is set
           if [[ "$exclude_main" != "exclude_main" || "$wt_abs" != "$main_repo_abs" ]]; then
             WORKTREES[${#WORKTREES[@]}]="$wt_abs"
