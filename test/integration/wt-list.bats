@@ -181,19 +181,6 @@ teardown() {
     [[ "$raw_line" == *"[unadopted]"* ]] || fail "Expected [unadopted] on unadopted worktree line, got: $raw_line"
 }
 
-@test "wt-list shows ? prefix for unadopted worktree" {
-    create_branch "$REPO" "feature-raw"
-    local wt_path="$WT_WORKTREES_BASE/feature-raw"
-    create_worktree "$REPO" "$wt_path" "feature-raw"
-
-    run "$TEST_HOME/.wt/bin/wt-list"
-    assert_success
-
-    local raw_line
-    raw_line=$(echo "$output" | grep "feature-raw" | head -1)
-    [[ "$raw_line" == *"?"* ]] || fail "Expected ? prefix on unadopted worktree line, got: $raw_line"
-}
-
 @test "wt-list does not show [unadopted] for adopted worktree" {
     source "$TEST_HOME/.wt/lib/wt-adopt"
 

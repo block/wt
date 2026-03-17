@@ -131,12 +131,10 @@ select_git_worktree() {
         is_unadopted=true
       fi
 
-      # Determine prefix: * for linked, ? for unadopted, space otherwise
+      # Determine prefix: * for linked, space otherwise
       local prefix="  "
       if [[ "$is_linked" == true ]]; then
         prefix="${GREEN}*${NC} "
-      elif [[ "$is_unadopted" == true ]]; then
-        prefix="${YELLOW}?${NC} "
       fi
 
       # Build unadopted badge (red if also linked, yellow otherwise)
