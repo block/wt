@@ -14,12 +14,14 @@
 #
 # Indicators:
 # -----------
-# *        = Currently linked worktree (symlink target)
-# [main]   = The main repository root
-# [linked] = This worktree is currently linked at WT_ACTIVE_WORKTREE
-# [dirty]  = Has uncommitted changes (only with -v)
-# [↑N]     = N commits ahead of upstream (only with -v)
-# [↓N]     = N commits behind upstream (only with -v)
+# *           = Currently linked worktree (symlink target)
+# ?           = Unadopted worktree (yellow)
+# [main]      = The main repository root
+# [linked]    = This worktree is currently linked at WT_ACTIVE_WORKTREE
+# [unadopted] = Worktree not adopted by wt (yellow; red if also linked)
+# [dirty]     = Has uncommitted changes (only with -v)
+# [↑N]        = N commits ahead of upstream (only with -v)
+# [↓N]        = N commits behind upstream (only with -v)
 #
 # Usage:
 #   wt-list           # Fast: shows path, branch, [main], [linked]
@@ -43,6 +45,9 @@ else
   exit 1
 fi
 wt_require_valid_config || exit 1
+
+# Source wt-adopt for adoption status checks
+wt_source wt-adopt
 
 usage() {
   cat <<EOF
@@ -125,14 +130,36 @@ LINKED_WORKTREE="$(wt_get_linked_worktree)"
         wt="${line#worktree }"
         wt_abs="$(cd "$wt" 2>/dev/null && pwd -P)" || continue
 
-        # Determine prefix (linked indicator)
-        prefix="  "
+        # Check adoption status (skip for main repo — adoption doesn't apply)
+        is_linked=false
+        is_unadopted=false
         if [[ -n "$LINKED_WORKTREE" && "$wt_abs" == "$LINKED_WORKTREE" ]]; then
-          prefix="${GREEN}*${NC} "
+          is_linked=true
+        fi
+        if [[ "$wt_abs" != "$MAIN_REPO_ABS" ]] && ! wt_is_adopted "$wt_abs" 2>/dev/null; then
+          is_unadopted=true
         fi
 
-        # Print with shared formatting
-        printf "%s%s\n" "$prefix" "$(wt_format_worktree "$wt_abs" "$MAIN_REPO_ABS" "$LINKED_WORKTREE" "$VERBOSE")"
+        # Determine prefix: * for linked, ? for unadopted, space otherwise
+        prefix="  "
+        if [[ "$is_linked" == true ]]; then
+          prefix="${GREEN}*${NC} "
+        elif [[ "$is_unadopted" == true ]]; then
+          prefix="${YELLOW}?${NC} "
+        fi
+
+        # Build unadopted badge (red if also linked, yellow otherwise)
+        unadopted_badge=""
+        if [[ "$is_unadopted" == true ]]; then
+          if [[ "$is_linked" == true ]]; then
+            unadopted_badge="${RED}[unadopted]${NC} "
+          else
+            unadopted_badge="${YELLOW}[unadopted]${NC} "
+          fi
+        fi
+
+        # Print with shared formatting + unadopted badge
+        printf "%s%s%s\n" "$prefix" "$(wt_format_worktree "$wt_abs" "$MAIN_REPO_ABS" "$LINKED_WORKTREE" "$VERBOSE")" "$unadopted_badge"
         ;;
     esac
   done < <(git worktree list --porcelain)
