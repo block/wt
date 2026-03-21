@@ -1,147 +1,93 @@
 package com.block.wt.provision
 
 import com.block.wt.git.GitDirResolver
-import com.block.wt.model.ProvisionEntry
-import com.block.wt.model.ProvisionMarker
-import com.google.gson.GsonBuilder
-import com.intellij.openapi.diagnostic.Logger
 import java.nio.file.Files
 import java.nio.file.Path
-import java.time.Instant
 
 object ProvisionMarkerService {
 
-    private val log = Logger.getInstance(ProvisionMarkerService::class.java)
+    private const val WT_DIR = "wt"
+    private const val ADOPTED_FILE = "adopted"
+    private const val LEGACY_JSON_FILE = "wt-provisioned"
 
-    const val MARKER_FILE = "wt-provisioned"
-
+    // Used by ContextSetupDialog to detect existing IDE metadata
     val IDE_METADATA_DIRS = listOf(".idea", ".ijwb", ".aswb", ".clwb", ".vscode")
 
-    private val gson = GsonBuilder().setPrettyPrinting().create()
-
     /**
-     * Fast check whether a worktree has been provisioned by any context.
-     * No subprocess — reads the filesystem directly.
+     * Fast check whether a worktree has been adopted by any context.
+     * Checks the new wt/adopted marker first, then falls back to legacy wt-provisioned.
      */
     fun isProvisioned(worktreePath: Path): Boolean {
         val gitDir = GitDirResolver.resolveGitDir(worktreePath) ?: return false
-        return Files.exists(gitDir.resolve(MARKER_FILE))
+        return Files.exists(gitDir.resolve(WT_DIR).resolve(ADOPTED_FILE)) ||
+            Files.exists(gitDir.resolve(LEGACY_JSON_FILE))
     }
 
     /**
-     * Checks whether a worktree is currently provisioned by a specific context
-     * (i.e. that context is the `current` provisioner).
+     * Checks whether a worktree is currently adopted by a specific context.
      */
     fun isProvisionedByContext(worktreePath: Path, contextName: String): Boolean {
-        val marker = readProvisionMarker(worktreePath) ?: return false
-        return marker.current == contextName
+        val context = readAdoptedContext(worktreePath) ?: return false
+        return context == contextName
     }
 
     /**
-     * Reads and parses the provision marker file, returning null if not provisioned.
+     * Reads the context name from the adoption marker.
+     * Returns null if not adopted or if the marker exists but has no context info.
      */
-    fun readProvisionMarker(worktreePath: Path): ProvisionMarker? {
+    fun readAdoptedContext(worktreePath: Path): String? {
         val gitDir = GitDirResolver.resolveGitDir(worktreePath) ?: return null
-        val markerPath = gitDir.resolve(MARKER_FILE)
-        if (!Files.exists(markerPath)) return null
-
-        return try {
-            val marker = gson.fromJson(Files.readString(markerPath), ProvisionMarker::class.java)
-            // Gson can produce non-null Kotlin types with null values when JSON fields
-            // are missing or null. The null checks below are runtime-necessary despite
-            // Kotlin's type system saying they're redundant.
-            @Suppress("SENSELESS_COMPARISON")
-            if (marker == null || marker.current == null || marker.provisions == null) {
-                log.warn("Incomplete provision marker for $worktreePath")
-                null
-            } else {
-                marker
-            }
-        } catch (e: Exception) {
-            log.warn("Failed to parse provision marker for $worktreePath", e)
-            null
+        // Primary: read from wt/adopted
+        val marker = gitDir.resolve(WT_DIR).resolve(ADOPTED_FILE)
+        if (Files.exists(marker)) {
+            val content = Files.readString(marker).trim()
+            return content.ifEmpty { null }
         }
+        // Fallback: read "current" from legacy JSON
+        val legacy = gitDir.resolve(LEGACY_JSON_FILE)
+        if (Files.exists(legacy)) {
+            return readCurrentFromLegacyJson(legacy)
+        }
+        return null
     }
 
     /**
-     * Writes (or updates) the provision marker for a worktree.
-     * Sets the given context as `current` and adds/updates its entry in the provisions array.
+     * Writes the adoption marker for a worktree.
+     * Stores the context name in plain text at <gitdir>/wt/adopted.
+     * Cleans up legacy wt-provisioned JSON if present.
      */
-    fun writeProvisionMarker(worktreePath: Path, contextName: String): Result<Unit> {
+    fun writeAdoptionMarker(worktreePath: Path, contextName: String): Result<Unit> = runCatching {
         val gitDir = GitDirResolver.resolveGitDir(worktreePath)
-            ?: return Result.failure(IllegalStateException("Cannot resolve git dir for $worktreePath"))
-        val markerPath = gitDir.resolve(MARKER_FILE)
-
-        val existing = readProvisionMarker(worktreePath)
-        val now = Instant.now().toString()
-
-        val provisions = (existing?.provisions?.filter { it.context != contextName } ?: emptyList()) +
-            ProvisionEntry(context = contextName, provisionedAt = now, provisionedBy = "jetbrains-plugin")
-
-        val marker = ProvisionMarker(current = contextName, provisions = provisions)
-        return try {
-            Files.writeString(markerPath, markerToJson(marker))
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+            ?: throw IllegalStateException("Cannot resolve git dir for $worktreePath")
+        val wtDir = gitDir.resolve(WT_DIR)
+        Files.createDirectories(wtDir)
+        Files.writeString(wtDir.resolve(ADOPTED_FILE), contextName + "\n")
+        // Clean up legacy JSON marker
+        Files.deleteIfExists(gitDir.resolve(LEGACY_JSON_FILE))
     }
 
     /**
-     * Removes the provision marker for a worktree.
-     * If contextName is null, deletes the entire marker file.
-     * If non-null, removes just that context's entry; clears current if it matched;
-     * if the array becomes empty, deletes the file.
+     * Removes the adoption marker for a worktree.
+     * Cleans up both wt/adopted and legacy wt-provisioned.
      */
-    fun removeProvisionMarker(worktreePath: Path, contextName: String? = null): Result<Unit> {
+    fun removeAdoptionMarker(worktreePath: Path): Result<Unit> = runCatching {
         val gitDir = GitDirResolver.resolveGitDir(worktreePath)
-            ?: return Result.failure(IllegalStateException("Cannot resolve git dir for $worktreePath"))
-        val markerPath = gitDir.resolve(MARKER_FILE)
-        if (!Files.exists(markerPath)) return Result.success(Unit)
-
-        if (contextName == null) {
-            return try {
-                Files.deleteIfExists(markerPath)
-                Result.success(Unit)
-            } catch (e: Exception) {
-                Result.failure(e)
-            }
-        }
-
-        val existing = readProvisionMarker(worktreePath) ?: return Result.success(Unit)
-        val remaining = existing.provisions.filter { it.context != contextName }
-
-        if (remaining.isEmpty()) {
-            return try {
-                Files.deleteIfExists(markerPath)
-                Result.success(Unit)
-            } catch (e: Exception) {
-                Result.failure(e)
-            }
-        }
-
-        val newCurrent = if (existing.current == contextName) remaining.last().context else existing.current
-        val marker = ProvisionMarker(current = newCurrent, provisions = remaining)
-
-        return try {
-            Files.writeString(markerPath, markerToJson(marker))
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+            ?: throw IllegalStateException("Cannot resolve git dir for $worktreePath")
+        val wtDir = gitDir.resolve(WT_DIR)
+        Files.deleteIfExists(wtDir.resolve(ADOPTED_FILE))
+        runCatching { Files.delete(wtDir) } // remove wt/ dir if empty, ignore if not
+        Files.deleteIfExists(gitDir.resolve(LEGACY_JSON_FILE))
     }
 
     /**
-     * Checks whether a worktree already has IDE metadata directories (e.g. .idea/, .ijwb/).
-     * Used to detect worktrees that were set up outside the provision flow and don't need
-     * a full metadata import — just the provision marker.
+     * Checks whether a worktree already has IDE metadata directories.
      */
-    fun hasExistingMetadata(worktreePath: Path): Boolean {
-        for (pattern in IDE_METADATA_DIRS) {
-            if (Files.isDirectory(worktreePath.resolve(pattern))) return true
-        }
-        return false
-    }
+    fun hasExistingMetadata(worktreePath: Path): Boolean =
+        IDE_METADATA_DIRS.any { Files.isDirectory(worktreePath.resolve(it)) }
 
-    private fun markerToJson(marker: ProvisionMarker): String = gson.toJson(marker)
+    private fun readCurrentFromLegacyJson(jsonFile: Path): String? {
+        val content = Files.readString(jsonFile)
+        val match = Regex(""""current"\s*:\s*"([^"]+)"""").find(content)
+        return match?.groupValues?.get(1)
+    }
 }

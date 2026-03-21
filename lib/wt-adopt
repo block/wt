@@ -47,8 +47,9 @@ wt_mark_adopted() {
     git_dir="$(cd "$worktree_path" && cd "$git_dir" && pwd -P)"
   fi
 
+  local context="${WT_CONTEXT_NAME:-unknown}"
   mkdir -p "$git_dir/wt"
-  touch "$git_dir/wt/adopted"
+  echo "$context" > "$git_dir/wt/adopted"
 }
 
 # Remove adoption marker from a worktree.
@@ -65,6 +66,31 @@ wt_unmark_adopted() {
 
   rm -f "$git_dir/wt/adopted"
   rmdir "$git_dir/wt" 2>/dev/null || true
+}
+
+# Read the context name from the adoption marker.
+# Args: $1 = worktree path (default: CWD)
+# Outputs: context name to stdout (may be empty for old-format files)
+# Returns: 0 if adopted (even if context unknown), 1 if not adopted
+wt_read_adopted_context() {
+  local worktree_path="${1:-.}"
+  local git_dir
+  git_dir="$(git -C "$worktree_path" rev-parse --git-dir 2>/dev/null)" || return 1
+
+  if [[ "$git_dir" != /* ]]; then
+    git_dir="$(cd "$worktree_path" && cd "$git_dir" && pwd -P)"
+  fi
+
+  if [[ -f "$git_dir/wt/adopted" ]]; then
+    local content
+    content="$(head -1 "$git_dir/wt/adopted" | tr -d '[:space:]')"
+    if [[ -n "$content" ]]; then
+      echo "$content"
+    fi
+    return 0
+  fi
+
+  return 1
 }
 
 # Check if a path is the main repository (not a worktree).

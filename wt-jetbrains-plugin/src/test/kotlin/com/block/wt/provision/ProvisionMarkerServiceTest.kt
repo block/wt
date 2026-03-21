@@ -3,7 +3,6 @@ package com.block.wt.provision
 import com.block.wt.testutil.TestFileHelper.deleteRecursive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -26,7 +25,6 @@ class ProvisionMarkerServiceTest {
     fun testIsProvisionedReturnsFalseWhenNoMarker() {
         val dir = Files.createTempDirectory("provision-test")
         try {
-            // Create a .git directory (main worktree style)
             Files.createDirectory(dir.resolve(".git"))
             assertFalse(ProvisionMarkerService.isProvisioned(dir))
         } finally {
@@ -35,77 +33,66 @@ class ProvisionMarkerServiceTest {
     }
 
     @Test
-    fun testWriteAndReadProvisionMarker() {
+    fun testWriteAndReadAdoptionMarker() {
         val dir = Files.createTempDirectory("provision-test")
         try {
             Files.createDirectory(dir.resolve(".git"))
 
-            val result = ProvisionMarkerService.writeProvisionMarker(dir, "java")
+            val result = ProvisionMarkerService.writeAdoptionMarker(dir, "java")
             assertTrue(result.isSuccess)
             assertTrue(ProvisionMarkerService.isProvisioned(dir))
             assertTrue(ProvisionMarkerService.isProvisionedByContext(dir, "java"))
             assertFalse(ProvisionMarkerService.isProvisionedByContext(dir, "kotlin"))
 
-            val marker = ProvisionMarkerService.readProvisionMarker(dir)
-            assertNotNull(marker)
-            assertEquals("java", marker!!.current)
-            assertEquals(1, marker.provisions.size)
-            assertEquals("java", marker.provisions[0].context)
-            assertEquals("jetbrains-plugin", marker.provisions[0].provisionedBy)
+            val context = ProvisionMarkerService.readAdoptedContext(dir)
+            assertEquals("java", context)
         } finally {
             deleteRecursive(dir)
         }
     }
 
     @Test
-    fun testWriteMultipleContextsPreservesHistory() {
+    fun testWriteOverwritesPreviousContext() {
         val dir = Files.createTempDirectory("provision-test")
         try {
             Files.createDirectory(dir.resolve(".git"))
 
-            ProvisionMarkerService.writeProvisionMarker(dir, "java")
-            ProvisionMarkerService.writeProvisionMarker(dir, "kotlin")
+            ProvisionMarkerService.writeAdoptionMarker(dir, "java")
+            ProvisionMarkerService.writeAdoptionMarker(dir, "kotlin")
 
-            val marker = ProvisionMarkerService.readProvisionMarker(dir)
-            assertNotNull(marker)
-            assertEquals("kotlin", marker!!.current)
-            assertEquals(2, marker.provisions.size)
-
-            val contexts = marker.provisions.map { it.context }.toSet()
-            assertTrue(contexts.contains("java"))
-            assertTrue(contexts.contains("kotlin"))
+            val context = ProvisionMarkerService.readAdoptedContext(dir)
+            assertEquals("kotlin", context)
+            assertTrue(ProvisionMarkerService.isProvisionedByContext(dir, "kotlin"))
+            assertFalse(ProvisionMarkerService.isProvisionedByContext(dir, "java"))
         } finally {
             deleteRecursive(dir)
         }
     }
 
     @Test
-    fun testReProvisionSameContextUpdatesEntry() {
+    fun testReProvisionSameContextIsIdempotent() {
         val dir = Files.createTempDirectory("provision-test")
         try {
             Files.createDirectory(dir.resolve(".git"))
 
-            ProvisionMarkerService.writeProvisionMarker(dir, "java")
-            ProvisionMarkerService.writeProvisionMarker(dir, "java")
+            ProvisionMarkerService.writeAdoptionMarker(dir, "java")
+            ProvisionMarkerService.writeAdoptionMarker(dir, "java")
 
-            val marker = ProvisionMarkerService.readProvisionMarker(dir)
-            assertNotNull(marker)
-            assertEquals("java", marker!!.current)
-            assertEquals(1, marker.provisions.size)
+            assertEquals("java", ProvisionMarkerService.readAdoptedContext(dir))
         } finally {
             deleteRecursive(dir)
         }
     }
 
     @Test
-    fun testRemoveProvisionMarkerDeletesFile() {
+    fun testRemoveAdoptionMarkerDeletesFile() {
         val dir = Files.createTempDirectory("provision-test")
         try {
             Files.createDirectory(dir.resolve(".git"))
-            ProvisionMarkerService.writeProvisionMarker(dir, "java")
+            ProvisionMarkerService.writeAdoptionMarker(dir, "java")
             assertTrue(ProvisionMarkerService.isProvisioned(dir))
 
-            val result = ProvisionMarkerService.removeProvisionMarker(dir)
+            val result = ProvisionMarkerService.removeAdoptionMarker(dir)
             assertTrue(result.isSuccess)
             assertFalse(ProvisionMarkerService.isProvisioned(dir))
         } finally {
@@ -114,97 +101,91 @@ class ProvisionMarkerServiceTest {
     }
 
     @Test
-    fun testRemoveSpecificContextKeepsOthers() {
+    fun testRemoveNonexistentMarkerSucceeds() {
         val dir = Files.createTempDirectory("provision-test")
         try {
             Files.createDirectory(dir.resolve(".git"))
-            ProvisionMarkerService.writeProvisionMarker(dir, "java")
-            ProvisionMarkerService.writeProvisionMarker(dir, "kotlin")
-
-            val result = ProvisionMarkerService.removeProvisionMarker(dir, "java")
-            assertTrue(result.isSuccess)
-
-            val marker = ProvisionMarkerService.readProvisionMarker(dir)
-            assertNotNull(marker)
-            assertEquals(1, marker!!.provisions.size)
-            assertEquals("kotlin", marker.provisions[0].context)
+            assertTrue(ProvisionMarkerService.removeAdoptionMarker(dir).isSuccess)
         } finally {
             deleteRecursive(dir)
         }
     }
 
     @Test
-    fun testRemoveCurrentContextUpdatesCurrent() {
-        val dir = Files.createTempDirectory("provision-test")
-        try {
-            Files.createDirectory(dir.resolve(".git"))
-            ProvisionMarkerService.writeProvisionMarker(dir, "java")
-            ProvisionMarkerService.writeProvisionMarker(dir, "kotlin")
-
-            // "kotlin" is current, remove it
-            ProvisionMarkerService.removeProvisionMarker(dir, "kotlin")
-
-            val marker = ProvisionMarkerService.readProvisionMarker(dir)
-            assertNotNull(marker)
-            assertEquals("java", marker!!.current)
-        } finally {
-            deleteRecursive(dir)
-        }
-    }
-
-    @Test
-    fun testRemoveLastContextDeletesFile() {
-        val dir = Files.createTempDirectory("provision-test")
-        try {
-            Files.createDirectory(dir.resolve(".git"))
-            ProvisionMarkerService.writeProvisionMarker(dir, "java")
-
-            ProvisionMarkerService.removeProvisionMarker(dir, "java")
-            assertFalse(ProvisionMarkerService.isProvisioned(dir))
-        } finally {
-            deleteRecursive(dir)
-        }
-    }
-
-    @Test
-    fun testRemoveNonexistentMarkerReturnsTrue() {
-        val dir = Files.createTempDirectory("provision-test")
-        try {
-            Files.createDirectory(dir.resolve(".git"))
-            assertTrue(ProvisionMarkerService.removeProvisionMarker(dir).isSuccess)
-        } finally {
-            deleteRecursive(dir)
-        }
-    }
-
-    @Test
-    fun testReadIncompleteJsonReturnsNull() {
+    fun testFallbackReadFromLegacyJson() {
         val dir = Files.createTempDirectory("provision-test")
         try {
             val gitDir = dir.resolve(".git")
             Files.createDirectory(gitDir)
 
-            // Empty JSON object — Gson sets non-null fields to null via Unsafe
-            Files.writeString(gitDir.resolve("wt-provisioned"), "{}")
-            assertNull(ProvisionMarkerService.readProvisionMarker(dir))
+            // Write legacy JSON marker
+            Files.writeString(
+                gitDir.resolve("wt-provisioned"),
+                """{"current": "go", "provisions": [{"context": "go"}]}"""
+            )
 
-            // Missing provisions field
-            Files.writeString(gitDir.resolve("wt-provisioned"), """{"current":"test"}""")
-            assertNull(ProvisionMarkerService.readProvisionMarker(dir))
+            assertTrue(ProvisionMarkerService.isProvisioned(dir))
+            assertEquals("go", ProvisionMarkerService.readAdoptedContext(dir))
+            assertTrue(ProvisionMarkerService.isProvisionedByContext(dir, "go"))
         } finally {
             deleteRecursive(dir)
         }
     }
 
     @Test
-    fun testReadMalformedJsonReturnsNull() {
+    fun testWriteCleanUpLegacyJson() {
         val dir = Files.createTempDirectory("provision-test")
         try {
             val gitDir = dir.resolve(".git")
             Files.createDirectory(gitDir)
-            Files.writeString(gitDir.resolve("wt-provisioned"), "not valid json")
 
-            assertNull(ProvisionMarkerService.readProvisionMarker(dir))
+            // Create legacy marker
+            val legacyPath = gitDir.resolve("wt-provisioned")
+            Files.writeString(legacyPath, """{"current":"old"}""")
+            assertTrue(Files.exists(legacyPath))
+
+            // Write new marker — should clean up legacy
+            ProvisionMarkerService.writeAdoptionMarker(dir, "java")
+            assertFalse(Files.exists(legacyPath))
+            assertEquals("java", ProvisionMarkerService.readAdoptedContext(dir))
+        } finally {
+            deleteRecursive(dir)
+        }
+    }
+
+    @Test
+    fun testRemoveCleanUpLegacyJson() {
+        val dir = Files.createTempDirectory("provision-test")
+        try {
+            val gitDir = dir.resolve(".git")
+            Files.createDirectory(gitDir)
+
+            // Create legacy marker
+            val legacyPath = gitDir.resolve("wt-provisioned")
+            Files.writeString(legacyPath, """{"current":"old"}""")
+
+            ProvisionMarkerService.removeAdoptionMarker(dir)
+            assertFalse(Files.exists(legacyPath))
+        } finally {
+            deleteRecursive(dir)
+        }
+    }
+
+    @Test
+    fun testEmptyAdoptedFileBackwardCompat() {
+        val dir = Files.createTempDirectory("provision-test")
+        try {
+            val gitDir = dir.resolve(".git")
+            Files.createDirectory(gitDir)
+            val wtDir = gitDir.resolve("wt")
+            Files.createDirectories(wtDir)
+
+            // Old CLI format: empty file
+            Files.writeString(wtDir.resolve("adopted"), "")
+
+            assertTrue(ProvisionMarkerService.isProvisioned(dir))
+            // Empty content returns null — no context info
+            assertNull(ProvisionMarkerService.readAdoptedContext(dir))
         } finally {
             deleteRecursive(dir)
         }
@@ -235,13 +216,49 @@ class ProvisionMarkerServiceTest {
             Files.createDirectory(worktree)
             Files.writeString(worktree.resolve(".git"), "gitdir: ${gitWorktreeDir}")
 
-            val result = ProvisionMarkerService.writeProvisionMarker(worktree, "test-context")
+            val result = ProvisionMarkerService.writeAdoptionMarker(worktree, "test-context")
             assertTrue(result.isSuccess)
-            assertTrue(Files.exists(gitWorktreeDir.resolve("wt-provisioned")))
+            assertTrue(Files.exists(gitWorktreeDir.resolve("wt").resolve("adopted")))
             assertTrue(ProvisionMarkerService.isProvisionedByContext(worktree, "test-context"))
         } finally {
             deleteRecursive(dir)
         }
     }
 
+    @Test
+    fun testCrossToolCliFormatReadByPlugin() {
+        val dir = Files.createTempDirectory("provision-test")
+        try {
+            val gitDir = dir.resolve(".git")
+            Files.createDirectory(gitDir)
+            val wtDir = gitDir.resolve("wt")
+            Files.createDirectories(wtDir)
+
+            // Write in CLI format: context name followed by newline
+            Files.writeString(wtDir.resolve("adopted"), "java\n")
+
+            assertTrue(ProvisionMarkerService.isProvisioned(dir))
+            assertEquals("java", ProvisionMarkerService.readAdoptedContext(dir))
+            assertTrue(ProvisionMarkerService.isProvisionedByContext(dir, "java"))
+        } finally {
+            deleteRecursive(dir)
+        }
+    }
+
+    @Test
+    fun testLegacyJsonWithNoCurrentFieldReturnsNull() {
+        val dir = Files.createTempDirectory("provision-test")
+        try {
+            val gitDir = dir.resolve(".git")
+            Files.createDirectory(gitDir)
+
+            // Legacy JSON without "current" field
+            Files.writeString(gitDir.resolve("wt-provisioned"), """{"provisions": []}""")
+
+            assertTrue(ProvisionMarkerService.isProvisioned(dir))
+            assertNull(ProvisionMarkerService.readAdoptedContext(dir))
+        } finally {
+            deleteRecursive(dir)
+        }
+    }
 }
