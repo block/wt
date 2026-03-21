@@ -8,6 +8,11 @@ setup() {
 
     # Source the library under test
     source "$TEST_HOME/.wt/lib/wt-common"
+
+    # Re-enable wt_read_git_config for unit tests that exercise it directly.
+    # The guard was needed during source-time to prevent host repo config bleed,
+    # but unit tests cd into their own mock repos before calling the function.
+    unset _WT_SKIP_GIT_CONFIG
 }
 
 teardown() {

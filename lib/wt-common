@@ -94,6 +94,10 @@ wt_read_context_config() {
 # Returns: 0 if config was loaded, 1 if not (not in repo, not enabled,
 #          no keys, or incomplete config).
 wt_read_git_config() {
+  # Allow tests to skip git config loading to avoid picking up the host repo's config.
+  # This follows the same pattern as _wt_is_interactive override in lib/wt-adopt.
+  [[ -n "${_WT_SKIP_GIT_CONFIG:-}" ]] && return 1
+
   # Only proceed if we're inside a git repo or worktree
   local repo_root
   repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || return 1
