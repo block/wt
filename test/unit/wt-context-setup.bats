@@ -24,6 +24,10 @@ teardown() {
     assert [ -n "${WT_KNOWN_METADATA[*]:-}" ]
 }
 
+@test "WT_KNOWN_METADATA has exactly 20 entries" {
+    assert_equal "${#WT_KNOWN_METADATA[@]}" "20"
+}
+
 @test "WT_KNOWN_METADATA contains expected patterns" {
     for expected in ".idea" ".ijwb"; do
         local found=false
