@@ -390,26 +390,14 @@ class WorktreePanel(private val project: Project) : JPanel(BorderLayout()), Data
             return "Not provisioned \u2014 right-click to provision"
         }
 
-        val marker = ProvisionMarkerService.readProvisionMarker(wt.path) ?: return "Provisioned"
+        val adoptedContext = ProvisionMarkerService.readAdoptedContext(wt.path)
+            ?: return "Adopted (unknown context)"
         val currentContextName = ContextService.getInstance(project).getCurrentConfig()?.name
-        val otherContexts = marker.provisions
-            .map { it.context }
-            .filter { it != marker.current }
 
-        return buildString {
-            append("Current: ${marker.current}")
-            if (marker.current == currentContextName) {
-                append(" (this context)")
-            }
-
-            if (otherContexts.isNotEmpty()) {
-                append(" | Also provisioned by: ")
-                append(otherContexts.joinToString(", ") { name ->
-                    if (name == currentContextName) "$name (this context)" else name
-                })
-            } else if (currentContextName != null && marker.current != currentContextName) {
-                append(" | Not provisioned by this context")
-            }
+        return if (currentContextName != null && adoptedContext != currentContextName) {
+            "Adopted by: $adoptedContext (different from current: $currentContextName)"
+        } else {
+            "Adopted by: $adoptedContext \u2713"
         }
     }
 

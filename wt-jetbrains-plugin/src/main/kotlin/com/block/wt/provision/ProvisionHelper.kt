@@ -10,7 +10,8 @@ import com.intellij.openapi.project.Project
 import java.nio.file.Path
 
 /**
- * Consolidates the provision flow: write marker -> import metadata -> install Bazel symlinks.
+ * Consolidates the provision flow: import metadata -> install Bazel symlinks -> write marker.
+ * The marker is written only after all steps succeed, matching CLI semantics.
  * Collects errors and reports them instead of silently swallowing.
  */
 object ProvisionHelper {
@@ -20,7 +21,7 @@ object ProvisionHelper {
     /**
      * Performs the full provision sequence for a single worktree.
      *
-     * @param keepExistingFiles If true, only writes the provision marker without importing metadata.
+     * @param keepExistingFiles If true, skips metadata import (marker + Bazel symlinks only).
      * @param scope Optional progress scope for UI feedback.
      */
     suspend fun provisionWorktree(
@@ -32,40 +33,42 @@ object ProvisionHelper {
     ) {
         val errors = mutableListOf<String>()
 
-        // Step 1: Write marker (0%–5%)
-        scope?.checkCanceled()
-        scope?.text("Writing provision marker...")
-        scope?.fraction(0.0)
-        ProvisionMarkerService.writeProvisionMarker(worktreePath, config.name).onFailure {
-            log.warn("Failed to write provision marker for $worktreePath", it)
-            errors.add("Failed to write provision marker: ${it.message}")
-        }
-
         if (!keepExistingFiles) {
-            // Step 2: Import metadata (5%–85%)
+            // Step 1: Import metadata (0%–80%)
             scope?.checkCanceled()
-            scope?.fraction(0.05)
+            scope?.fraction(0.0)
             scope?.text("Importing metadata...")
             runCatching {
                 MetadataService.getInstance(project).importMetadata(
                     config.ideaFilesBase, worktreePath,
                     patterns = config.metadataPatterns,
-                    scope = scope?.sub(0.05, 0.80),
+                    scope = scope?.sub(0.0, 0.80),
                 )
             }.onFailure {
                 log.warn("Metadata import failed for $worktreePath", it)
                 errors.add("Metadata import: ${it.message}")
             }
 
-            // Step 3: Bazel symlinks (85%–100%)
+            // Step 2: Bazel symlinks (80%–95%)
             scope?.checkCanceled()
-            scope?.fraction(0.85)
+            scope?.fraction(0.80)
             scope?.text("Installing Bazel symlinks...")
             runCatching {
                 BazelService.getInstance(project).installBazelSymlinks(config.mainRepoRoot, worktreePath)
             }.onFailure {
                 log.warn("Bazel symlink install failed for $worktreePath", it)
                 errors.add("Bazel symlinks: ${it.message}")
+            }
+        }
+
+        // Step 3: Write adoption marker only if no errors (95%–100%)
+        scope?.checkCanceled()
+        scope?.fraction(0.95)
+        scope?.text("Writing adoption marker...")
+        if (errors.isEmpty()) {
+            ProvisionMarkerService.writeAdoptionMarker(worktreePath, config.name).onFailure {
+                log.warn("Failed to write adoption marker for $worktreePath", it)
+                errors.add("Failed to write adoption marker: ${it.message}")
             }
         }
 

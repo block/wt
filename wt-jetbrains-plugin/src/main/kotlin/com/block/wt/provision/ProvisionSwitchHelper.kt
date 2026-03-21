@@ -64,7 +64,7 @@ object ProvisionSwitchHelper {
                 when (answer) {
                     0 -> {
                         // Provision (keep files) — marker only, no import
-                        ProvisionMarkerService.writeProvisionMarker(wt.path, currentContextName)
+                        ProvisionMarkerService.writeAdoptionMarker(wt.path, currentContextName)
                             .onFailure { /* best-effort: switch anyway */ }
                         SymlinkSwitchService.getInstance(project).switchWorktree(wt.path)
                         return

@@ -23,6 +23,17 @@ teardown() {
     teardown_test_env
 }
 
+# Helper: resolve git dir for a worktree
+_resolve_git_dir() {
+    local wt_path="$1"
+    local git_dir
+    git_dir="$(git -C "$wt_path" rev-parse --git-dir)"
+    if [[ "$git_dir" != /* ]]; then
+        git_dir="$(cd "$wt_path" && cd "$git_dir" && pwd -P)"
+    fi
+    echo "$git_dir"
+}
+
 # =============================================================================
 # wt_is_adopted / wt_mark_adopted / wt_unmark_adopted
 # =============================================================================
@@ -33,17 +44,37 @@ teardown() {
 }
 
 @test "wt_mark_adopted creates marker file in correct git-dir location" {
+    export WT_CONTEXT_NAME="java"
     wt_mark_adopted "$WORKTREE"
 
     # Marker should be inside the worktree's git dir, NOT in the working tree
     local git_dir
-    git_dir="$(git -C "$WORKTREE" rev-parse --git-dir)"
-    if [[ "$git_dir" != /* ]]; then
-        git_dir="$(cd "$WORKTREE" && cd "$git_dir" && pwd -P)"
-    fi
+    git_dir="$(_resolve_git_dir "$WORKTREE")"
     assert [ -f "$git_dir/wt/adopted" ]
     # In a worktree, .git is a file, not a directory — marker should NOT be at .git/wt/adopted
     assert [ ! -d "$WORKTREE/.git/wt" ]
+}
+
+@test "wt_mark_adopted writes context name to wt/adopted file" {
+    export WT_CONTEXT_NAME="java"
+    wt_mark_adopted "$WORKTREE"
+
+    local git_dir
+    git_dir="$(_resolve_git_dir "$WORKTREE")"
+    local content
+    content="$(cat "$git_dir/wt/adopted")"
+    assert_equal "$content" "java"
+}
+
+@test "wt_mark_adopted uses 'unknown' when WT_CONTEXT_NAME is unset" {
+    unset WT_CONTEXT_NAME
+    wt_mark_adopted "$WORKTREE"
+
+    local git_dir
+    git_dir="$(_resolve_git_dir "$WORKTREE")"
+    local content
+    content="$(cat "$git_dir/wt/adopted")"
+    assert_equal "$content" "unknown"
 }
 
 @test "wt_is_adopted returns true after marking" {
@@ -63,18 +94,67 @@ teardown() {
 
     # wt/ directory should also be cleaned up
     local git_dir
-    git_dir="$(git -C "$WORKTREE" rev-parse --git-dir)"
-    if [[ "$git_dir" != /* ]]; then
-        git_dir="$(cd "$WORKTREE" && cd "$git_dir" && pwd -P)"
-    fi
+    git_dir="$(_resolve_git_dir "$WORKTREE")"
     assert [ ! -d "$git_dir/wt" ]
 }
 
 @test "wt_mark_adopted is idempotent" {
+    export WT_CONTEXT_NAME="java"
     wt_mark_adopted "$WORKTREE"
     wt_mark_adopted "$WORKTREE"
     run wt_is_adopted "$WORKTREE"
     assert_success
+}
+
+# =============================================================================
+# wt_read_adopted_context
+# =============================================================================
+
+@test "wt_read_adopted_context returns context name from wt/adopted" {
+    export WT_CONTEXT_NAME="java"
+    wt_mark_adopted "$WORKTREE"
+
+    run wt_read_adopted_context "$WORKTREE"
+    assert_success
+    assert_output "java"
+}
+
+@test "wt_read_adopted_context handles empty file (old format backward compat)" {
+    local git_dir
+    git_dir="$(_resolve_git_dir "$WORKTREE")"
+    mkdir -p "$git_dir/wt"
+    touch "$git_dir/wt/adopted"
+
+    run wt_read_adopted_context "$WORKTREE"
+    assert_success
+    assert_output ""
+}
+
+@test "wt_read_adopted_context returns 1 when not adopted" {
+    run wt_read_adopted_context "$WORKTREE"
+    assert_failure
+}
+
+# =============================================================================
+# Cross-tool: CLI writes, plugin reads
+# =============================================================================
+
+@test "cross-tool: wt/adopted is plain text readable by both CLI and plugin" {
+    export WT_CONTEXT_NAME="java"
+    wt_mark_adopted "$WORKTREE"
+
+    local git_dir
+    git_dir="$(_resolve_git_dir "$WORKTREE")"
+
+    # Verify file is simple text: context name followed by newline
+    local raw_content
+    raw_content="$(cat "$git_dir/wt/adopted")"
+    assert_equal "$raw_content" "java"
+
+    # Verify wt_read_adopted_context reads it back
+    run wt_read_adopted_context "$WORKTREE"
+    assert_success
+    assert_output "java"
 }
 
 # =============================================================================
