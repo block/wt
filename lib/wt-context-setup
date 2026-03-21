@@ -384,7 +384,10 @@ _wt_migrate_repo() {
       echo
       echo "Update symlink to point to main repo? (You can switch later with 'wt switch')"
       if prompt_confirm "Update symlink to $WT_MAIN_REPO_ROOT? [y/N]" "n"; then
-        ln -sfn "$WT_MAIN_REPO_ROOT" "$WT_ACTIVE_WORKTREE"
+        if ! wt_atomic_symlink "$WT_MAIN_REPO_ROOT" "$WT_ACTIVE_WORKTREE"; then
+          error "Failed to update symlink at $WT_ACTIVE_WORKTREE"
+          return 1
+        fi
         echo "  ✓ Symlink updated!"
       else
         echo "  Symlink unchanged"

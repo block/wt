@@ -109,17 +109,14 @@ else
   TARGET_WORKTREE="$(wt_resolve_and_validate "$TARGET_WORKTREE")" || exit 1
 fi
 
-mkdir -p "$(dirname "$LINK_PATH")"
-
-# Safely handle existing link path - only remove symlinks, error on real files/dirs
-if [[ -L "$LINK_PATH" ]]; then
-  rm "$LINK_PATH"
-elif [[ -e "$LINK_PATH" ]]; then
+if [[ -e "$LINK_PATH" ]] && ! [[ -L "$LINK_PATH" ]]; then
   error "$LINK_PATH exists but is not a symlink. Refusing to remove."
   exit 1
 fi
-
-ln -s "$TARGET_WORKTREE" "$LINK_PATH"
+if ! wt_atomic_symlink "$TARGET_WORKTREE" "$LINK_PATH"; then
+  error "Failed to create symlink at $LINK_PATH"
+  exit 1
+fi
 
 success "Switched active worktree:"
 echo "  $LINK_PATH -> $TARGET_WORKTREE"
