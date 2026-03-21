@@ -413,3 +413,126 @@ teardown() {
     assert_equal "$content_unadopted" "gitdir: ${new_repo}/.git/worktrees/wt-all-unadopted"
 }
 
+# =============================================================================
+# Tests for _wt_write_git_config()
+# =============================================================================
+
+@test "_wt_write_git_config writes all expected keys to git local config" {
+    local repo
+    repo=$(create_mock_repo)
+
+    export WT_WORKTREES_BASE="$TEST_HOME/.wt/repos/myctx/worktrees"
+    export WT_IDEA_FILES_BASE="$TEST_HOME/.wt/repos/myctx/idea-files"
+    export WT_BASE_BRANCH="main"
+    export WT_ACTIVE_WORKTREE="$TEST_HOME/active"
+    export WT_METADATA_PATTERNS=".idea .vscode"
+
+    _wt_write_git_config "$repo" "myctx"
+
+    assert_equal "$(git -C "$repo" config --local wt.enabled)" "true"
+    assert_equal "$(git -C "$repo" config --local wt.contextName)" "myctx"
+    assert_equal "$(git -C "$repo" config --local wt.worktreesBase)" "$WT_WORKTREES_BASE"
+    assert_equal "$(git -C "$repo" config --local wt.ideaFilesBase)" "$WT_IDEA_FILES_BASE"
+    assert_equal "$(git -C "$repo" config --local wt.baseBranch)" "main"
+    assert_equal "$(git -C "$repo" config --local wt.activeWorktree)" "$WT_ACTIVE_WORKTREE"
+    assert_equal "$(git -C "$repo" config --local wt.metadataPatterns)" ".idea .vscode"
+}
+
+@test "_wt_write_git_config values match what the .conf file would contain" {
+    local repo
+    repo=$(create_mock_repo)
+
+    export WT_WORKTREES_BASE="$TEST_HOME/.wt/repos/testctx/worktrees"
+    export WT_IDEA_FILES_BASE="$TEST_HOME/.wt/repos/testctx/idea-files"
+    export WT_BASE_BRANCH="develop"
+    export WT_ACTIVE_WORKTREE="$TEST_HOME/dev/myrepo"
+    export WT_METADATA_PATTERNS=".idea"
+
+    _wt_write_git_config "$repo" "testctx"
+
+    # Simulate what the .conf file would have and compare
+    assert_equal "$(git -C "$repo" config --local wt.worktreesBase)" "$WT_WORKTREES_BASE"
+    assert_equal "$(git -C "$repo" config --local wt.ideaFilesBase)" "$WT_IDEA_FILES_BASE"
+    assert_equal "$(git -C "$repo" config --local wt.baseBranch)" "$WT_BASE_BRANCH"
+    assert_equal "$(git -C "$repo" config --local wt.activeWorktree)" "$WT_ACTIVE_WORKTREE"
+    assert_equal "$(git -C "$repo" config --local wt.metadataPatterns)" "$WT_METADATA_PATTERNS"
+}
+
+@test "_wt_write_git_config keys are readable by wt_read_git_config" {
+    local repo
+    repo=$(create_mock_repo)
+
+    export WT_WORKTREES_BASE="$TEST_HOME/.wt/repos/roundtrip/worktrees"
+    export WT_IDEA_FILES_BASE="$TEST_HOME/.wt/repos/roundtrip/idea-files"
+    export WT_BASE_BRANCH="main"
+    export WT_ACTIVE_WORKTREE="$TEST_HOME/active"
+    export WT_METADATA_PATTERNS=".idea .ijwb"
+
+    _wt_write_git_config "$repo" "roundtrip"
+
+    # Clear the variables so wt_read_git_config has to populate them
+    unset WT_MAIN_REPO_ROOT WT_WORKTREES_BASE WT_IDEA_FILES_BASE WT_BASE_BRANCH
+    unset WT_ACTIVE_WORKTREE WT_METADATA_PATTERNS WT_CONTEXT_NAME
+    unset _WT_SKIP_GIT_CONFIG
+
+    cd "$repo"
+    wt_read_git_config
+
+    assert_equal "$WT_MAIN_REPO_ROOT" "$repo"
+    assert_equal "$WT_WORKTREES_BASE" "$TEST_HOME/.wt/repos/roundtrip/worktrees"
+    assert_equal "$WT_IDEA_FILES_BASE" "$TEST_HOME/.wt/repos/roundtrip/idea-files"
+    assert_equal "$WT_BASE_BRANCH" "main"
+    assert_equal "$WT_ACTIVE_WORKTREE" "$TEST_HOME/active"
+    assert_equal "$WT_METADATA_PATTERNS" ".idea .ijwb"
+    assert_equal "$WT_CONTEXT_NAME" "roundtrip"
+}
+
+@test "_wt_write_git_config warns and returns 0 when no .git exists" {
+    local non_git_dir="$BATS_TEST_TMPDIR/no-git"
+    mkdir -p "$non_git_dir"
+
+    export WT_WORKTREES_BASE="/tmp/wt" WT_IDEA_FILES_BASE="/tmp/idea"
+    export WT_BASE_BRANCH="main" WT_ACTIVE_WORKTREE="/tmp/active"
+    export WT_METADATA_PATTERNS=""
+
+    run _wt_write_git_config "$non_git_dir" "test"
+    assert_success
+    assert_output --partial "Skipping git local config"
+}
+
+@test "_wt_write_git_config unsets metadataPatterns when empty" {
+    local repo
+    repo=$(create_mock_repo)
+
+    export WT_WORKTREES_BASE="/tmp/wt" WT_IDEA_FILES_BASE="/tmp/idea"
+    export WT_BASE_BRANCH="main" WT_ACTIVE_WORKTREE="/tmp/active"
+
+    # First write with patterns
+    export WT_METADATA_PATTERNS=".idea"
+    _wt_write_git_config "$repo" "ctx"
+    assert_equal "$(git -C "$repo" config --local wt.metadataPatterns)" ".idea"
+
+    # Then write with empty patterns — key should be unset
+    export WT_METADATA_PATTERNS=""
+    _wt_write_git_config "$repo" "ctx"
+    run git -C "$repo" config --local wt.metadataPatterns
+    assert_failure
+}
+
+@test "_wt_write_git_config writes all 7 plugin-compatible keys" {
+    local repo
+    repo=$(create_mock_repo)
+
+    export WT_WORKTREES_BASE="/wt" WT_IDEA_FILES_BASE="/idea"
+    export WT_BASE_BRANCH="main" WT_ACTIVE_WORKTREE="/active"
+    export WT_METADATA_PATTERNS=".idea"
+
+    _wt_write_git_config "$repo" "ctx"
+
+    # Verify all 7 keys the plugin expects are present
+    local keys
+    keys=$(git -C "$repo" config --local --get-regexp '^wt\.' | awk '{print $1}' | sort)
+    local expected
+    expected=$(printf '%s\n' wt.activeworktree wt.basebranch wt.contextname wt.enabled wt.ideafilesbase wt.metadatapatterns wt.worktreesbase | sort)
+    assert_equal "$keys" "$expected"
+}

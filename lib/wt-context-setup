@@ -288,6 +288,29 @@ _wt_select_metadata_patterns() {
   fi
 }
 
+# Write wt.* keys to git local config for plugin compatibility
+# Args: $1 = repo root, $2 = context name
+# Keys match the JetBrains plugin's writeConfig() for bidirectional parity
+_wt_write_git_config() {
+  local repo_root="$1" context_name="$2"
+  if [[ ! -d "$repo_root/.git" ]] && [[ ! -f "$repo_root/.git" ]]; then
+    warn "Skipping git local config — no .git found at $repo_root"
+    return 0
+  fi
+  info "Writing git local config..."
+  git -C "$repo_root" config --local wt.enabled true
+  git -C "$repo_root" config --local wt.contextName "$context_name"
+  git -C "$repo_root" config --local wt.worktreesBase "$WT_WORKTREES_BASE"
+  git -C "$repo_root" config --local wt.ideaFilesBase "$WT_IDEA_FILES_BASE"
+  git -C "$repo_root" config --local wt.baseBranch "$WT_BASE_BRANCH"
+  git -C "$repo_root" config --local wt.activeWorktree "$WT_ACTIVE_WORKTREE"
+  if [[ -n "${WT_METADATA_PATTERNS:-}" ]]; then
+    git -C "$repo_root" config --local wt.metadataPatterns "$WT_METADATA_PATTERNS"
+  else
+    git -C "$repo_root" config --local --unset wt.metadataPatterns 2>/dev/null || true
+  fi
+}
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Main setup functions
 # ─────────────────────────────────────────────────────────────────────────────
@@ -819,6 +842,9 @@ WT_METADATA_PATTERNS="$WT_METADATA_PATTERNS"
 EOF
 
   echo "  ✓ Created context config: $config_path"
+
+  # Write git local config (mirrors .conf for plugin compatibility)
+  _wt_write_git_config "$repo_path" "$context_name"
 
   # Write context name to current file - config is read from .conf at runtime
   mkdir -p "$(dirname "$current_file")"
