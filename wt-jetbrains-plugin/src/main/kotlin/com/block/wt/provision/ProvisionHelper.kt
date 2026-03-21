@@ -49,6 +49,7 @@ object ProvisionHelper {
             runCatching {
                 MetadataService.getInstance(project).importMetadata(
                     config.ideaFilesBase, worktreePath,
+                    patterns = config.metadataPatterns,
                     scope = scope?.sub(0.05, 0.80),
                 )
             }.onFailure {

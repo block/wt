@@ -65,6 +65,142 @@ class MetadataServiceTest {
         }
     }
 
+    @Test
+    fun testImportHierarchicalVault() {
+        val dir = Files.createTempDirectory("import-hierarchical")
+        try {
+            val vault = dir.resolve("vault")
+            val target = dir.resolve("target")
+            Files.createDirectories(vault)
+            Files.createDirectories(target)
+
+            // Create real metadata directories
+            val topIdea = dir.resolve("real-top-idea")
+            Files.createDirectories(topIdea)
+            Files.writeString(topIdea.resolve("workspace.xml"), "top-content")
+
+            val nestedIdea = dir.resolve("real-nested-idea")
+            Files.createDirectories(nestedIdea)
+            Files.writeString(nestedIdea.resolve("workspace.xml"), "nested-content")
+
+            // Create vault structure with symlinks
+            // vault/.idea -> real-top-idea
+            Files.createSymbolicLink(vault.resolve(".idea"), topIdea)
+            // vault/services/payments/.idea -> real-nested-idea
+            Files.createDirectories(vault.resolve("services/payments"))
+            Files.createSymbolicLink(vault.resolve("services/payments/.idea"), nestedIdea)
+
+            val result = MetadataService.importMetadataStatic(vault, target, listOf(".idea"))
+            assertTrue(result.isSuccess)
+            assertEquals(2, result.getOrThrow())
+
+            // Verify both imported to correct target paths
+            assertTrue(Files.exists(target.resolve(".idea/workspace.xml")))
+            assertEquals("top-content", Files.readString(target.resolve(".idea/workspace.xml")))
+            assertTrue(Files.exists(target.resolve("services/payments/.idea/workspace.xml")))
+            assertEquals("nested-content", Files.readString(target.resolve("services/payments/.idea/workspace.xml")))
+        } finally {
+            deleteRecursive(dir)
+        }
+    }
+
+    @Test
+    fun testImportFlatVaultBackwardCompat() {
+        val dir = Files.createTempDirectory("import-flat")
+        try {
+            val vault = dir.resolve("vault")
+            val target = dir.resolve("target")
+            Files.createDirectories(vault)
+            Files.createDirectories(target)
+
+            // Create real metadata directory
+            val realIdea = dir.resolve("real-idea")
+            Files.createDirectories(realIdea)
+            Files.writeString(realIdea.resolve("workspace.xml"), "content")
+
+            // Create vault with top-level symlink
+            Files.createSymbolicLink(vault.resolve(".idea"), realIdea)
+
+            // Empty patterns = backward compat (match symlinks)
+            val result = MetadataService.importMetadataStatic(vault, target)
+            assertTrue(result.isSuccess)
+            assertEquals(1, result.getOrThrow())
+
+            assertTrue(Files.exists(target.resolve(".idea/workspace.xml")))
+            assertEquals("content", Files.readString(target.resolve(".idea/workspace.xml")))
+        } finally {
+            deleteRecursive(dir)
+        }
+    }
+
+    @Test
+    fun testImportPatternFiltering() {
+        val dir = Files.createTempDirectory("import-filter")
+        try {
+            val vault = dir.resolve("vault")
+            val target = dir.resolve("target")
+            Files.createDirectories(vault)
+            Files.createDirectories(target)
+
+            // Create real metadata directories
+            val realIdea = dir.resolve("real-idea")
+            Files.createDirectories(realIdea)
+            Files.writeString(realIdea.resolve("workspace.xml"), "idea-content")
+
+            val realVscode = dir.resolve("real-vscode")
+            Files.createDirectories(realVscode)
+            Files.writeString(realVscode.resolve("settings.json"), "vscode-content")
+
+            // Both in vault as symlinks
+            Files.createSymbolicLink(vault.resolve(".idea"), realIdea)
+            Files.createSymbolicLink(vault.resolve(".vscode"), realVscode)
+
+            // Only import .idea
+            val result = MetadataService.importMetadataStatic(vault, target, listOf(".idea"))
+            assertTrue(result.isSuccess)
+            assertEquals(1, result.getOrThrow())
+
+            assertTrue(Files.exists(target.resolve(".idea/workspace.xml")))
+            assertTrue(!Files.exists(target.resolve(".vscode")))
+        } finally {
+            deleteRecursive(dir)
+        }
+    }
+
+    @Test
+    fun testImportBrokenSymlinkCleanup() {
+        val dir = Files.createTempDirectory("import-broken")
+        try {
+            val vault = dir.resolve("vault")
+            val target = dir.resolve("target")
+            Files.createDirectories(vault)
+            Files.createDirectories(target)
+
+            // Create a broken symlink pointing to non-existent directory
+            val brokenTarget = dir.resolve("does-not-exist")
+            Files.createSymbolicLink(vault.resolve(".idea"), brokenTarget)
+
+            // Also create a valid one
+            val realVscode = dir.resolve("real-vscode")
+            Files.createDirectories(realVscode)
+            Files.writeString(realVscode.resolve("settings.json"), "content")
+            Files.createSymbolicLink(vault.resolve(".vscode"), realVscode)
+
+            val result = MetadataService.importMetadataStatic(vault, target, listOf(".idea", ".vscode"))
+            assertTrue(result.isSuccess)
+            assertEquals(1, result.getOrThrow())
+
+            // Broken symlink should be deleted
+            assertTrue(!Files.exists(vault.resolve(".idea")))
+            assertTrue(!Files.isSymbolicLink(vault.resolve(".idea")))
+
+            // Valid one should be imported
+            assertTrue(Files.exists(target.resolve(".vscode/settings.json")))
+        } finally {
+            deleteRecursive(dir)
+        }
+    }
+
     // Standalone implementations of the logic for testing without IntelliJ platform
     private fun deduplicateNested(paths: List<Path>): List<Path> {
         val sorted = paths.sortedBy { it.nameCount }

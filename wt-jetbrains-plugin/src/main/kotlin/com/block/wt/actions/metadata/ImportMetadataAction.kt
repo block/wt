@@ -22,7 +22,7 @@ class ImportMetadataAction : WtConfigAction() {
         runInBackground(project, "Importing Metadata", cancellable = false) {
             it.text = "Importing metadata from vault..."
             MetadataService.getInstance(project)
-                .importMetadata(config.ideaFilesBase, target)
+                .importMetadata(config.ideaFilesBase, target, patterns = config.metadataPatterns)
                 .fold(
                     onSuccess = { count ->
                         Notifications.info(project, "Metadata Imported", "Imported $count metadata directories")
