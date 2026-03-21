@@ -45,6 +45,7 @@ setup_test_env() {
     export PATH="$TEST_HOME/.wt/bin:$PATH"
     export _WT_ROOT="$TEST_HOME/.wt"
     export LIB_DIR="$TEST_HOME/.wt/lib"
+    export _WT_SKIP_GIT_CONFIG=1
 }
 
 # Teardown test environment
