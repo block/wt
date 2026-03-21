@@ -868,3 +868,59 @@ teardown() {
     assert_success
 }
 
+# =============================================================================
+# Tests for wt_atomic_symlink()
+# =============================================================================
+
+@test "wt_atomic_symlink creates a new symlink where none existed" {
+    local target_dir="$BATS_TEST_TMPDIR/target"
+    local link_path="$BATS_TEST_TMPDIR/mylink"
+    mkdir -p "$target_dir"
+
+    run wt_atomic_symlink "$target_dir" "$link_path"
+    assert_success
+    assert [ -L "$link_path" ]
+    assert_equal "$(readlink "$link_path")" "$target_dir"
+}
+
+@test "wt_atomic_symlink replaces an existing symlink" {
+    local target1="$BATS_TEST_TMPDIR/target1"
+    local target2="$BATS_TEST_TMPDIR/target2"
+    local link_path="$BATS_TEST_TMPDIR/mylink"
+    mkdir -p "$target1" "$target2"
+
+    ln -s "$target1" "$link_path"
+    assert_equal "$(readlink "$link_path")" "$target1"
+
+    run wt_atomic_symlink "$target2" "$link_path"
+    assert_success
+    assert [ -L "$link_path" ]
+    assert_equal "$(readlink "$link_path")" "$target2"
+}
+
+@test "wt_atomic_symlink creates parent directories" {
+    local target_dir="$BATS_TEST_TMPDIR/target"
+    local link_path="$BATS_TEST_TMPDIR/nested/deep/dir/mylink"
+    mkdir -p "$target_dir"
+
+    assert [ ! -d "$BATS_TEST_TMPDIR/nested/deep/dir" ]
+
+    run wt_atomic_symlink "$target_dir" "$link_path"
+    assert_success
+    assert [ -L "$link_path" ]
+    assert_equal "$(readlink "$link_path")" "$target_dir"
+}
+
+@test "wt_atomic_symlink does not leave temp link on success" {
+    local target_dir="$BATS_TEST_TMPDIR/target"
+    local link_path="$BATS_TEST_TMPDIR/mylink"
+    mkdir -p "$target_dir"
+
+    wt_atomic_symlink "$target_dir" "$link_path"
+
+    # No .wt-tmp.* files should remain in the parent directory
+    local leftover
+    leftover=$(find "$(dirname "$link_path")" -maxdepth 1 -name "*.wt-tmp.*" 2>/dev/null)
+    assert_equal "$leftover" ""
+}
+

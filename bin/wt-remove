@@ -304,7 +304,9 @@ success "Worktree removed successfully."
 if [[ "$IS_CURRENTLY_LINKED" == "true" ]]; then
   echo
   echo "Switching symlink to main repository..."
-  rm -f "$LINK_PATH"
-  ln -s "$MAIN_REPO_ABS" "$LINK_PATH"
+  if ! wt_atomic_symlink "$MAIN_REPO_ABS" "$LINK_PATH"; then
+    error "Failed to re-link $LINK_PATH to main repo"
+    exit 1
+  fi
   success "Symlink updated: $LINK_PATH -> $MAIN_REPO_ABS"
 fi

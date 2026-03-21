@@ -618,6 +618,34 @@ wt_uncommitted_summary() {
   fi
 }
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Symlink helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+# wt_atomic_symlink TARGET LINK_PATH
+# Atomically create or replace a symlink at LINK_PATH pointing to TARGET.
+# Uses create-temp-then-rename pattern: ln -s creates a temp symlink in the
+# same directory, then mv atomically replaces the target (rename(2) syscall).
+# When the destination is a symlink pointing to a directory, plain `mv -f`
+# follows the symlink and moves the file INTO the directory instead of
+# replacing the symlink. Platform-specific flags prevent this:
+#   GNU coreutils: -T treats the destination as a normal file (not a directory)
+#   BSD/macOS:     -h prevents following a symlink-to-directory destination
+wt_atomic_symlink() {
+  local target="$1" link_path="$2"
+  local tmp_link="${link_path}.wt-tmp.$$"
+  mkdir -p "$(dirname "$link_path")"
+  ln -s "$target" "$tmp_link" || { rm -f "$tmp_link"; return 1; }
+  # Atomic rename: mv must not follow the destination if it's a symlink-to-directory.
+  # GNU coreutils: -T treats destination as a file path (not directory)
+  # BSD (macOS): -h prevents following destination symlinks
+  if ! mv -fT "$tmp_link" "$link_path" 2>/dev/null && \
+     ! mv -fh "$tmp_link" "$link_path" 2>/dev/null; then
+    rm -f "$tmp_link"
+    return 1
+  fi
+}
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Prompts
 # ═══════════════════════════════════════════════════════════════════════════════
