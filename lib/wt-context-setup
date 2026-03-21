@@ -30,8 +30,11 @@ WT_KNOWN_METADATA=(
   ".aswb:Android Studio + Bazel plugin (legacy)"
   ".clwb:CLion + Bazel plugin (legacy)"
   ".bazelbsp:JetBrains Bazel plugin (new, BSP-based)"
+  ".bazelproject:Bazel project view file"
   ".bsp:Build Server Protocol (Scala, Java, Bazel)"
   # Xcode / iOS
+  ".xcodeproj:Xcode project"
+  ".xcworkspace:Xcode workspace"
   ".swiftpm:Swift Package Manager metadata"
   "xcuserdata:Xcode user data (breakpoints, UI state)"
   # VS Code
@@ -40,6 +43,7 @@ WT_KNOWN_METADATA=(
   ".metals:Metals LSP (Scala)"
   ".bloop:Bloop build server (Scala)"
   # Eclipse
+  ".eclipse:Eclipse project settings"
   ".settings:Eclipse settings"
   ".project:Eclipse project"
   ".classpath:Eclipse classpath"

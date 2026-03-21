@@ -13,8 +13,11 @@ import com.intellij.ui.components.JBCheckBox
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBTextField
 import com.intellij.ui.dsl.builder.panel
+import java.nio.file.FileVisitResult
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.SimpleFileVisitor
+import java.nio.file.attribute.BasicFileAttributes
 import javax.swing.JComponent
 import javax.swing.event.DocumentEvent
 import javax.swing.event.DocumentListener
@@ -88,14 +91,15 @@ class AddContextDialog(private val project: Project?) : DialogWrapper(project) {
             .removeSuffix("-main")
         contextNameField.text = name
 
-        // Auto-detect base branch, validate git repo, and check existing config (runs off EDT)
-        data class DeriveResult(val branch: String, val isGit: Boolean, val hasGitConfig: Boolean)
+        // Auto-detect base branch, validate git repo, check existing config, and detect patterns (runs off EDT)
+        data class DeriveResult(val branch: String, val isGit: Boolean, val hasGitConfig: Boolean, val detectedPatterns: Set<String>)
         val result = ProgressManager.getInstance().runProcessWithProgressSynchronously<DeriveResult, Exception>(
             {
                 val isGit = GitDirResolver.resolveGitDir(path) != null
                 val branch = if (isGit) detectBaseBranch(path) else "main"
                 val hasGitConfig = if (isGit) GitConfigHelper.isEnabled(path) else false
-                DeriveResult(branch, isGit, hasGitConfig)
+                val patterns = detectPatterns(path)
+                DeriveResult(branch, isGit, hasGitConfig, patterns)
             },
             "Detecting Repository Info",
             false,
@@ -105,8 +109,8 @@ class AddContextDialog(private val project: Project?) : DialogWrapper(project) {
         hasExistingGitConfig = result.hasGitConfig
         baseBranchField.text = result.branch
 
-        // Detect metadata patterns
-        detectAndShowPatterns(path)
+        // Build pattern checkboxes on the EDT from off-EDT detection results
+        showPatterns(result.detectedPatterns)
 
         rederivePaths()
     }
@@ -155,11 +159,26 @@ class AddContextDialog(private val project: Project?) : DialogWrapper(project) {
         return "main"
     }
 
-    private fun detectAndShowPatterns(repoPath: Path) {
+    private fun detectPatterns(repoPath: Path): Set<String> {
+        val detected = mutableSetOf<String>()
+        val knownNames = MetadataPattern.KNOWN_PATTERNS.map { it.name }.toSet()
+        Files.walkFileTree(repoPath, emptySet(), 5, object : SimpleFileVisitor<Path>() {
+            override fun preVisitDirectory(dir: Path, attrs: BasicFileAttributes): FileVisitResult {
+                val name = dir.fileName?.toString() ?: return FileVisitResult.CONTINUE
+                if (name in knownNames && dir != repoPath) {
+                    detected.add(name)
+                    return FileVisitResult.SKIP_SUBTREE
+                }
+                return FileVisitResult.CONTINUE
+            }
+        })
+        return detected
+    }
+
+    private fun showPatterns(detected: Set<String>) {
         patternCheckboxes.clear()
         for (pattern in MetadataPattern.KNOWN_PATTERNS) {
-            val candidate = repoPath.resolve(pattern.name)
-            if (Files.exists(candidate)) {
+            if (pattern.name in detected) {
                 val checkbox = JBCheckBox("${pattern.name} - ${pattern.description}", true)
                 patternCheckboxes.add(Pair(checkbox, pattern.name))
             }
