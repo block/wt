@@ -23,12 +23,12 @@ class ReprovisionContextAction : WtConfigAction() {
             "This will remove the current wt configuration for '${config.name}' and let you re-create it.\n" +
                 "Existing worktree directories will be kept.\n\n" +
                 "Continue?",
-            "Re-provision Context",
+            "Re-adopt Context",
             Messages.getQuestionIcon(),
         )
         if (answer != Messages.YES) return
 
-        runInBackground(project, "Re-provisioning Context", cancellable = false) { indicator ->
+        runInBackground(project, "Re-adopting Context", cancellable = false) { indicator ->
             try {
                 indicator.text = "Removing git config..."
                 GitConfigHelper.removeAllConfig(config.mainRepoRoot)
@@ -44,7 +44,7 @@ class ReprovisionContextAction : WtConfigAction() {
 
                 ContextService.getInstance(project).reload()
             } catch (ex: Exception) {
-                Notifications.error(project, "Re-provision Failed", ex.message ?: "Unknown error")
+                Notifications.error(project, "Re-adopt Failed", ex.message ?: "Unknown error")
                 return@runInBackground
             }
 
@@ -112,7 +112,7 @@ class ReprovisionContextAction : WtConfigAction() {
                         }
 
                         WorktreeService.getInstance(project).refreshWorktreeList()
-                        Notifications.info(project, "Context Re-provisioned", "Context '$contextName' re-provisioned")
+                        Notifications.info(project, "Context Re-adopted", "Context '$contextName' re-adopted")
                     } catch (ex: Exception) {
                         Notifications.error(project, "Context Creation Failed", ex.message ?: "Unknown error")
                     }

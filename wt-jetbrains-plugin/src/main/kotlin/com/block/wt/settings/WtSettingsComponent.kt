@@ -26,9 +26,9 @@ class WtSettingsComponent {
                     .comment("Disable to speed up worktree list loading for repos with many worktrees")
             }
             row {
-                checkBox("Prompt to provision when switching to non-provisioned worktrees")
+                checkBox("Prompt to adopt when switching to non-adopted worktrees")
                     .bindSelected(settings.state::promptProvisionOnSwitch)
-                    .comment("Shows Provision & Switch / Switch Only / Cancel dialog")
+                    .comment("Shows Adopt & Switch / Switch Only / Cancel dialog")
             }
             row("Auto-refresh interval (seconds, 0 to disable):") {
                 spinner(0..600, 5)

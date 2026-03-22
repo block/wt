@@ -33,7 +33,7 @@ object ProvisionSwitchHelper {
             if (answer != Messages.YES) return
         }
 
-        // Provision prompt: only when the worktree is not provisioned by the current context
+        // Adopt prompt: only when the worktree is not adopted by the current context
         val contextService = ContextService.getInstance(project)
         val config = contextService.getCurrentConfig()
         val currentContextName = config?.name
@@ -57,8 +57,8 @@ object ProvisionSwitchHelper {
                     "Worktree '${wt.displayName}' has existing files that conflict with " +
                         "context '$currentContextName':\n\n$conflictSummary\n\n" +
                         "Overwrite: replace with this context's vault.\n" +
-                        "Keep: mark as provisioned without changing files.",
-                    "Provision Worktree?",
+                        "Keep: mark as adopted without changing files.",
+                    "Adopt Worktree?",
                     options,
                     0, // default: overwrite
                     Messages.getQuestionIcon(),
@@ -83,13 +83,13 @@ object ProvisionSwitchHelper {
                     else -> return // Cancel or closed
                 }
             } else {
-                // No conflicts — simpler provision prompt
+                // No conflicts — simpler adopt prompt
                 val answer = Messages.showYesNoCancelDialog(
                     project,
-                    "Worktree '${wt.displayName}' is not provisioned by context '$currentContextName'.\n\n" +
-                        "Provisioning will import IDE metadata and install Bazel symlinks.",
-                    "Provision Worktree?",
-                    "Provision && Switch",
+                    "Worktree '${wt.displayName}' is not adopted by context '$currentContextName'.\n\n" +
+                        "Adopting will import IDE metadata and install Bazel symlinks.",
+                    "Adopt Worktree?",
+                    "Adopt && Switch",
                     "Switch Only",
                     "Cancel",
                     Messages.getQuestionIcon(),
@@ -115,7 +115,7 @@ object ProvisionSwitchHelper {
         val config = ContextService.getInstance(project).getCurrentConfig() ?: return
 
         ProgressManager.getInstance().run(object : Task.Backgroundable(
-            project, "Provisioning & Switching Worktree", true
+            project, "Adopting & Switching Worktree", true
         ) {
             override fun run(indicator: ProgressIndicator) {
                 indicator.isIndeterminate = false

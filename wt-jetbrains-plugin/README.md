@@ -28,16 +28,18 @@ To update, rebuild and reinstall. The old version is replaced automatically.
 | wt CLI command | Plugin equivalent |
 |---|---|
 | `wt list [-v]` | **Worktrees** tool window with async status indicators |
-| `wt add [-b] <branch>` | **Create Worktree** dialog (stash/pull/create/restore) |
-| `wt switch <worktree>` | **Switch Worktree** with atomic symlink swap |
-| `wt remove [--merged]` | **Remove Worktree** / **Remove Merged** with safety checks |
-| `wt context [name]` | **Context selector** in status bar + popup |
+| `wt add [-b] <branch>` | **Create Worktree** dialog |
+| `wt switch <worktree>` | **Switch Worktree** (double-click or action) |
+| `wt remove [--merged]` | **Remove Worktree** / **Remove Merged** |
+| `wt adopt` | **Adopt Worktree** (same `wt/adopted` marker) |
+| `wt context add` | **Add Context** dialog |
+| `wt context` | Auto-detected from project path |
 | `wt metadata-export` | **Export Metadata to Vault** |
 | `wt metadata-import` | **Import Metadata from Vault** |
 | `wt-metadata-refresh` | **Refresh Bazel Targets** |
 | `wt cd` | **Open in Terminal** |
 
-The plugin reads the same `~/.wt/` config files as the CLI. Both work side by side. A file watcher auto-refreshes the tool window on external changes.
+The plugin reads the same `~/.wt/` config files as the CLI. Both work side by side. Worktrees adopted via the CLI are recognized by the plugin and vice versa. A file watcher auto-refreshes the tool window on external changes.
 
 ---
 
@@ -54,7 +56,7 @@ The plugin reads the same `~/.wt/` config files as the CLI. Both work side by si
 | Branch | Checked-out branch |
 | Status | `⚠`conflicts `●`staged `✱`modified `…`untracked `↑`ahead `↓`behind |
 | Agent | Active Claude Code session IDs (truncated; hover for full) |
-| Provisioned | `✓` current context, `~` other context |
+| Adopted | `✓` adopted by current context, `~` adopted by another context |
 
 Double-click a row to switch. Hover Status or Agent cells for details.
 
@@ -69,7 +71,7 @@ Also available under **VCS > Worktrees**.
 
 ### Status Bar
 
-Shows current context (e.g. `wt: java`). Click to switch.
+Shows current worktree (e.g. `wt: java`). Click to switch worktrees.
 
 ### Settings
 
@@ -79,7 +81,7 @@ Shows current context (e.g. `wt: java`). Click to switch.
 - Status indicator loading
 - Auto-export metadata on shutdown (default: off)
 - Switch/remove confirmation dialogs
-- Provision prompt on switch
+- Adopt prompt on switch
 
 ---
 

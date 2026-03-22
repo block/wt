@@ -22,7 +22,7 @@ class WorktreeTableModel : AbstractTableModel() {
         const val COL_PR = 4
         const val COL_PROVISIONED = 5
 
-        val COLUMN_NAMES = arrayOf("Path", "Branch", "Status", "Agent", "PR", "Provisioned")
+        val COLUMN_NAMES = arrayOf("Path", "Branch", "Status", "Agent", "PR", "Adopted")
     }
 
     fun setWorktrees(newWorktrees: List<WorktreeInfo>) {

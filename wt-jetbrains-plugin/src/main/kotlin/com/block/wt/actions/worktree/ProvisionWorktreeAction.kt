@@ -39,19 +39,19 @@ class ProvisionWorktreeAction : WtTableAction() {
         }
 
         if (wt.isProvisionedByCurrentContext) {
-            Notifications.info(project, "Already Provisioned", "This worktree is already provisioned by '$currentContextName'")
+            Notifications.info(project, "Already Adopted", "This worktree is already adopted by '$currentContextName'")
             return
         }
 
         ProgressManager.getInstance().run(object : Task.Backgroundable(
-            project, "Provisioning Worktree", true
+            project, "Adopting Worktree", true
         ) {
             override fun run(indicator: com.intellij.openapi.progress.ProgressIndicator) {
                 indicator.isIndeterminate = false
                 runBlockingCancellable {
                     ProvisionHelper.provisionWorktree(project, wt.path, config, scope = indicator.asScope())
                     WorktreeService.getInstance(project).refreshWorktreeList()
-                    Notifications.info(project, "Worktree Provisioned", "Provisioned ${wt.displayName} for context '$currentContextName'")
+                    Notifications.info(project, "Worktree Adopted", "Adopted ${wt.displayName} for context '$currentContextName'")
                 }
             }
         })

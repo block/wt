@@ -4,6 +4,7 @@ import com.block.wt.actions.WtConfigAction
 import com.block.wt.git.GitConfigHelper
 import com.block.wt.services.ContextService
 import com.block.wt.ui.Notifications
+import com.block.wt.util.ConfigFileHelper
 import com.block.wt.util.PathHelper
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.ui.Messages
@@ -42,6 +43,17 @@ class DeleteContextAction : WtConfigAction() {
                 }
 
                 ContextService.getInstance(project).reload()
+
+                val currentName = ConfigFileHelper.readCurrentContext()
+                if (currentName == config.name) {
+                    val remaining = ContextService.getInstance(project).contexts.value
+                    if (remaining.isNotEmpty()) {
+                        ConfigFileHelper.writeCurrentContext(remaining.first().name)
+                    } else {
+                        Files.deleteIfExists(PathHelper.currentFile)
+                    }
+                }
+
                 Notifications.info(project, "Context Deleted", "Context '${config.name}' deleted")
             } catch (ex: Exception) {
                 Notifications.error(project, "Delete Failed", ex.message ?: "Unknown error")
