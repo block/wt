@@ -13,7 +13,6 @@ object GitBranchHelper {
     }
 
     fun worktreePathForBranch(worktreesBase: Path, branchName: String): Path {
-        val safeName = branchName.replace("/", "-")
-        return worktreesBase.resolve(safeName)
+        return worktreesBase.resolve(branchName)
     }
 }
