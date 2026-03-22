@@ -298,6 +298,81 @@ wt_read_config || true
 : "${WT_CONTEXT_NAME:=""}"
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Worktree pointer maintenance
+# ─────────────────────────────────────────────────────────────────────────────
+
+# After moving a repo's .git directory to a new location, update
+# worktrees' .git files to point to the new .git path.
+#
+# Each git worktree has a .git FILE (not directory) containing:
+#   gitdir: /old/path/.git/worktrees/<name>
+#
+# After the repo is moved, these pointers become stale. This function
+# reads the main repo's .git/worktrees/*/gitdir to find each worktree's
+# .git file, then rewrites it to point to the new location.
+#
+# Args: $1 = repo directory (the new location containing .git/)
+#       $2 = mode (optional): "unadopted" (default) - only unadopted worktrees
+#                              "adopted"  - only worktrees adopted by context
+#                              "all"      - all worktrees unconditionally
+#       $3 = context name (optional, used with "adopted" mode)
+_wt_update_worktree_pointers() {
+  local repo_dir="$1"
+  local mode="${2:-unadopted}"
+  local context_name="${3:-}"
+  local git_dir="$repo_dir/.git"
+
+  [[ -d "$git_dir/worktrees" ]] || return 0
+
+  info "Updating worktree references..."
+  for wt_meta_dir in "$git_dir"/worktrees/*/; do
+    [[ -d "$wt_meta_dir" ]] || continue
+
+    # Read gitdir to find the worktree path
+    local gitdir_file="$wt_meta_dir/gitdir"
+    [[ -f "$gitdir_file" ]] || continue
+    local wt_dot_git
+    wt_dot_git="$(cat "$gitdir_file" | tr -d '[:space:]')"
+    [[ -f "$wt_dot_git" ]] || continue
+
+    # Check adoption state based on mode.
+    # We check the marker directly in the worktree metadata dir rather than
+    # using wt_is_adopted (which runs git rev-parse) because after a repo
+    # move the .git pointers are stale and git operations would fail.
+    # The marker lives at <git_dir>/worktrees/<name>/wt/adopted.
+    local adopted_marker="$wt_meta_dir/wt/adopted"
+    case "$mode" in
+      unadopted)
+        # Skip adopted worktrees — they already have correct physical paths
+        if [[ -f "$adopted_marker" ]]; then
+          continue
+        fi
+        ;;
+      adopted)
+        # Skip unadopted worktrees and worktrees adopted by other contexts
+        if [[ ! -f "$adopted_marker" ]]; then
+          continue
+        fi
+        if [[ -n "$context_name" ]]; then
+          local adopted_ctx
+          adopted_ctx="$(head -1 "$adopted_marker" 2>/dev/null | tr -d '[:space:]')"
+          if [[ -n "$adopted_ctx" && "$adopted_ctx" != "$context_name" ]]; then
+            continue
+          fi
+        fi
+        ;;
+      all)
+        # Update everything
+        ;;
+    esac
+
+    local wt_name="${wt_meta_dir%/}"
+    wt_name="${wt_name##*/}"
+    echo "gitdir: ${git_dir}/worktrees/${wt_name}" > "$wt_dot_git"
+  done
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Expand ~ to $HOME in a path (bash doesn't expand ~ in variable assignments
 # or interactive read input)
 _wt_expand_path() {

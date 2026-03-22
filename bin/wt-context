@@ -175,9 +175,43 @@ remove_context() {
     git -C "$repo_root" config --local --remove-section wt 2>/dev/null || true
   fi
 
-  # 2. Remove adoption markers from worktrees
-  info "Removing adoption markers from worktrees..."
+  # 2. Delete .conf file
+  info "Removing config file..."
+  rm -f "$conf_file"
+
+  # 3. Reverse repo migration: move main repo back to symlink location
+  # Done BEFORE removing adoption markers so pointer update can check adoption state
   wt_source wt-adopt
+  if [[ -L "$active_worktree" ]]; then
+    local link_target
+    link_target="$(readlink "$active_worktree")"
+    # Make link_target absolute if relative
+    if [[ "$link_target" != /* ]]; then
+      link_target="$(cd "$(dirname "$active_worktree")" && _wt_realpath "$link_target")"
+    fi
+
+    if [[ "$link_target" == "$repo_root" || "$(_wt_realpath "$link_target" 2>/dev/null)" == "$(_wt_realpath "$repo_root" 2>/dev/null)" ]]; then
+      info "Restoring repository to original location..."
+      rm "$active_worktree"
+      mv "$repo_root" "$active_worktree"
+
+      # Fix worktree .git pointers after repo move
+      # Only update worktrees that were adopted by this context
+      _wt_update_worktree_pointers "$active_worktree" "adopted" "$context_name"
+
+      # Update repo_root for subsequent marker removal
+      repo_root="$active_worktree"
+    else
+      warn "Symlink at $active_worktree points to $link_target (expected $repo_root)"
+      warn "Removing symlink but not moving repository"
+      rm "$active_worktree"
+    fi
+  elif [[ -e "$active_worktree" ]]; then
+    warn "$active_worktree exists but is not a symlink — leaving it unchanged"
+  fi
+
+  # 4. Remove adoption markers from worktrees (after repo migration so pointers are updated first)
+  info "Removing adoption markers from worktrees..."
   local wt_path=""
   while IFS= read -r line; do
     if [[ "$line" == "worktree "* ]]; then
@@ -195,56 +229,6 @@ remove_context() {
       wt_path=""
     fi
   done < <(git -C "$repo_root" worktree list --porcelain 2>/dev/null; echo)
-
-  # 3. Delete .conf file
-  info "Removing config file..."
-  rm -f "$conf_file"
-
-  # 4. Reverse repo migration: move main repo back to symlink location
-  if [[ -L "$active_worktree" ]]; then
-    local link_target
-    link_target="$(readlink "$active_worktree")"
-    # Make link_target absolute if relative
-    if [[ "$link_target" != /* ]]; then
-      link_target="$(cd "$(dirname "$active_worktree")" && _wt_realpath "$link_target")"
-    fi
-
-    if [[ "$link_target" == "$repo_root" || "$(_wt_realpath "$link_target" 2>/dev/null)" == "$(_wt_realpath "$repo_root" 2>/dev/null)" ]]; then
-      info "Restoring repository to original location..."
-      rm "$active_worktree"
-      mv "$repo_root" "$active_worktree"
-
-      # Fix worktree .git pointers after repo move
-      # Each worktree has a .git FILE containing "gitdir: <old>/.git/worktrees/<name>"
-      # After moving the repo, these need to point to the new location
-      if [[ -d "$active_worktree/.git/worktrees" ]]; then
-        info "Updating worktree references..."
-        local new_git_dir="$active_worktree/.git"
-
-        for wt_meta_dir in "$new_git_dir"/worktrees/*/; do
-          [[ -d "$wt_meta_dir" ]] || continue
-          # Read the gitdir file to find the worktree's .git file location
-          local gitdir_file="$wt_meta_dir/gitdir"
-          [[ -f "$gitdir_file" ]] || continue
-          local wt_dot_git
-          wt_dot_git="$(cat "$gitdir_file" | tr -d '[:space:]')"
-
-          # Update the .git file in the worktree to point to the new location
-          if [[ -f "$wt_dot_git" ]]; then
-            local wt_name
-            wt_name="$(basename "$wt_meta_dir")"
-            echo "gitdir: ${new_git_dir}/worktrees/${wt_name}" > "$wt_dot_git"
-          fi
-        done
-      fi
-    else
-      warn "Symlink at $active_worktree points to $link_target (expected $repo_root)"
-      warn "Removing symlink but not moving repository"
-      rm "$active_worktree"
-    fi
-  elif [[ -e "$active_worktree" ]]; then
-    warn "$active_worktree exists but is not a symlink — leaving it unchanged"
-  fi
 
   # 5. Update ~/.wt/current
   local current_context
