@@ -102,14 +102,8 @@ object GitConfigHelper {
     fun removeAllConfig(repoPath: Path) {
         val mainGitDir = GitDirResolver.resolveMainGitDir(repoPath) ?: return
         val repoRoot = mainGitDir.parent
-        val keys = listOf(
-            "wt.enabled", "wt.contextName", "wt.worktreesBase", "wt.ideaFilesBase",
-            "wt.baseBranch", "wt.activeWorktree", "wt.metadataPatterns",
-        )
-        for (key in keys) {
-            // --unset-all may fail if key doesn't exist — that's fine
-            ProcessHelper.runGit(listOf("config", "--local", "--unset-all", key), workingDir = repoRoot)
-        }
+        // --remove-section may fail if [wt] section doesn't exist — that's fine
+        ProcessHelper.runGit(listOf("config", "--local", "--remove-section", "wt"), workingDir = repoRoot)
     }
 
     /**

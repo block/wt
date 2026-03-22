@@ -20,8 +20,7 @@ class DeleteContextAction : WtConfigAction() {
             project,
             "Delete context '${config.name}'?\n\n" +
                 "Your repository lives at ${config.mainRepoRoot}.\n" +
-                "The symlink at ${config.activeWorktree} will be removed.\n" +
-                "You may need to move the repo back manually.\n\n" +
+                "It will be moved back to ${config.activeWorktree}.\n\n" +
                 "Existing worktree directories will be kept.",
             "Delete Context",
             Messages.getWarningIcon(),
@@ -37,9 +36,33 @@ class DeleteContextAction : WtConfigAction() {
                 val confFile = PathHelper.reposDir.resolve("${config.name}.conf")
                 Files.deleteIfExists(confFile)
 
-                indicator.text = "Removing symlink..."
-                if (PathHelper.isSymlink(config.activeWorktree)) {
-                    Files.delete(config.activeWorktree)
+                // Reverse repo migration: move main repo back to symlink location
+                indicator.text = "Restoring repository to original location..."
+                val activeWorktree = config.activeWorktree
+                val mainRepoRoot = config.mainRepoRoot
+
+                if (PathHelper.isSymlink(activeWorktree)) {
+                    val linkTarget = PathHelper.readSymlink(activeWorktree)
+                    val resolvedTarget = if (linkTarget != null) {
+                        if (linkTarget.isAbsolute) linkTarget
+                        else activeWorktree.parent.resolve(linkTarget)
+                    } else null
+
+                    val resolvedRepo = PathHelper.normalizeSafe(mainRepoRoot)
+                    val resolvedLink = if (resolvedTarget != null) PathHelper.normalizeSafe(resolvedTarget) else null
+
+                    if (resolvedLink != null && resolvedLink == resolvedRepo) {
+                        // Symlink points to main repo — reverse the migration
+                        Files.delete(activeWorktree)
+                        Files.move(mainRepoRoot, activeWorktree)
+                    } else {
+                        // Symlink points elsewhere — just remove it
+                        Files.delete(activeWorktree)
+                    }
+                } else if (Files.exists(activeWorktree)) {
+                    // Not a symlink — leave it alone
+                    Notifications.warning(project, "Context Delete",
+                        "${activeWorktree.fileName} is not a symlink — repository not moved")
                 }
 
                 ContextService.getInstance(project).reload()

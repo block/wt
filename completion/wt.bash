@@ -241,10 +241,10 @@ _wt_context_complete() {
     if [[ "$cur" == -* ]]; then
       COMPREPLY+=( $(compgen -W "-l --list -h --help" -- "$cur") )
     else
-      # Context names and 'add' subcommand
+      # Context names and subcommands
       local contexts
       contexts="$(_wt_context_list)"
-      COMPREPLY+=( $(compgen -W "add $contexts" -- "$cur") )
+      COMPREPLY+=( $(compgen -W "add remove $contexts" -- "$cur") )
     fi
     return 0
   fi
@@ -252,6 +252,18 @@ _wt_context_complete() {
   # After 'add' subcommand
   if [[ "${COMP_WORDS[1]}" == "add" ]]; then
     COMPREPLY+=( $(compgen -d -- "$cur") )
+    return 0
+  fi
+
+  # After 'remove' subcommand
+  if [[ "${COMP_WORDS[1]}" == "remove" ]]; then
+    if [[ "$cur" == -* ]]; then
+      COMPREPLY+=( $(compgen -W "-y --yes" -- "$cur") )
+    else
+      local contexts
+      contexts="$(_wt_context_list)"
+      COMPREPLY+=( $(compgen -W "$contexts" -- "$cur") )
+    fi
     return 0
   fi
 }
@@ -355,7 +367,7 @@ _wt_completion_bash() {
       context)
         local contexts
         contexts="$(_wt_context_list)"
-        COMPREPLY=($(compgen -W "add --list $contexts" -- "$cur"))
+        COMPREPLY=($(compgen -W "add remove --list $contexts" -- "$cur"))
         ;;
       metadata-import|ijwb-import)
         if [[ ${COMP_CWORD} -eq 2 ]]; then
