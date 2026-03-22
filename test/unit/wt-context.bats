@@ -250,6 +250,20 @@ teardown() {
     assert_equal "$stderr" ""
 }
 
+@test "wt_show_context_banner uses WT_CONTEXT_NAME over ~/.wt/current" {
+    local repo
+    repo=$(create_mock_repo)
+    create_test_context "global-context" "$repo"
+
+    # Simulate git-local config setting a different context name
+    WT_CONTEXT_NAME="local-context"
+
+    run --separate-stderr wt_show_context_banner
+    assert_success
+    [[ "$stderr" == *"local-context"* ]] || fail "Expected stderr to contain 'local-context', got: $stderr"
+    [[ "$stderr" != *"global-context"* ]] || fail "Expected stderr NOT to contain 'global-context', got: $stderr"
+}
+
 # =============================================================================
 # Integration tests for context workflow
 # =============================================================================
