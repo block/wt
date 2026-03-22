@@ -48,6 +48,7 @@ usage() {
   cat <<EOF
 Usage: $(basename "$0") [OPTIONS] [CONTEXT_NAME]
        $(basename "$0") add [NAME] [PATH]
+       $(basename "$0") remove [NAME]
 
 Manage repository contexts for multi-repo support.
 
@@ -57,6 +58,7 @@ Options:
 
 Subcommands:
   add           Add a new repository context
+  remove [name] Remove a context and clean up all wt config
 
 Examples:
   $(basename "$0")              # Interactive selection
@@ -65,6 +67,7 @@ Examples:
   $(basename "$0") add          # Add new context (interactive)
   $(basename "$0") add ~/repo   # Add context for repository
   $(basename "$0") add myname ~/repo  # Add context with specific name
+  $(basename "$0") remove java  # Remove 'java' context
 EOF
 }
 
@@ -99,6 +102,142 @@ add_context() {
 
   # Run the full setup flow from wt-context-setup library
   wt_setup_context "$repo_path" "$context_name"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Remove context subcommand — deletes context and cleans up all wt config
+# ─────────────────────────────────────────────────────────────────────────────
+
+remove_context() {
+  local context_name=""
+  local skip_confirm=0
+
+  # Parse args
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -y|--yes) skip_confirm=1; shift ;;
+      -h|--help) usage; exit 0 ;;
+      -*) error "Unknown option: $1"; usage; exit 1 ;;
+      *) context_name="$1"; shift ;;
+    esac
+  done
+
+  # If no name given, interactive selection
+  if [[ -z "$context_name" ]]; then
+    context_name="$(select_context)"
+    [[ -z "$context_name" ]] && { error "No context selected"; exit 1; }
+  fi
+
+  # Verify context exists
+  if ! wt_context_exists "$context_name"; then
+    error "Context not found: $context_name"
+    exit 1
+  fi
+
+  # Load the context's config to get paths
+  local conf_file
+  conf_file="$(wt_get_context_config_path "$context_name")"
+
+  # Parse config values from the .conf file
+  local repo_root worktrees_base active_worktree
+  repo_root="$(grep '^WT_MAIN_REPO_ROOT=' "$conf_file" | head -1 | sed 's/^[^=]*=//; s/^"//; s/"$//')"
+  worktrees_base="$(grep '^WT_WORKTREES_BASE=' "$conf_file" | head -1 | sed 's/^[^=]*=//; s/^"//; s/"$//')"
+  active_worktree="$(grep '^WT_ACTIVE_WORKTREE=' "$conf_file" | head -1 | sed 's/^[^=]*=//; s/^"//; s/"$//')"
+
+  # Expand ~ in paths
+  repo_root="$(_wt_expand_path "$repo_root")"
+  worktrees_base="$(_wt_expand_path "$worktrees_base")"
+  active_worktree="$(_wt_expand_path "$active_worktree")"
+
+  # Confirmation
+  if [[ $skip_confirm -ne 1 ]]; then
+    echo "Removing context '$context_name':"
+    echo "  Main repo:    $repo_root"
+    echo "  Worktrees:    $worktrees_base"
+    echo "  Active link:  $active_worktree"
+    echo
+    echo "This will:"
+    echo "  - Remove wt.* git config from the repository"
+    echo "  - Remove adoption markers from worktrees"
+    echo "  - Delete ~/.wt/repos/${context_name}.conf"
+    echo "  - Restore repository to original location"
+    echo
+    echo "Existing worktree directories will be kept."
+    if ! prompt_confirm "Continue? [y/N]" "n"; then
+      echo "Aborted."
+      exit 0
+    fi
+  fi
+
+  # 1. Remove git config keys
+  if [[ -d "$repo_root/.git" ]] || [[ -f "$repo_root/.git" ]]; then
+    info "Removing wt.* git config..."
+    git -C "$repo_root" config --local --remove-section wt 2>/dev/null || true
+  fi
+
+  # 2. Remove adoption markers from worktrees
+  info "Removing adoption markers from worktrees..."
+  wt_source wt-adopt
+  local wt_path=""
+  while IFS= read -r line; do
+    if [[ "$line" == "worktree "* ]]; then
+      wt_path="${line#worktree }"
+    elif [[ -z "$line" && -n "$wt_path" ]]; then
+      # End of worktree block — check and remove marker
+      if wt_is_adopted "$wt_path" 2>/dev/null; then
+        local marker_ctx
+        marker_ctx="$(wt_read_adopted_context "$wt_path" 2>/dev/null)" || true
+        # Remove if context matches, or if it's an old empty marker
+        if [[ -z "$marker_ctx" || "$marker_ctx" == "$context_name" ]]; then
+          wt_unmark_adopted "$wt_path" 2>/dev/null || true
+        fi
+      fi
+      wt_path=""
+    fi
+  done < <(git -C "$repo_root" worktree list --porcelain 2>/dev/null; echo)
+
+  # 3. Delete .conf file
+  info "Removing config file..."
+  rm -f "$conf_file"
+
+  # 4. Reverse repo migration: move main repo back to symlink location
+  if [[ -L "$active_worktree" ]]; then
+    local link_target
+    link_target="$(readlink "$active_worktree")"
+    # Make link_target absolute if relative
+    if [[ "$link_target" != /* ]]; then
+      link_target="$(cd "$(dirname "$active_worktree")" && _wt_realpath "$link_target")"
+    fi
+
+    if [[ "$link_target" == "$repo_root" || "$(_wt_realpath "$link_target" 2>/dev/null)" == "$(_wt_realpath "$repo_root" 2>/dev/null)" ]]; then
+      info "Restoring repository to original location..."
+      rm "$active_worktree"
+      mv "$repo_root" "$active_worktree"
+    else
+      warn "Symlink at $active_worktree points to $link_target (expected $repo_root)"
+      warn "Removing symlink but not moving repository"
+      rm "$active_worktree"
+    fi
+  elif [[ -e "$active_worktree" ]]; then
+    warn "$active_worktree exists but is not a symlink — leaving it unchanged"
+  fi
+
+  # 5. Update ~/.wt/current
+  local current_context
+  current_context="$(wt_get_current_context)"
+  if [[ "$current_context" == "$context_name" ]]; then
+    local remaining
+    remaining="$(wt_list_contexts | head -1)"
+    if [[ -n "$remaining" ]]; then
+      wt_set_current_context "$remaining"
+      info "Switched current context to '$remaining'"
+    else
+      rm -f "$(wt_get_current_file)"
+      info "No remaining contexts"
+    fi
+  fi
+
+  success "Context '$context_name' removed"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -186,6 +325,11 @@ main() {
       add)
         shift
         add_context "$@"
+        exit $?
+        ;;
+      remove)
+        shift
+        remove_context "$@"
         exit $?
         ;;
       -*)

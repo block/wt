@@ -39,6 +39,7 @@ Context Commands (multi-repo support):
   context add               Add a new repository context (interactive)
   context add <path>        Add context for repository at path
   context add <name> <path> Add context with specific name and path
+  context remove [name]     Remove a context and clean up all wt config
 
 Metadata Commands:
   metadata-export [src] [vault] Export project metadata to vault
