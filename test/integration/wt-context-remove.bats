@@ -205,6 +205,11 @@ teardown() {
     # Normalize worktree path
     wt_path="$(cd "$wt_path" && pwd -P)"
 
+    # Mark the worktree as adopted by this context — remove only updates
+    # worktrees adopted by the context being removed
+    source "$TEST_HOME/.wt/lib/wt-adopt"
+    WT_CONTEXT_NAME="ptr-test" wt_mark_adopted "$wt_path"
+
     # Verify the worktree's .git file points to the OLD location
     local dot_git_content
     dot_git_content="$(cat "$wt_path/.git")"

@@ -372,6 +372,12 @@ _wt_migrate_repo() {
     echo "Creating symlink $WT_ACTIVE_WORKTREE -> $WT_MAIN_REPO_ROOT ..."
     ln -s "$WT_MAIN_REPO_ROOT" "$WT_ACTIVE_WORKTREE"
 
+    # Update pre-existing worktree .git pointers to use the physical base path.
+    # Before migration, worktrees pointed to the original location (now the symlink).
+    # After wt switch, the symlink moves away from base, breaking those pointers.
+    # Only update unadopted worktrees — adopted ones already have correct physical paths.
+    _wt_update_worktree_pointers "$WT_MAIN_REPO_ROOT" "unadopted"
+
     echo "  ✓ Migration complete!"
 
   elif [[ -L "$WT_ACTIVE_WORKTREE" ]]; then

@@ -3,6 +3,7 @@ package com.block.wt.services
 import com.block.wt.git.GitConfigHelper
 import com.block.wt.git.GitDirResolver
 import com.block.wt.model.ContextConfig
+import com.block.wt.provision.ProvisionMarkerService
 import com.block.wt.util.ConfigFileHelper
 import com.block.wt.util.PathHelper
 import com.intellij.openapi.components.Service
@@ -15,6 +16,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.nio.file.Files
 import java.nio.file.Path
+
+enum class PointerUpdateMode { ALL, UNADOPTED_ONLY, ADOPTED_BY_CONTEXT }
 
 @Service(Service.Level.PROJECT)
 class ContextService(
@@ -50,7 +53,7 @@ class ContextService(
         Files.deleteIfExists(confFile)
 
         // 3. Reverse repo migration if applicable
-        restoreRepository(config.activeWorktree, config.mainRepoRoot)
+        restoreRepository(config.activeWorktree, config.mainRepoRoot, config.name)
 
         // 4. Update ~/.wt/current
         val currentName = ConfigFileHelper.readCurrentContext()
@@ -86,7 +89,7 @@ class ContextService(
         reload()
     }
 
-    private fun restoreRepository(activeWorktree: Path, mainRepoRoot: Path) {
+    private fun restoreRepository(activeWorktree: Path, mainRepoRoot: Path, contextName: String) {
         if (!PathHelper.isSymlink(activeWorktree)) return
 
         val linkTarget = PathHelper.readSymlink(activeWorktree) ?: return
@@ -100,14 +103,18 @@ class ContextService(
             // Symlink points to main repo — reverse the migration
             Files.delete(activeWorktree)
             Files.move(mainRepoRoot, activeWorktree)
-            updateWorktreePointers(activeWorktree)
+            updateWorktreePointers(activeWorktree, PointerUpdateMode.ADOPTED_BY_CONTEXT, contextName)
         } else {
             // Symlink points elsewhere — just remove it
             Files.delete(activeWorktree)
         }
     }
 
-    private fun updateWorktreePointers(repoDir: Path) {
+    internal fun updateWorktreePointers(
+        repoDir: Path,
+        mode: PointerUpdateMode = PointerUpdateMode.ALL,
+        contextName: String? = null,
+    ) {
         val gitWorktreesDir = repoDir.resolve(".git/worktrees")
         if (!Files.isDirectory(gitWorktreesDir)) return
 
@@ -116,6 +123,22 @@ class ContextService(
             .filter { Files.isDirectory(it) }
             .forEach { wtMetaDir ->
                 val wtDotGit = resolveWorktreeGitFile(wtMetaDir) ?: return@forEach
+
+                // Derive worktree path from .git file path
+                val wtPath = wtDotGit.parent  // .git file is at <worktree>/.git
+
+                // Check adoption filter
+                when (mode) {
+                    PointerUpdateMode.UNADOPTED_ONLY -> {
+                        if (ProvisionMarkerService.isProvisioned(wtPath)) return@forEach
+                    }
+                    PointerUpdateMode.ADOPTED_BY_CONTEXT -> {
+                        val ctx = ProvisionMarkerService.readAdoptedContext(wtPath)
+                        if (ctx == null || (contextName != null && ctx != contextName)) return@forEach
+                    }
+                    PointerUpdateMode.ALL -> { /* update all */ }
+                }
+
                 val wtName = wtMetaDir.fileName.toString()
                 Files.writeString(wtDotGit, "gitdir: ${newGitDir.resolve("worktrees/$wtName")}\n")
             }

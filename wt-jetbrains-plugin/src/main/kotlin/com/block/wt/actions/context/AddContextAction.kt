@@ -4,6 +4,7 @@ import com.block.wt.actions.WtAction
 import com.block.wt.model.ContextConfig
 import com.block.wt.services.ContextService
 import com.block.wt.services.MetadataService
+import com.block.wt.services.PointerUpdateMode
 import com.block.wt.services.WorktreeService
 import com.block.wt.ui.AddContextDialog
 import com.block.wt.ui.Notifications
@@ -58,6 +59,10 @@ class AddContextAction : WtAction() {
 
                     indicator.text = "Creating symlink..."
                     Files.createSymbolicLink(activeWorktree, mainRepoRoot)
+
+                    // Update pre-existing worktree .git pointers to use the physical base path
+                    // Only update unadopted worktrees — adopted ones already have correct physical paths
+                    ContextService.getInstance(project).updateWorktreePointers(mainRepoRoot, PointerUpdateMode.UNADOPTED_ONLY)
                 } else if (!Files.exists(activeWorktree)) {
                     // Neither exists — create symlink if mainRepoRoot exists
                     if (Files.isDirectory(mainRepoRoot)) {

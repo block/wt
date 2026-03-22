@@ -8,6 +8,7 @@ setup() {
 
     # Source the libraries under test
     source "$TEST_HOME/.wt/lib/wt-common"
+    source "$TEST_HOME/.wt/lib/wt-adopt"
     source "$TEST_HOME/.wt/lib/wt-context"
     source "$TEST_HOME/.wt/lib/wt-context-setup"
 }
@@ -227,5 +228,188 @@ teardown() {
     # Create again (should not fail)
     run _wt_create_directories
     assert_success
+}
+
+# =============================================================================
+# Tests for _wt_update_worktree_pointers()
+# =============================================================================
+
+@test "_wt_update_worktree_pointers updates .git files after repo move" {
+    # Create a repo with a worktree
+    local repo
+    repo=$(create_mock_repo "$BATS_TEST_TMPDIR/original-repo")
+    create_branch "$repo" "feat-branch"
+    local wt_path="$BATS_TEST_TMPDIR/wt-feat"
+    create_worktree "$repo" "$wt_path" "feat-branch"
+    wt_path="$(cd "$wt_path" && pwd -P)"
+
+    # Verify initial .git pointer uses old path
+    local dot_git_content
+    dot_git_content="$(cat "$wt_path/.git")"
+    assert_equal "$dot_git_content" "gitdir: ${repo}/.git/worktrees/wt-feat"
+
+    # Simulate migration: move repo to new location
+    local new_repo="$BATS_TEST_TMPDIR/new-location"
+    mv "$repo" "$new_repo"
+
+    # Run the pointer update
+    run _wt_update_worktree_pointers "$new_repo"
+    assert_success
+
+    # .git file should now point to the new location
+    dot_git_content="$(cat "$wt_path/.git")"
+    assert_equal "$dot_git_content" "gitdir: ${new_repo}/.git/worktrees/wt-feat"
+
+    # Verify git operations work
+    run git -C "$wt_path" status
+    assert_success
+}
+
+@test "_wt_update_worktree_pointers is no-op without worktrees" {
+    local repo
+    repo=$(create_mock_repo "$BATS_TEST_TMPDIR/no-wt-repo")
+
+    # Should succeed silently when there are no worktrees
+    run _wt_update_worktree_pointers "$repo"
+    assert_success
+}
+
+@test "_wt_update_worktree_pointers handles multiple worktrees" {
+    local repo
+    repo=$(create_mock_repo "$BATS_TEST_TMPDIR/multi-wt-repo")
+
+    create_branch "$repo" "branch-a"
+    create_branch "$repo" "branch-b"
+    local wt_a="$BATS_TEST_TMPDIR/wt-a"
+    local wt_b="$BATS_TEST_TMPDIR/wt-b"
+    create_worktree "$repo" "$wt_a" "branch-a"
+    create_worktree "$repo" "$wt_b" "branch-b"
+    wt_a="$(cd "$wt_a" && pwd -P)"
+    wt_b="$(cd "$wt_b" && pwd -P)"
+
+    # Move repo
+    local new_repo="$BATS_TEST_TMPDIR/moved-multi"
+    mv "$repo" "$new_repo"
+
+    run _wt_update_worktree_pointers "$new_repo"
+    assert_success
+
+    # Both worktrees should be updated
+    local content_a content_b
+    content_a="$(cat "$wt_a/.git")"
+    content_b="$(cat "$wt_b/.git")"
+    assert_equal "$content_a" "gitdir: ${new_repo}/.git/worktrees/wt-a"
+    assert_equal "$content_b" "gitdir: ${new_repo}/.git/worktrees/wt-b"
+}
+
+@test "_wt_update_worktree_pointers unadopted mode skips adopted worktrees" {
+    local repo
+    repo=$(create_mock_repo "$BATS_TEST_TMPDIR/adopt-skip-repo")
+
+    create_branch "$repo" "branch-adopted"
+    create_branch "$repo" "branch-unadopted"
+    local wt_adopted="$BATS_TEST_TMPDIR/wt-adopted"
+    local wt_unadopted="$BATS_TEST_TMPDIR/wt-unadopted"
+    create_worktree "$repo" "$wt_adopted" "branch-adopted"
+    create_worktree "$repo" "$wt_unadopted" "branch-unadopted"
+    wt_adopted="$(cd "$wt_adopted" && pwd -P)"
+    wt_unadopted="$(cd "$wt_unadopted" && pwd -P)"
+
+    # Mark one worktree as adopted
+    wt_mark_adopted "$wt_adopted"
+
+    # Move repo
+    local new_repo="$BATS_TEST_TMPDIR/moved-adopt-skip"
+    mv "$repo" "$new_repo"
+
+    run _wt_update_worktree_pointers "$new_repo" "unadopted"
+    assert_success
+
+    # Unadopted worktree should be updated
+    local content_unadopted
+    content_unadopted="$(cat "$wt_unadopted/.git")"
+    assert_equal "$content_unadopted" "gitdir: ${new_repo}/.git/worktrees/wt-unadopted"
+
+    # Adopted worktree should NOT be updated (still has old path)
+    local content_adopted
+    content_adopted="$(cat "$wt_adopted/.git")"
+    assert_equal "$content_adopted" "gitdir: ${repo}/.git/worktrees/wt-adopted"
+}
+
+@test "_wt_update_worktree_pointers adopted mode only updates worktrees adopted by context" {
+    local repo
+    repo=$(create_mock_repo "$BATS_TEST_TMPDIR/adopt-ctx-repo")
+
+    create_branch "$repo" "branch-ctx-a"
+    create_branch "$repo" "branch-ctx-b"
+    create_branch "$repo" "branch-unadopted"
+    local wt_ctx_a="$BATS_TEST_TMPDIR/wt-ctx-a"
+    local wt_ctx_b="$BATS_TEST_TMPDIR/wt-ctx-b"
+    local wt_unadopted="$BATS_TEST_TMPDIR/wt-ctx-unadopted"
+    create_worktree "$repo" "$wt_ctx_a" "branch-ctx-a"
+    create_worktree "$repo" "$wt_ctx_b" "branch-ctx-b"
+    create_worktree "$repo" "$wt_unadopted" "branch-unadopted"
+    wt_ctx_a="$(cd "$wt_ctx_a" && pwd -P)"
+    wt_ctx_b="$(cd "$wt_ctx_b" && pwd -P)"
+    wt_unadopted="$(cd "$wt_unadopted" && pwd -P)"
+
+    # Mark worktrees as adopted by different contexts
+    export WT_CONTEXT_NAME="ctx-a"
+    wt_mark_adopted "$wt_ctx_a"
+    export WT_CONTEXT_NAME="ctx-b"
+    wt_mark_adopted "$wt_ctx_b"
+    unset WT_CONTEXT_NAME
+
+    # Move repo
+    local new_repo="$BATS_TEST_TMPDIR/moved-adopt-ctx"
+    mv "$repo" "$new_repo"
+
+    run _wt_update_worktree_pointers "$new_repo" "adopted" "ctx-a"
+    assert_success
+
+    # Only the worktree adopted by ctx-a should be updated
+    local content_a
+    content_a="$(cat "$wt_ctx_a/.git")"
+    assert_equal "$content_a" "gitdir: ${new_repo}/.git/worktrees/wt-ctx-a"
+
+    # Worktree adopted by ctx-b should NOT be updated
+    local content_b
+    content_b="$(cat "$wt_ctx_b/.git")"
+    assert_equal "$content_b" "gitdir: ${repo}/.git/worktrees/wt-ctx-b"
+
+    # Unadopted worktree should NOT be updated
+    local content_unadopted
+    content_unadopted="$(cat "$wt_unadopted/.git")"
+    assert_equal "$content_unadopted" "gitdir: ${repo}/.git/worktrees/wt-ctx-unadopted"
+}
+
+@test "_wt_update_worktree_pointers all mode updates everything" {
+    local repo
+    repo=$(create_mock_repo "$BATS_TEST_TMPDIR/all-mode-repo")
+
+    create_branch "$repo" "branch-adopted"
+    create_branch "$repo" "branch-unadopted"
+    local wt_adopted="$BATS_TEST_TMPDIR/wt-all-adopted"
+    local wt_unadopted="$BATS_TEST_TMPDIR/wt-all-unadopted"
+    create_worktree "$repo" "$wt_adopted" "branch-adopted"
+    create_worktree "$repo" "$wt_unadopted" "branch-unadopted"
+    wt_adopted="$(cd "$wt_adopted" && pwd -P)"
+    wt_unadopted="$(cd "$wt_unadopted" && pwd -P)"
+
+    wt_mark_adopted "$wt_adopted"
+
+    # Move repo
+    local new_repo="$BATS_TEST_TMPDIR/moved-all-mode"
+    mv "$repo" "$new_repo"
+
+    run _wt_update_worktree_pointers "$new_repo" "all"
+    assert_success
+
+    # Both should be updated
+    local content_adopted content_unadopted
+    content_adopted="$(cat "$wt_adopted/.git")"
+    content_unadopted="$(cat "$wt_unadopted/.git")"
+    assert_equal "$content_adopted" "gitdir: ${new_repo}/.git/worktrees/wt-all-adopted"
+    assert_equal "$content_unadopted" "gitdir: ${new_repo}/.git/worktrees/wt-all-unadopted"
 }
 
