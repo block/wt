@@ -29,7 +29,7 @@ wt_is_adopted() {
 
   # Resolve to absolute path
   if [[ "$git_dir" != /* ]]; then
-    git_dir="$(cd "$worktree_path" && cd "$git_dir" && pwd -P)"
+    git_dir="$(_wt_realpath "$worktree_path/$git_dir")"
   fi
 
   [[ -f "$git_dir/wt/adopted" ]]
@@ -44,7 +44,7 @@ wt_mark_adopted() {
   git_dir="$(git -C "$worktree_path" rev-parse --git-dir 2>/dev/null)" || return 1
 
   if [[ "$git_dir" != /* ]]; then
-    git_dir="$(cd "$worktree_path" && cd "$git_dir" && pwd -P)"
+    git_dir="$(_wt_realpath "$worktree_path/$git_dir")"
   fi
 
   local context="${WT_CONTEXT_NAME:-unknown}"
@@ -61,7 +61,7 @@ wt_unmark_adopted() {
   git_dir="$(git -C "$worktree_path" rev-parse --git-dir 2>/dev/null)" || return 1
 
   if [[ "$git_dir" != /* ]]; then
-    git_dir="$(cd "$worktree_path" && cd "$git_dir" && pwd -P)"
+    git_dir="$(_wt_realpath "$worktree_path/$git_dir")"
   fi
 
   rm -f "$git_dir/wt/adopted"
@@ -78,7 +78,7 @@ wt_read_adopted_context() {
   git_dir="$(git -C "$worktree_path" rev-parse --git-dir 2>/dev/null)" || return 1
 
   if [[ "$git_dir" != /* ]]; then
-    git_dir="$(cd "$worktree_path" && cd "$git_dir" && pwd -P)"
+    git_dir="$(_wt_realpath "$worktree_path/$git_dir")"
   fi
 
   if [[ -f "$git_dir/wt/adopted" ]]; then
@@ -106,8 +106,16 @@ wt_is_main_repo() {
 
   # Resolve both to absolute physical paths for comparison
   local abs_git_dir abs_common_dir
-  abs_git_dir="$(cd "$path" && cd "$git_dir" && pwd -P)"
-  abs_common_dir="$(cd "$path" && cd "$common_dir" && pwd -P)"
+  if [[ "$git_dir" == /* ]]; then
+    abs_git_dir="$(_wt_realpath "$git_dir")"
+  else
+    abs_git_dir="$(_wt_realpath "$path/$git_dir")"
+  fi
+  if [[ "$common_dir" == /* ]]; then
+    abs_common_dir="$(_wt_realpath "$common_dir")"
+  else
+    abs_common_dir="$(_wt_realpath "$path/$common_dir")"
+  fi
 
   [[ "$abs_git_dir" == "$abs_common_dir" ]]
 }

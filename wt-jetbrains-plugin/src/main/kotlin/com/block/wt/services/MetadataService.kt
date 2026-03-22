@@ -9,6 +9,7 @@ import com.intellij.openapi.project.Project
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.IOException
 import java.nio.file.FileVisitOption
 import java.nio.file.FileVisitResult
 import java.nio.file.Files
@@ -163,6 +164,27 @@ class MetadataService(
         ): Result<Int> {
             return try {
                 Files.createDirectories(vault)
+
+                // Sweep stale vault symlinks before re-exporting
+                if (Files.exists(vault)) {
+                    val patternSet = patterns.toSet()
+                    Files.walkFileTree(vault, object : SimpleFileVisitor<Path>() {
+                        override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult {
+                            if (Files.isSymbolicLink(file) && file.fileName.toString() in patternSet) {
+                                Files.deleteIfExists(file)
+                            }
+                            return FileVisitResult.CONTINUE
+                        }
+                        override fun postVisitDirectory(dir: Path, exc: IOException?): FileVisitResult {
+                            if (dir != vault) {
+                                runCatching {
+                                    Files.list(dir).use { if (!it.findFirst().isPresent) Files.delete(dir) }
+                                }
+                            }
+                            return FileVisitResult.CONTINUE
+                        }
+                    })
+                }
 
                 val foundPaths = findMetadataDirsStatic(source, patterns)
                 val deduplicated = deduplicateNestedStatic(foundPaths)

@@ -39,39 +39,42 @@ object ProvisionSwitchHelper {
         val currentContextName = config?.name
 
         if (settings.promptProvisionOnSwitch && currentContextName != null && !wt.isProvisionedByCurrentContext) {
-            val hasMetadata = ProvisionMarkerService.hasExistingMetadata(wt.path)
+            val vault = config.ideaFilesBase
+            val patterns = config.metadataPatterns
+            val conflicts = ProvisionMarkerService.detectConflicts(wt.path, vault, patterns)
 
-            if (hasMetadata) {
-                // Worktree already has project files — ask whether to claim them or overwrite
+            if (conflicts.isNotEmpty()) {
+                // Worktree has conflicts — show detailed list with options
+                val conflictSummary = conflicts.joinToString("\n") { "  - ${it.relativePath} (${it.type.name.lowercase()})" }
                 val options = arrayOf(
-                    "Provision (keep files)",
-                    "Provision (overwrite from vault)",
+                    "Overwrite",
+                    "Keep",
                     "Switch Only",
                     "Cancel",
                 )
                 val answer = Messages.showDialog(
                     project,
-                    "Worktree '${wt.displayName}' has existing project files but hasn't been " +
-                        "provisioned by context '$currentContextName'.\n\n" +
-                        "Keep files: mark as provisioned without changing anything.\n" +
-                        "Overwrite: replace project files with this context's vault.",
+                    "Worktree '${wt.displayName}' has existing files that conflict with " +
+                        "context '$currentContextName':\n\n$conflictSummary\n\n" +
+                        "Overwrite: replace with this context's vault.\n" +
+                        "Keep: mark as provisioned without changing files.",
                     "Provision Worktree?",
                     options,
-                    0, // default: keep files
+                    0, // default: overwrite
                     Messages.getQuestionIcon(),
                 )
 
                 when (answer) {
                     0 -> {
-                        // Provision (keep files) — marker only, no import
-                        ProvisionMarkerService.writeAdoptionMarker(wt.path, currentContextName)
-                            .onFailure { /* best-effort: switch anyway */ }
-                        SymlinkSwitchService.getInstance(project).switchWorktree(wt.path)
+                        // Overwrite — full import then switch
+                        provisionAndSwitch(project, wt)
                         return
                     }
                     1 -> {
-                        // Provision (overwrite from vault) — full import then switch
-                        provisionAndSwitch(project, wt)
+                        // Keep — marker only, no import
+                        ProvisionMarkerService.writeAdoptionMarker(wt.path, currentContextName)
+                            .onFailure { /* best-effort: switch anyway */ }
+                        SymlinkSwitchService.getInstance(project).switchWorktree(wt.path)
                         return
                     }
                     2 -> {
@@ -80,7 +83,7 @@ object ProvisionSwitchHelper {
                     else -> return // Cancel or closed
                 }
             } else {
-                // No existing metadata — standard provision prompt
+                // No conflicts — simpler provision prompt
                 val answer = Messages.showYesNoCancelDialog(
                     project,
                     "Worktree '${wt.displayName}' is not provisioned by context '$currentContextName'.\n\n" +
