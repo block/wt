@@ -260,7 +260,7 @@ class WorktreeInfoTest {
     fun testWorktreePathForBranch() {
         val base = Path.of("/worktrees")
         assertEquals(
-            Path.of("/worktrees/feature-foo"),
+            Path.of("/worktrees/feature/foo"),
             GitBranchHelper.worktreePathForBranch(base, "feature/foo")
         )
         assertEquals(
