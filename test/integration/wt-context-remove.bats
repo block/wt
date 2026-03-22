@@ -195,6 +195,42 @@ teardown() {
     assert_output --partial "expected"
 }
 
+@test "remove updates worktree .git pointers after repo move" {
+    create_test_context "ptr-test" "$REPO1"
+
+    # Create a branch and worktree
+    create_branch "$REPO1" "ptr-branch"
+    local wt_path="$BATS_TEST_TMPDIR/wt-ptr"
+    create_worktree "$REPO1" "$wt_path" "ptr-branch"
+    # Normalize worktree path
+    wt_path="$(cd "$wt_path" && pwd -P)"
+
+    # Verify the worktree's .git file points to the OLD location
+    local dot_git_content
+    dot_git_content="$(cat "$wt_path/.git")"
+    assert_equal "$dot_git_content" "gitdir: ${REPO1}/.git/worktrees/wt-ptr"
+
+    # Set up the symlink scenario: active_link -> REPO1 (main repo)
+    local active_link="$TEST_HOME/active"
+    rm -f "$active_link"
+    ln -s "$REPO1" "$active_link"
+
+    run "$TEST_HOME/.wt/bin/wt-context" remove -y "ptr-test"
+    assert_success
+
+    # After remove: active_link should be a real directory
+    assert [ ! -L "$active_link" ]
+    assert [ -d "$active_link" ]
+
+    # The worktree's .git file should now point to the NEW location
+    dot_git_content="$(cat "$wt_path/.git")"
+    assert_equal "$dot_git_content" "gitdir: ${active_link}/.git/worktrees/wt-ptr"
+
+    # Verify git operations work in the worktree
+    run git -C "$wt_path" status
+    assert_success
+}
+
 @test "remove leaves non-symlink active worktree unchanged with warning" {
     create_test_context "nosym-test" "$REPO1"
 

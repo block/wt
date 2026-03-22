@@ -13,6 +13,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.nio.file.Files
 import java.nio.file.Path
 
 @Service(Service.Level.PROJECT)
@@ -40,6 +41,32 @@ class ContextService(
 
     fun getCurrentConfig(): ContextConfig? = _config.value
 
+    fun removeContext(config: ContextConfig) {
+        // 1. Remove wt.* git config section
+        GitConfigHelper.removeAllConfig(config.mainRepoRoot)
+
+        // 2. Delete .conf file
+        val confFile = PathHelper.reposDir.resolve("${config.name}.conf")
+        Files.deleteIfExists(confFile)
+
+        // 3. Reverse repo migration if applicable
+        restoreRepository(config.activeWorktree, config.mainRepoRoot)
+
+        // 4. Update ~/.wt/current
+        val currentName = ConfigFileHelper.readCurrentContext()
+        if (currentName == config.name) {
+            val remaining = _contexts.value.filter { it.name != config.name }
+            if (remaining.isNotEmpty()) {
+                ConfigFileHelper.writeCurrentContext(remaining.first().name)
+            } else {
+                Files.deleteIfExists(PathHelper.currentFile)
+            }
+        }
+
+        // 5. Reload
+        reload()
+    }
+
     fun addContext(config: ContextConfig) {
         // Primary: write to git local config
         runCatching { GitConfigHelper.writeConfig(config.mainRepoRoot, config) }
@@ -57,6 +84,48 @@ class ContextService(
         }
 
         reload()
+    }
+
+    private fun restoreRepository(activeWorktree: Path, mainRepoRoot: Path) {
+        if (!PathHelper.isSymlink(activeWorktree)) return
+
+        val linkTarget = PathHelper.readSymlink(activeWorktree) ?: return
+        val resolvedTarget = if (linkTarget.isAbsolute) linkTarget
+        else activeWorktree.parent.resolve(linkTarget)
+
+        val resolvedRepo = PathHelper.normalizeSafe(mainRepoRoot)
+        val resolvedLink = PathHelper.normalizeSafe(resolvedTarget)
+
+        if (resolvedLink == resolvedRepo) {
+            // Symlink points to main repo — reverse the migration
+            Files.delete(activeWorktree)
+            Files.move(mainRepoRoot, activeWorktree)
+            updateWorktreePointers(activeWorktree)
+        } else {
+            // Symlink points elsewhere — just remove it
+            Files.delete(activeWorktree)
+        }
+    }
+
+    private fun updateWorktreePointers(repoDir: Path) {
+        val gitWorktreesDir = repoDir.resolve(".git/worktrees")
+        if (!Files.isDirectory(gitWorktreesDir)) return
+
+        val newGitDir = repoDir.resolve(".git")
+        Files.list(gitWorktreesDir).use { it.toList() }
+            .filter { Files.isDirectory(it) }
+            .forEach { wtMetaDir ->
+                val wtDotGit = resolveWorktreeGitFile(wtMetaDir) ?: return@forEach
+                val wtName = wtMetaDir.fileName.toString()
+                Files.writeString(wtDotGit, "gitdir: ${newGitDir.resolve("worktrees/$wtName")}\n")
+            }
+    }
+
+    private fun resolveWorktreeGitFile(wtMetaDir: Path): Path? {
+        val gitdirFile = wtMetaDir.resolve("gitdir")
+        if (!Files.exists(gitdirFile)) return null
+        val path = Path.of(Files.readString(gitdirFile).trim())
+        return if (Files.exists(path)) path else null
     }
 
     /**
