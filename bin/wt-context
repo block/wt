@@ -213,6 +213,30 @@ remove_context() {
       info "Restoring repository to original location..."
       rm "$active_worktree"
       mv "$repo_root" "$active_worktree"
+
+      # Fix worktree .git pointers after repo move
+      # Each worktree has a .git FILE containing "gitdir: <old>/.git/worktrees/<name>"
+      # After moving the repo, these need to point to the new location
+      if [[ -d "$active_worktree/.git/worktrees" ]]; then
+        info "Updating worktree references..."
+        local new_git_dir="$active_worktree/.git"
+
+        for wt_meta_dir in "$new_git_dir"/worktrees/*/; do
+          [[ -d "$wt_meta_dir" ]] || continue
+          # Read the gitdir file to find the worktree's .git file location
+          local gitdir_file="$wt_meta_dir/gitdir"
+          [[ -f "$gitdir_file" ]] || continue
+          local wt_dot_git
+          wt_dot_git="$(cat "$gitdir_file" | tr -d '[:space:]')"
+
+          # Update the .git file in the worktree to point to the new location
+          if [[ -f "$wt_dot_git" ]]; then
+            local wt_name
+            wt_name="$(basename "$wt_meta_dir")"
+            echo "gitdir: ${new_git_dir}/worktrees/${wt_name}" > "$wt_dot_git"
+          fi
+        done
+      fi
     else
       warn "Symlink at $active_worktree points to $link_target (expected $repo_root)"
       warn "Removing symlink but not moving repository"
