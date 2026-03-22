@@ -87,7 +87,7 @@ fi
 
 # Get absolute path of main repo (use pwd -P to resolve symlinks for consistent comparison)
 # Note: git worktree list stores physical paths, so we need to match that behavior
-MAIN_REPO_ABS="$(cd "$WT_MAIN_REPO_ROOT" && pwd -P)"
+MAIN_REPO_ABS="$(_wt_realpath "$WT_MAIN_REPO_ROOT")"
 
 # Get currently linked worktree (if any)
 LINKED_WORKTREE="$(wt_get_linked_worktree)"
@@ -107,7 +107,7 @@ LINKED_WORKTREE="$(wt_get_linked_worktree)"
     case "$line" in
       worktree\ *)
         wt="${line#worktree }"
-        wt_abs="$(cd "$wt" 2>/dev/null && pwd -P)" || continue
+        wt_abs="$(_wt_realpath "$wt")" || continue
 
         # Determine prefix (linked indicator)
         prefix="  "

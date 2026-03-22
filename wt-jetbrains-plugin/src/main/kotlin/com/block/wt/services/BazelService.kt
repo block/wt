@@ -60,16 +60,18 @@ class BazelService(
                 val mainLink = mainRepo.resolve(name)
                 if (!Files.isSymbolicLink(mainLink)) continue
 
-                val target = Files.readSymbolicLink(mainLink)
+                val rawTarget = Files.readSymbolicLink(mainLink)
+                val absoluteTarget = if (rawTarget.isAbsolute) rawTarget
+                    else mainLink.parent.resolve(rawTarget).normalize()
                 val worktreeLink = worktree.resolve(name)
 
                 if (Files.exists(worktreeLink) || Files.isSymbolicLink(worktreeLink)) {
                     Files.delete(worktreeLink)
                 }
 
-                Files.createSymbolicLink(worktreeLink, target)
+                Files.createSymbolicLink(worktreeLink, absoluteTarget)
                 count++
-                log.info("Installed Bazel symlink: $name -> $target")
+                log.info("Installed Bazel symlink: $name -> $absoluteTarget")
             }
             Result.success(count)
         } catch (e: Exception) {
