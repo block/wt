@@ -387,7 +387,7 @@ class WorktreePanel(private val project: Project) : JPanel(BorderLayout()), Data
 
     private fun buildProvisionTooltip(wt: WorktreeInfo): String {
         if (!wt.isProvisioned) {
-            return "Not provisioned \u2014 right-click to provision"
+            return "Not adopted \u2014 right-click to adopt"
         }
 
         val adoptedContext = ProvisionMarkerService.readAdoptedContext(wt.path)

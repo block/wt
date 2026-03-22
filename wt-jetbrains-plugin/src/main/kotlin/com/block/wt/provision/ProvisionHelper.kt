@@ -77,8 +77,8 @@ object ProvisionHelper {
         if (errors.isNotEmpty()) {
             Notifications.warning(
                 project,
-                "Provisioning Warnings",
-                "Provisioned with issues:\n${errors.joinToString("\n• ", prefix = "• ")}",
+                "Adoption Warnings",
+                "Adopted with issues:\n${errors.joinToString("\n• ", prefix = "• ")}",
             )
         }
     }

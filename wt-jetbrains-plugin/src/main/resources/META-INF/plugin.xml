@@ -96,8 +96,8 @@
 
             <action id="Wt.ProvisionWorktree"
                     class="com.block.wt.actions.worktree.ProvisionWorktreeAction"
-                    text="Provision Worktree..."
-                    description="Provision an existing worktree for the current wt context"/>
+                    text="Adopt Worktree..."
+                    description="Adopt an existing worktree for the current wt context"/>
 
             <separator/>
 
@@ -113,7 +113,7 @@
 
             <action id="Wt.ReprovisionContext"
                     class="com.block.wt.actions.context.ReprovisionContextAction"
-                    text="Re-provision Context..."
+                    text="Re-adopt Context..."
                     description="Remove and re-create the wt context configuration"/>
 
             <action id="Wt.DeleteContext"
@@ -198,7 +198,7 @@
             <separator/>
             <action id="Wt.Context.ProvisionWorktree"
                     class="com.block.wt.actions.worktree.ProvisionWorktreeAction"
-                    text="Provision Worktree..."
+                    text="Adopt Worktree..."
                     icon="AllIcons.Actions.Download"/>
             <reference ref="Wt.Toolbar.Remove"/>
             <action id="Wt.Context.RemoveMerged"

@@ -25,11 +25,11 @@ import javax.swing.JPanel
 
 /**
  * One-time setup dialog shown when a context is first used.
- * Lists all non-provisioned worktrees and lets the user pick which to provision.
+ * Lists all non-adopted worktrees and lets the user pick which to adopt.
  *
  * Results:
- * - OK ("Provision Selected") → provisions checked worktrees, marks context as set up
- * - CANCEL with "Skip" → marks context as set up without provisioning
+ * - OK ("Adopt Selected") → adopts checked worktrees, marks context as set up
+ * - CANCEL with "Skip" → marks context as set up without adopting
  * - CANCEL with close button → does nothing, will ask again next time
  */
 class ContextSetupDialog(
@@ -55,7 +55,7 @@ class ContextSetupDialog(
 
     init {
         title = "Set Up Context: ${config.name}"
-        setOKButtonText("Provision Selected")
+        setOKButtonText("Adopt Selected")
         setCancelButtonText("Remind Me Later")
         init()
     }
@@ -68,8 +68,8 @@ class ContextSetupDialog(
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
             border = JBUI.Borders.emptyBottom(12)
 
-            add(JBLabel("The following worktrees haven't been provisioned by context '${config.name}'."))
-            add(JBLabel("Select which ones to provision:").apply {
+            add(JBLabel("The following worktrees haven't been adopted by context '${config.name}'."))
+            add(JBLabel("Select which ones to adopt:").apply {
                 border = JBUI.Borders.emptyTop(4)
             })
         }
@@ -84,7 +84,7 @@ class ContextSetupDialog(
         }
         panel.add(JBScrollPane(checkBoxList), BorderLayout.CENTER)
 
-        val footer = JBLabel("Worktrees with existing project files will be marked as provisioned without changes. " +
+        val footer = JBLabel("Worktrees with existing project files will be marked as adopted without changes. " +
             "Others will have metadata imported from the vault.").apply {
             foreground = JBUI.CurrentTheme.Label.disabledForeground()
             border = JBUI.Borders.emptyTop(8)
@@ -132,24 +132,24 @@ class ContextSetupDialog(
             val settings = WtPluginSettings.getInstance()
             if (config.name in settings.state.setupCompletedContexts) return
 
-            // Only show if there are non-provisioned worktrees
-            val hasUnprovisioned = worktrees.any { !it.isProvisionedByCurrentContext }
-            if (!hasUnprovisioned) {
-                // All worktrees are already provisioned — mark as done silently
+            // Only show if there are non-adopted worktrees
+            val hasUnadopted = worktrees.any { !it.isProvisionedByCurrentContext }
+            if (!hasUnadopted) {
+                // All worktrees are already adopted — mark as done silently
                 markSetupComplete(config.name)
                 return
             }
 
             val dialog = ContextSetupDialog(project, config, worktrees)
             if (dialog.showAndGet()) {
-                // OK — provision selected worktrees
+                // OK — adopt selected worktrees
                 val selected = dialog.getSelectedEntries()
                 if (selected.isNotEmpty()) {
-                    runProvisioning(project, config, selected)
+                    runAdoption(project, config, selected)
                 }
                 markSetupComplete(config.name)
             } else if (dialog.wasSkipped()) {
-                // Skip — mark as done without provisioning
+                // Skip — mark as done without adopting
                 markSetupComplete(config.name)
             }
             // else: Remind Me Later / closed — do nothing, will ask again
@@ -165,13 +165,13 @@ class ContextSetupDialog(
             }
         }
 
-        private fun runProvisioning(
+        private fun runAdoption(
             project: Project,
             config: ContextConfig,
             entries: List<WorktreeEntry>,
         ) {
             ProgressManager.getInstance().run(object : Task.Backgroundable(
-                project, "Provisioning Worktrees", true
+                project, "Adopting Worktrees", true
             ) {
                 override fun run(indicator: ProgressIndicator) {
                     indicator.isIndeterminate = false
@@ -182,7 +182,7 @@ class ContextSetupDialog(
                             indicator.checkCanceled()
                             val wtStart = i.toDouble() / entries.size
                             val wtSize = 1.0 / entries.size
-                            scope.text("Provisioning ${entry.wt.displayName}...")
+                            scope.text("Adopting ${entry.wt.displayName}...")
 
                             ProvisionHelper.provisionWorktree(
                                 project,
@@ -199,7 +199,7 @@ class ContextSetupDialog(
                         Notifications.info(
                             project,
                             "Context Setup Complete",
-                            "Provisioned ${entries.size} worktree(s) for context '${config.name}'",
+                            "Adopted ${entries.size} worktree(s) for context '${config.name}'",
                         )
                     }
                 }
