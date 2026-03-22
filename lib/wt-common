@@ -22,6 +22,61 @@
 # switches take effect immediately without requiring shell reload.
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Ensure standard Unix utilities are available even in environments like Hermit
+# that aggressively modify PATH. These are required by wt commands and many
+# shell operations throughout the toolkit.
+case ":$PATH:" in
+  *:/usr/bin:*) ;;  # already present
+  *) PATH="/usr/bin:$PATH" ;;
+esac
+
+# Path helpers (defined early — used by wt_read_git_config at source time)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Resolve a path to its fully-canonicalized absolute form, following all
+# symlinks in the chain. Portable alternative to `realpath` or `readlink -f`.
+# Args: $1 = path to resolve
+# Outputs: canonical path to stdout
+# Returns: 0 on success, 1 if path does not exist
+_wt_realpath() {
+  local target="$1"
+  while [[ -L "$target" ]]; do
+    local dir="${target%/*}"
+    [[ "$dir" == "$target" ]] && dir="."   # no slash in path
+    [[ -z "$dir" ]] && dir="/"             # path was /filename
+    dir="$(cd -P "$dir" 2>/dev/null && pwd -P)" || return 1
+    target="$(readlink "$target")"
+    [[ "$target" != /* ]] && target="$dir/$target"
+  done
+  if [[ -d "$target" ]]; then
+    (cd -P "$target" 2>/dev/null && pwd -P) || return 1
+  elif [[ -e "$target" ]]; then
+    local parent="${target%/*}"
+    [[ "$parent" == "$target" ]] && parent="."   # no slash in path
+    [[ -z "$parent" ]] && parent="/"             # path was /filename
+    parent="$(cd -P "$parent" 2>/dev/null && pwd -P)" || return 1
+    [[ "$parent" == "/" ]] && parent=""           # avoid double slash: //base
+    printf '%s/%s\n' "$parent" "${target##*/}"
+  else
+    return 1
+  fi
+}
+
+# Resolve the parent directory to its physical path, preserving the basename as-is.
+# Unlike _wt_realpath, does NOT follow the final component if it's a symlink.
+# Useful when you need a canonical path for comparison but must preserve a symlink
+# for subsequent -L checks or readlink calls.
+_wt_resolve_parent() {
+  local path="$1"
+  local dir="${path%/*}"
+  local base="${path##*/}"
+  [[ "$dir" == "$path" ]] && dir="."   # no slash in path
+  [[ -z "$dir" ]] && dir="/"           # path was /filename
+  dir="$(cd -P "$dir" 2>/dev/null && pwd -P)" || return 1
+  [[ "$dir" == "/" ]] && dir=""        # avoid double slash: //base
+  printf '%s/%s\n' "$dir" "$base"
+}
+
 # Clear all WT_* config variables to allow fresh reload
 # Used before wt_read_config() when we need to pick up context changes
 # in the current shell (e.g., completions, help)
@@ -243,46 +298,6 @@ wt_read_config || true
 : "${WT_CONTEXT_NAME:=""}"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Path helpers
-# ─────────────────────────────────────────────────────────────────────────────
-
-# Resolve a path to its fully-canonicalized absolute form, following all
-# symlinks in the chain. Portable alternative to `realpath` or `readlink -f`.
-# Args: $1 = path to resolve
-# Outputs: canonical path to stdout
-# Returns: 0 on success, 1 if path does not exist
-_wt_realpath() {
-  local target="$1"
-  while [[ -L "$target" ]]; do
-    local dir
-    dir="$(cd -P "$(dirname "$target")" 2>/dev/null && pwd -P)" || return 1
-    target="$(readlink "$target")"
-    [[ "$target" != /* ]] && target="$dir/$target"
-  done
-  if [[ -d "$target" ]]; then
-    (cd -P "$target" 2>/dev/null && pwd -P) || return 1
-  elif [[ -e "$target" ]]; then
-    local parent
-    parent="$(cd -P "$(dirname "$target")" 2>/dev/null && pwd -P)" || return 1
-    printf '%s/%s\n' "$parent" "$(basename "$target")"
-  else
-    return 1
-  fi
-}
-
-# _wt_resolve_parent PATH
-# Resolve the parent directory to its physical path, preserving the basename as-is.
-# Unlike _wt_realpath, does NOT follow the final component if it's a symlink.
-# Useful when you need a canonical path for comparison but must preserve a symlink
-# for subsequent -L checks or readlink calls.
-_wt_resolve_parent() {
-  local path="$1"
-  local dir base
-  dir="$(cd -P "$(dirname "$path")" 2>/dev/null && pwd -P)" || return 1
-  base="$(basename "$path")"
-  printf '%s/%s\n' "$dir" "$base"
-}
-
 # Expand ~ to $HOME in a path (bash doesn't expand ~ in variable assignments
 # or interactive read input)
 _wt_expand_path() {

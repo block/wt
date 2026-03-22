@@ -102,3 +102,76 @@ teardown() {
     expected="$(cd -P "$real_dir" && pwd -P)"
     assert_output "$expected"
 }
+
+# =============================================================================
+# Tests for _wt_realpath() — parameter expansion edge cases
+# =============================================================================
+
+@test "_wt_realpath resolves file with no directory component" {
+    # A bare filename in the current directory
+    local workdir="$BATS_TEST_TMPDIR/workdir"
+    mkdir -p "$workdir"
+    echo "content" > "$workdir/bare-file.txt"
+
+    cd "$workdir"
+    run _wt_realpath "bare-file.txt"
+    assert_success
+
+    local expected_dir
+    expected_dir="$(cd -P "$workdir" && pwd -P)"
+    assert_output "$expected_dir/bare-file.txt"
+}
+
+@test "_wt_realpath resolves directory with no directory component" {
+    # A bare dirname in the current directory
+    local workdir="$BATS_TEST_TMPDIR/workdir"
+    mkdir -p "$workdir/subdir"
+
+    cd "$workdir"
+    run _wt_realpath "subdir"
+    assert_success
+
+    local expected
+    expected="$(cd -P "$workdir/subdir" && pwd -P)"
+    assert_output "$expected"
+}
+
+# =============================================================================
+# Tests for _wt_resolve_parent() — parameter expansion edge cases
+# =============================================================================
+
+@test "_wt_resolve_parent resolves root-level path" {
+    # _wt_resolve_parent resolves the PARENT directory but preserves basename as-is.
+    # For "/tmp", parent is "/" and basename is "tmp", so output is "/tmp"
+    # (even on macOS where /tmp is a symlink to /private/tmp).
+    run _wt_resolve_parent "/tmp"
+    assert_success
+    assert_output "/tmp"
+}
+
+@test "_wt_resolve_parent resolves bare filename" {
+    local workdir="$BATS_TEST_TMPDIR/workdir"
+    mkdir -p "$workdir"
+    echo "content" > "$workdir/myfile.txt"
+
+    cd "$workdir"
+    run _wt_resolve_parent "myfile.txt"
+    assert_success
+
+    local expected_dir
+    expected_dir="$(cd -P "$workdir" && pwd -P)"
+    assert_output "$expected_dir/myfile.txt"
+}
+
+@test "_wt_resolve_parent resolves normal nested path" {
+    local workdir="$BATS_TEST_TMPDIR/workdir/sub"
+    mkdir -p "$workdir"
+    echo "content" > "$workdir/file.txt"
+
+    run _wt_resolve_parent "$workdir/file.txt"
+    assert_success
+
+    local expected_dir
+    expected_dir="$(cd -P "$workdir" && pwd -P)"
+    assert_output "$expected_dir/file.txt"
+}
