@@ -115,8 +115,8 @@ _wt_detect_metadata_patterns() {
 
   for entry in "${WT_KNOWN_METADATA[@]}"; do
     local pattern="${entry%%:*}"
-    while IFS= read -r path; do
-      [[ -n "$path" ]] && all_paths+=("$path")
+    while IFS= read -r _entry_path; do
+      [[ -n "$_entry_path" ]] && all_paths+=("$_entry_path")
     done < <(find "$repo" -maxdepth 5 -type d -name "$pattern" 2>/dev/null)
   done
 
@@ -128,24 +128,24 @@ _wt_detect_metadata_patterns() {
   sorted_paths=$(printf '%s\n' "${all_paths[@]}" | sort)
 
   local kept_paths=()
-  while IFS= read -r path; do
-    [[ -z "$path" ]] && continue
+  while IFS= read -r _entry_path; do
+    [[ -z "$_entry_path" ]] && continue
     local dominated=false
     for kept in ${kept_paths[@]+"${kept_paths[@]}"}; do
-      if [[ "$path" == "$kept/"* ]]; then
+      if [[ "$_entry_path" == "$kept/"* ]]; then
         dominated=true
         break
       fi
     done
     if [[ "$dominated" == "false" ]]; then
-      kept_paths+=("$path")
+      kept_paths+=("$_entry_path")
     fi
   done <<< "$sorted_paths"
 
   local patterns=()
-  for path in ${kept_paths[@]+"${kept_paths[@]}"}; do
+  for _entry_path in ${kept_paths[@]+"${kept_paths[@]}"}; do
     local pattern
-    pattern="$(basename "$path")"
+    pattern="$(basename "$_entry_path")"
     local found=false
     for p in ${patterns[@]+"${patterns[@]}"}; do
       [[ "$p" == "$pattern" ]] && found=true && break

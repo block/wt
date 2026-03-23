@@ -22,14 +22,6 @@
 # switches take effect immediately without requiring shell reload.
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Ensure standard Unix utilities are available even in environments like Hermit
-# that aggressively modify PATH. These are required by wt commands and many
-# shell operations throughout the toolkit.
-case ":$PATH:" in
-  *:/usr/bin:*) ;;  # already present
-  *) PATH="/usr/bin:$PATH" ;;
-esac
-
 # Path helpers (defined early — used by wt_read_git_config at source time)
 # ─────────────────────────────────────────────────────────────────────────────
 

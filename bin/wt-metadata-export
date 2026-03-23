@@ -161,8 +161,8 @@ find_all_metadata_dirs() {
   local all_paths=()
 
   for pattern in $WT_METADATA_PATTERNS; do
-    while IFS= read -r path; do
-      [[ -n "$path" ]] && all_paths+=("$path")
+    while IFS= read -r _entry_path; do
+      [[ -n "$_entry_path" ]] && all_paths+=("$_entry_path")
     done < <(find "$SOURCE_DIR" -maxdepth 5 -type d -name "$pattern" 2>/dev/null)
   done
 
@@ -177,21 +177,21 @@ find_all_metadata_dirs() {
 
   # Deduplicate: skip paths that are inside another metadata path
   local kept_paths=()
-  while IFS= read -r path; do
-    [[ -z "$path" ]] && continue
+  while IFS= read -r _entry_path; do
+    [[ -z "$_entry_path" ]] && continue
     local dominated=false
 
     for kept in ${kept_paths[@]+"${kept_paths[@]}"}; do
-      # Check if $path is inside $kept (kept is a prefix of path)
-      if [[ "$path" == "$kept/"* ]]; then
+      # Check if $_p is inside $kept (kept is a prefix of _p)
+      if [[ "$_entry_path" == "$kept/"* ]]; then
         dominated=true
         break
       fi
     done
 
     if [[ "$dominated" == "false" ]]; then
-      kept_paths+=("$path")
-      echo "$path"
+      kept_paths+=("$_entry_path")
+      echo "$_entry_path"
     fi
   done <<< "$sorted_paths"
 }
