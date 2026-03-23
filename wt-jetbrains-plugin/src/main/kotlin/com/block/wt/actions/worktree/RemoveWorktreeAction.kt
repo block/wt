@@ -11,7 +11,6 @@ import com.block.wt.settings.BranchDeletionMode
 import com.block.wt.settings.WtPluginSettings
 import com.block.wt.ui.Notifications
 import com.block.wt.ui.WorktreePanel
-import com.block.wt.util.normalizeSafe
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
@@ -71,11 +70,11 @@ class RemoveWorktreeAction : WtConfigAction() {
     }
 
     private fun confirmAndRemove(project: Project, wt: WorktreeInfo, worktreeService: WorktreeService) {
-        val config = ContextService.getInstance(project).getCurrentConfig()
-        if (config != null && wt.path.normalizeSafe() == config.mainRepoRoot.normalizeSafe()) {
+        if (wt.isMain) {
             Notifications.error(project, "Cannot Remove", "Cannot remove the main repository worktree")
             return
         }
+        val config = ContextService.getInstance(project).getCurrentConfig()
 
         val needsConfirmation = WtPluginSettings.getInstance().state.confirmBeforeRemove || wt.isDirty == true
 
