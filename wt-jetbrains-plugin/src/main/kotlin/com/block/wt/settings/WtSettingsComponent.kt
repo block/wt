@@ -2,6 +2,7 @@ package com.block.wt.settings
 
 import com.intellij.openapi.ui.DialogPanel
 import com.intellij.ui.dsl.builder.bindIntValue
+import com.intellij.ui.dsl.builder.bindItem
 import com.intellij.ui.dsl.builder.bindSelected
 import com.intellij.ui.dsl.builder.panel
 import javax.swing.JComponent
@@ -54,6 +55,14 @@ class WtSettingsComponent {
             row {
                 checkBox("Confirm before removing worktrees")
                     .bindSelected(settings.state::confirmBeforeRemove)
+            }
+            row("After removing worktree, delete branch:") {
+                comboBox(BranchDeletionMode.entries.toList())
+                    .bindItem(
+                        { BranchDeletionMode.valueOf(settings.state.branchDeletionAfterRemove) },
+                        { settings.state.branchDeletionAfterRemove = (it ?: BranchDeletionMode.ASK).name },
+                    )
+                    .comment("Ask = prompt each time, Always = delete without asking, Never = keep branch")
             }
         }
     }

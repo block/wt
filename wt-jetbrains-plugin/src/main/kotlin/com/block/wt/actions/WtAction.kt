@@ -53,7 +53,9 @@ abstract class WtConfigAction : WtAction() {
 
     protected fun requireConfig(e: AnActionEvent): ContextConfig? {
         val project = e.project ?: return null
-        return ContextService.getInstance(project).getCurrentConfig()
+        val contextService = ContextService.getInstance(project)
+        contextService.reload()
+        return contextService.getCurrentConfig()
     }
 }
 
