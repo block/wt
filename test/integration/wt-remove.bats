@@ -225,3 +225,69 @@ create_removable_worktree() {
     assert_success
     assert [ ! -d "$wt2" ]
 }
+
+# =============================================================================
+# Branch deletion tests (-b/--branch flag)
+# =============================================================================
+
+@test "wt-remove -b deletes the branch after removing worktree" {
+    local wt_path
+    wt_path=$(create_removable_worktree "branch-del")
+
+    # Merge the branch so git branch -d succeeds
+    (cd "$REPO" && git merge branch-del) >/dev/null 2>&1
+
+    run "$TEST_HOME/.wt/bin/wt-remove" -y -b "$wt_path"
+    assert_success
+    assert [ ! -d "$wt_path" ]
+    assert_output --partial "Branch 'branch-del' deleted"
+
+    # Branch should no longer exist
+    run git -C "$REPO" branch --list "branch-del"
+    assert_output ""
+}
+
+@test "wt-remove -y -b deletes branch silently without prompts" {
+    local wt_path
+    wt_path=$(create_removable_worktree "silent-del")
+
+    # Merge the branch so git branch -d succeeds
+    (cd "$REPO" && git merge silent-del) >/dev/null 2>&1
+
+    run "$TEST_HOME/.wt/bin/wt-remove" -y -b "$wt_path"
+    assert_success
+    assert [ ! -d "$wt_path" ]
+    assert_output --partial "Branch 'silent-del' deleted"
+
+    # Branch should be gone
+    run git -C "$REPO" branch --list "silent-del"
+    assert_output ""
+}
+
+@test "wt-remove -y without -b does NOT delete the branch" {
+    local wt_path
+    wt_path=$(create_removable_worktree "keep-branch")
+
+    run "$TEST_HOME/.wt/bin/wt-remove" -y "$wt_path"
+    assert_success
+    assert [ ! -d "$wt_path" ]
+
+    # Branch should still exist
+    run git -C "$REPO" branch --list "keep-branch"
+    assert_output --partial "keep-branch"
+}
+
+@test "wt-remove --merged still deletes branches (existing behavior)" {
+    # Create a branch, merge it, then create worktree
+    (cd "$REPO" && git checkout -b merged-branch-del && git checkout main && git merge merged-branch-del) >/dev/null 2>&1
+    local wt_path="$WT_WORKTREES_BASE/merged-branch-del"
+    create_worktree "$REPO" "$wt_path" "merged-branch-del"
+
+    run "$TEST_HOME/.wt/bin/wt-remove" --merged -y
+    assert_success
+    assert [ ! -d "$wt_path" ]
+
+    # Branch should be deleted by --merged mode
+    run git -C "$REPO" branch --list "merged-branch-del"
+    assert_output ""
+}

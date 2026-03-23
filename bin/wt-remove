@@ -52,10 +52,11 @@ wt_require_valid_config || exit 1
 wt_source wt-choose
 
 usage() {
-  echo "Usage: $(basename "$0") [-y|--yes] [--merged] [worktree-path|branch-name]"
+  echo "Usage: $(basename "$0") [-y|--yes] [-b|--branch] [--merged] [worktree-path|branch-name]"
   echo
   echo "Options:"
   echo "  -y, --yes           Skip confirmation prompt (unless uncommitted changes exist)"
+  echo "  -b, --branch        Also delete the git branch after removing the worktree"
   echo "  --merged            Remove all worktrees whose branches are merged into $WT_BASE_BRANCH"
   echo
   echo "Modes:"
@@ -67,6 +68,7 @@ usage() {
 TARGET_WORKTREE=""
 SKIP_CONFIRM=false
 REMOVE_MERGED=false
+DELETE_BRANCH=false
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -81,6 +83,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --merged)
       REMOVE_MERGED=true
+      shift
+      ;;
+    -b|--branch)
+      DELETE_BRANCH=true
       shift
       ;;
     -*)
@@ -220,6 +226,9 @@ else
   TARGET_WORKTREE="$(wt_resolve_and_validate "$TARGET_WORKTREE")" || exit 1
 fi
 
+# Capture branch name before removal (git info won't be available after)
+WORKTREE_BRANCH="$(git -C "$TARGET_WORKTREE" rev-parse --abbrev-ref HEAD 2>/dev/null)" || WORKTREE_BRANCH=""
+
 # Safety check: don't remove the main repo
 if [[ "$TARGET_WORKTREE" == "$MAIN_REPO_ABS" ]]; then
   error "Cannot remove the main repository: $TARGET_WORKTREE"
@@ -309,4 +318,38 @@ if [[ "$IS_CURRENTLY_LINKED" == "true" ]]; then
     exit 1
   fi
   success "Symlink updated: $LINK_PATH -> $MAIN_REPO_ABS"
+fi
+
+#
+# Optionally delete the branch
+#
+if [[ -n "$WORKTREE_BRANCH" && "$WORKTREE_BRANCH" != "HEAD" ]]; then
+  # Check if this branch is checked out in main repo
+  MAIN_BRANCH="$(git -C "$WT_MAIN_REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null)" || MAIN_BRANCH=""
+  if [[ "$WORKTREE_BRANCH" == "$MAIN_BRANCH" ]]; then
+    warn "Branch '$WORKTREE_BRANCH' is checked out in main repo — cannot delete"
+  elif [[ "$DELETE_BRANCH" == "true" ]]; then
+    if git -C "$WT_MAIN_REPO_ROOT" branch -d "$WORKTREE_BRANCH" 2>/dev/null; then
+      success "Branch '$WORKTREE_BRANCH' deleted."
+    else
+      warn "Branch '$WORKTREE_BRANCH' has unmerged changes."
+      if prompt_confirm "  Force delete branch? [y/N]" "n"; then
+        git -C "$WT_MAIN_REPO_ROOT" branch -D "$WORKTREE_BRANCH"
+        success "Branch '$WORKTREE_BRANCH' force-deleted."
+      fi
+    fi
+  elif [[ "$SKIP_CONFIRM" != "true" ]]; then
+    echo
+    if prompt_confirm "Delete branch '$WORKTREE_BRANCH'? [y/N]" "n"; then
+      if git -C "$WT_MAIN_REPO_ROOT" branch -d "$WORKTREE_BRANCH" 2>/dev/null; then
+        success "Branch '$WORKTREE_BRANCH' deleted."
+      else
+        warn "Branch '$WORKTREE_BRANCH' has unmerged changes."
+        if prompt_confirm "  Force delete branch? [y/N]" "n"; then
+          git -C "$WT_MAIN_REPO_ROOT" branch -D "$WORKTREE_BRANCH"
+          success "Branch '$WORKTREE_BRANCH' force-deleted."
+        fi
+      fi
+    fi
+  fi
 fi

@@ -192,6 +192,11 @@ _wt_remove_complete() {
   COMPREPLY=()
   cur="${COMP_WORDS[COMP_CWORD]}"
 
+  if [[ "$cur" == -* ]]; then
+    COMPREPLY+=( $(compgen -W "-y --yes -b --branch --merged" -- "$cur") )
+    return 0
+  fi
+
   local branches
   branches="$(wt_worktree_branch_list exclude_main)"
   if [[ -n "$branches" ]]; then
@@ -357,11 +362,15 @@ _wt_completion_bash() {
         fi
         ;;
       remove)
-        local branches
-        branches="$(wt_worktree_branch_list exclude_main)"
-        if [[ -n "$branches" ]]; then
-          local IFS=$'\n'
-          COMPREPLY+=($(compgen -W "$branches" -- "$cur"))
+        if [[ "$cur" == -* ]]; then
+          COMPREPLY+=($(compgen -W "-y --yes -b --branch --merged" -- "$cur"))
+        else
+          local branches
+          branches="$(wt_worktree_branch_list exclude_main)"
+          if [[ -n "$branches" ]]; then
+            local IFS=$'\n'
+            COMPREPLY+=($(compgen -W "$branches" -- "$cur"))
+          fi
         fi
         ;;
       context)

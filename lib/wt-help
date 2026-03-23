@@ -24,8 +24,9 @@ Worktree Commands:
   add <branch>              Create a new worktree for a branch
   switch [worktree]         Switch the active worktree symlink
                             - interactive worktree selection if omitted
-  remove [worktree]         Remove a worktree
+  remove [-y] [-b] [worktree] Remove a worktree (optionally delete branch)
                             - interactive worktree selection if omitted
+                            - use -b/--branch to also delete the git branch
                             - use --merged to remove all merged-branch worktrees
   list [-v]                 List all worktrees with status
                             - use -v for dirty/ahead/behind indicators
