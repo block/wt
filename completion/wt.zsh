@@ -89,6 +89,9 @@ _wt_remove() {
   typeset -A opt_args
 
   _arguments -C \
+    '(-y --yes)'{-y,--yes}'[Skip confirmation prompt]' \
+    '(-b --branch)'{-b,--branch}'[Also delete the git branch]' \
+    '--merged[Remove all worktrees with merged branches]' \
     '1:worktree:->worktree' && return 0
 
   case "$state" in
