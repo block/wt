@@ -7,6 +7,7 @@ import com.block.wt.progress.asScope
 import com.block.wt.services.ContextService
 import com.block.wt.services.SymlinkSwitchService
 import com.block.wt.services.WorktreeService
+import com.block.wt.settings.BranchDeletionMode
 import com.block.wt.settings.WtPluginSettings
 import com.block.wt.ui.Notifications
 import com.block.wt.ui.WorktreePanel
@@ -18,6 +19,8 @@ import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.ui.popup.JBPopupFactory
 import com.intellij.openapi.ui.popup.PopupStep
 import com.intellij.openapi.ui.popup.util.BaseListPopupStep
+import git4idea.branch.GitBrancher
+import git4idea.repo.GitRepositoryManager
 
 class RemoveWorktreeAction : WtConfigAction() {
 
@@ -113,16 +116,56 @@ class RemoveWorktreeAction : WtConfigAction() {
 
             result.fold(
                 onSuccess = {
-                    scope.fraction(0.95)
+                    scope.fraction(0.90)
                     scope.text("Refreshing worktree list...")
                     worktreeService.refreshWorktreeList()
                     scope.fraction(1.0)
                     Notifications.info(project, "Worktree Removed", "Removed ${wt.displayName}")
+
+                    offerBranchDeletion(project, wt.branch)
                 },
                 onFailure = { ex ->
                     Notifications.error(project, "Remove Failed", ex.message ?: "Unknown error")
                 },
             )
         }
+    }
+
+    private fun offerBranchDeletion(project: Project, branch: String?) {
+        if (branch.isNullOrBlank() || branch in PROTECTED_BRANCHES) return
+
+        val mode = try {
+            BranchDeletionMode.valueOf(WtPluginSettings.getInstance().state.branchDeletionAfterRemove)
+        } catch (_: IllegalArgumentException) {
+            BranchDeletionMode.ASK
+        }
+        if (mode == BranchDeletionMode.NEVER) return
+
+        val shouldDelete = when (mode) {
+            BranchDeletionMode.ALWAYS -> true
+            BranchDeletionMode.ASK -> {
+                var answer = Messages.NO
+                ApplicationManager.getApplication().invokeAndWait {
+                    answer = Messages.showYesNoDialog(
+                        project,
+                        "Delete branch '$branch'?",
+                        "Delete Branch",
+                        Messages.getQuestionIcon(),
+                    )
+                }
+                answer == Messages.YES
+            }
+            BranchDeletionMode.NEVER -> false
+        }
+        if (!shouldDelete) return
+
+        ApplicationManager.getApplication().invokeLater {
+            val repos = GitRepositoryManager.getInstance(project).repositories
+            GitBrancher.getInstance(project).deleteBranches(mapOf(branch to repos), null)
+        }
+    }
+
+    companion object {
+        private val PROTECTED_BRANCHES = setOf("main", "master")
     }
 }

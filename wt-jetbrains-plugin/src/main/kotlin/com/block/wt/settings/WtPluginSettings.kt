@@ -7,6 +7,8 @@ import com.intellij.openapi.components.State
 import com.intellij.openapi.components.Storage
 import com.intellij.openapi.components.service
 
+enum class BranchDeletionMode { ASK, ALWAYS, NEVER }
+
 @Service(Service.Level.APP)
 @State(
     name = "com.block.wt.settings.WtPluginSettings",
@@ -27,6 +29,7 @@ class WtPluginSettings : PersistentStateComponent<WtPluginSettings.State> {
         var lastWelcomeVersion: String = "",
         var enhancedSessionDetection: Boolean = true,
         var agentTerminalNavigation: Boolean = true,
+        var branchDeletionAfterRemove: String = "ASK",
     )
 
     @Volatile
