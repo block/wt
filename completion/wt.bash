@@ -192,8 +192,13 @@ _wt_remove_complete() {
   COMPREPLY=()
   cur="${COMP_WORDS[COMP_CWORD]}"
 
+  if [[ "$cur" == --on-dirty=* ]]; then
+    COMPREPLY+=( $(compgen -W "--on-dirty=warn --on-dirty=skip --on-dirty=remove" -- "$cur") )
+    return 0
+  fi
+
   if [[ "$cur" == -* ]]; then
-    COMPREPLY+=( $(compgen -W "-y --yes -b --branch --merged" -- "$cur") )
+    COMPREPLY+=( $(compgen -W "-y --yes -b --branch --merged --on-dirty=" -- "$cur") )
     return 0
   fi
 
@@ -362,8 +367,10 @@ _wt_completion_bash() {
         fi
         ;;
       remove)
-        if [[ "$cur" == -* ]]; then
-          COMPREPLY+=($(compgen -W "-y --yes -b --branch --merged" -- "$cur"))
+        if [[ "$cur" == --on-dirty=* ]]; then
+          COMPREPLY+=($(compgen -W "--on-dirty=warn --on-dirty=skip --on-dirty=remove" -- "$cur"))
+        elif [[ "$cur" == -* ]]; then
+          COMPREPLY+=($(compgen -W "-y --yes -b --branch --merged --on-dirty=" -- "$cur"))
         else
           local branches
           branches="$(wt_worktree_branch_list exclude_main)"

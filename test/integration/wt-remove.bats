@@ -115,7 +115,7 @@ create_removable_worktree() {
 # must acknowledge they're deleting uncommitted work.
 # =============================================================================
 
-@test "wt-remove -y still prompts for dirty worktrees and removes after confirmation" {
+@test "wt-remove --on-dirty=warn (default) prompts for dirty worktrees" {
     local wt_path
     wt_path=$(create_removable_worktree "dirty-wt")
 
@@ -290,4 +290,148 @@ create_removable_worktree() {
     # Branch should be deleted by --merged mode
     run git -C "$REPO" branch --list "merged-branch-del"
     assert_output ""
+}
+
+# =============================================================================
+# Multi-target removal tests (single invocation)
+# =============================================================================
+
+@test "wt-remove -y removes multiple worktrees in one invocation" {
+    local wt1 wt2
+    wt1=$(create_removable_worktree "multi-rm-1")
+    wt2=$(create_removable_worktree "multi-rm-2")
+
+    run "$TEST_HOME/.wt/bin/wt-remove" -y "$wt1" "$wt2"
+    assert_success
+    assert [ ! -d "$wt1" ]
+    assert [ ! -d "$wt2" ]
+    assert_output --partial "Removed 2 worktree(s)"
+}
+
+@test "wt-remove -y skips nonexistent targets and removes valid ones" {
+    local wt1
+    wt1=$(create_removable_worktree "valid-target")
+
+    run "$TEST_HOME/.wt/bin/wt-remove" -y "$wt1" "/nonexistent/path"
+    assert_success
+    assert [ ! -d "$wt1" ]
+    # wt_resolve_and_validate prints "Worktree not found" for invalid targets
+    assert_output --partial "not found"
+}
+
+@test "wt-remove resolves branch name to worktree path" {
+    create_removable_worktree "by-branch-name"
+
+    run "$TEST_HOME/.wt/bin/wt-remove" -y "by-branch-name"
+    assert_success
+    assert_output --partial "Worktree removed"
+}
+
+# =============================================================================
+# Squash-merge detection tests
+# =============================================================================
+
+@test "wt-remove --merged detects squash-merged branches" {
+    # Create branch with unique content
+    create_branch "$REPO" "squash-feature"
+    local wt_path="$WT_WORKTREES_BASE/squash-feature"
+    create_worktree "$REPO" "$wt_path" "squash-feature"
+
+    # Squash-merge into main (NOT a regular merge)
+    (cd "$REPO" && git merge --squash squash-feature && git commit -m "Squash merge") >/dev/null 2>&1
+
+    # Verify git branch --merged does NOT detect it (the old bug)
+    run git -C "$REPO" branch --merged main
+    refute_output --partial "squash-feature"
+
+    # But wt-remove --merged should detect it
+    run "$TEST_HOME/.wt/bin/wt-remove" --merged -y
+    assert_success
+    assert [ ! -d "$wt_path" ]
+}
+
+@test "wt-remove --merged deletes squash-merged branch with force" {
+    create_branch "$REPO" "squash-branch-del"
+    local wt_path="$WT_WORKTREES_BASE/squash-branch-del"
+    create_worktree "$REPO" "$wt_path" "squash-branch-del"
+
+    (cd "$REPO" && git merge --squash squash-branch-del && git commit -m "Squash") >/dev/null 2>&1
+
+    run "$TEST_HOME/.wt/bin/wt-remove" --merged -y
+    assert_success
+    assert [ ! -d "$wt_path" ]
+
+    # Branch should be force-deleted (git branch -D)
+    run git -C "$REPO" branch --list "squash-branch-del"
+    assert_output ""
+}
+
+# =============================================================================
+# --on-dirty flag tests
+# =============================================================================
+
+@test "wt-remove --on-dirty=skip skips dirty worktrees" {
+    local wt_path
+    wt_path=$(create_removable_worktree "dirty-skip")
+    echo "uncommitted" >> "$wt_path/file.txt"
+
+    run "$TEST_HOME/.wt/bin/wt-remove" -y --on-dirty=skip "$wt_path"
+    assert_success
+    # Worktree should still exist (skipped)
+    assert [ -d "$wt_path" ]
+    assert_output --partial "Skipping"
+}
+
+@test "wt-remove --on-dirty=remove removes dirty worktrees without prompting" {
+    local wt_path
+    wt_path=$(create_removable_worktree "dirty-remove")
+    echo "uncommitted" >> "$wt_path/file.txt"
+
+    run "$TEST_HOME/.wt/bin/wt-remove" -y --on-dirty=remove "$wt_path"
+    assert_success
+    assert [ ! -d "$wt_path" ]
+    assert_output --partial "removing anyway"
+}
+
+@test "wt-remove --on-dirty=invalid fails with error" {
+    run "$TEST_HOME/.wt/bin/wt-remove" --on-dirty=invalid
+    assert_failure
+    assert_output --partial "Invalid --on-dirty mode"
+}
+
+@test "wt-remove --merged --on-dirty=skip skips dirty merged worktrees" {
+    (cd "$REPO" && git checkout -b dirty-merged && git checkout main && git merge dirty-merged) >/dev/null 2>&1
+    local wt_path="$WT_WORKTREES_BASE/dirty-merged"
+    create_worktree "$REPO" "$wt_path" "dirty-merged"
+    echo "uncommitted" >> "$wt_path/file.txt"
+
+    run "$TEST_HOME/.wt/bin/wt-remove" --merged -y --on-dirty=skip
+    assert_success
+    # Dirty worktree should be preserved
+    assert [ -d "$wt_path" ]
+    assert_output --partial "Skipping"
+}
+
+# =============================================================================
+# --merged symlink fixup (regression test for bug fix)
+# =============================================================================
+
+@test "wt-remove --merged fixes active symlink when removing linked worktree" {
+    (cd "$REPO" && git checkout -b merged-linked && git checkout main && git merge merged-linked) >/dev/null 2>&1
+    local wt_path="$WT_WORKTREES_BASE/merged-linked"
+    create_worktree "$REPO" "$wt_path" "merged-linked"
+
+    # Link to this worktree
+    ln -sf "$wt_path" "$WT_ACTIVE_WORKTREE"
+
+    run "$TEST_HOME/.wt/bin/wt-remove" --merged -y
+    assert_success
+    assert [ ! -d "$wt_path" ]
+
+    # Symlink should now point to main repo
+    if [ -L "$WT_ACTIVE_WORKTREE" ]; then
+        local target
+        target=$(readlink "$WT_ACTIVE_WORKTREE")
+        assert_equal "$target" "$REPO"
+    fi
 }

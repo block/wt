@@ -8,7 +8,7 @@
 #
 # Behavior:
 # ---------
-# 1. If a worktree path is provided as an argument, uses it directly.
+# 1. If worktree paths/branches are provided as arguments, uses them directly.
 #    Otherwise, uses `select_git_worktree` (from wt-choose) to present an
 #    interactive menu of available worktrees.
 #
@@ -23,11 +23,11 @@
 #    and warns the user.
 #
 # 6. --merged mode: finds and removes all worktrees whose branches have been
-#    merged into the base branch.
+#    merged into the base branch (detects both regular and squash merges).
 #
 # Usage:
 #   wt-remove                     # Interactive: pick worktree to remove
-#   wt-remove <worktree-path>     # Remove specified worktree (with confirmation)
+#   wt-remove <worktree|branch> ...  # Remove one or more worktrees
 #   wt-remove --merged            # Remove all worktrees with merged branches
 #
 
@@ -52,23 +52,29 @@ wt_require_valid_config || exit 1
 wt_source wt-choose
 
 usage() {
-  echo "Usage: $(basename "$0") [-y|--yes] [-b|--branch] [--merged] [worktree-path|branch-name]"
+  echo "Usage: $(basename "$0") [-y|--yes] [-b|--branch] [--merged] [--on-dirty=MODE] [worktree|branch ...]"
   echo
   echo "Options:"
-  echo "  -y, --yes           Skip confirmation prompt (unless uncommitted changes exist)"
-  echo "  -b, --branch        Also delete the git branch after removing the worktree"
-  echo "  --merged            Remove all worktrees whose branches are merged into $WT_BASE_BRANCH"
+  echo "  -y, --yes              Skip confirmation prompts"
+  echo "  -b, --branch           Also delete the git branch after removing the worktree"
+  echo "  --merged               Remove all worktrees whose branches are merged into $WT_BASE_BRANCH"
+  echo "                         (detects both regular merges and squash merges)"
+  echo "  --on-dirty=MODE        What to do with dirty worktrees (default: warn)"
+  echo "                           warn   - prompt before removing (default)"
+  echo "                           skip   - silently skip dirty worktrees"
+  echo "                           remove - remove without prompting"
   echo
   echo "Modes:"
   echo "  $(basename "$0")                          # Interactive: pick worktree to remove"
-  echo "  $(basename "$0") <worktree-path|branch>   # Remove specified worktree (with confirmation)"
+  echo "  $(basename "$0") <worktree|branch> ...    # Remove one or more worktrees"
   echo "  $(basename "$0") --merged                 # Remove all worktrees with merged branches"
 }
 
-TARGET_WORKTREE=""
+TARGET_WORKTREES=()
 SKIP_CONFIRM=false
 REMOVE_MERGED=false
 DELETE_BRANCH=false
+ON_DIRTY=warn  # warn | skip | remove
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -89,18 +95,33 @@ while [[ $# -gt 0 ]]; do
       DELETE_BRANCH=true
       shift
       ;;
+    --on-dirty=*)
+      ON_DIRTY="${1#--on-dirty=}"
+      if [[ "$ON_DIRTY" != "warn" && "$ON_DIRTY" != "skip" && "$ON_DIRTY" != "remove" ]]; then
+        error "Invalid --on-dirty mode: $ON_DIRTY (must be warn, skip, or remove)"
+        exit 1
+      fi
+      shift
+      ;;
+    --on-dirty)
+      if [[ $# -lt 2 ]]; then
+        error "--on-dirty requires a value: warn, skip, or remove"
+        exit 1
+      fi
+      ON_DIRTY="$2"
+      if [[ "$ON_DIRTY" != "warn" && "$ON_DIRTY" != "skip" && "$ON_DIRTY" != "remove" ]]; then
+        error "Invalid --on-dirty mode: $ON_DIRTY (must be warn, skip, or remove)"
+        exit 1
+      fi
+      shift 2
+      ;;
     -*)
       error "Unknown option: $1"
       usage >&2
       exit 1
       ;;
     *)
-      if [[ -n "$TARGET_WORKTREE" ]]; then
-        error "Too many arguments"
-        usage >&2
-        exit 1
-      fi
-      TARGET_WORKTREE="$1"
+      TARGET_WORKTREES+=("$1")
       shift
       ;;
   esac
@@ -112,23 +133,181 @@ wt_show_context_banner
 # Safety check: get absolute path of main repo
 MAIN_REPO_ABS="$(cd "$WT_MAIN_REPO_ROOT" && pwd)"
 
+# Resolve active symlink path once for all removals
+LINK_PATH="$WT_ACTIVE_WORKTREE"
+if [[ -d "$(dirname "$LINK_PATH")" ]]; then
+  LINK_PATH="$(cd "$(dirname "$LINK_PATH")" && pwd)/$(basename "$LINK_PATH")"
+fi
+CURRENT_LINKED=""
+if [[ -L "$LINK_PATH" ]]; then
+  CURRENT_LINKED="$(readlink "$LINK_PATH")"
+  if [[ "$CURRENT_LINKED" != /* ]]; then
+    CURRENT_LINKED="$(cd "$(dirname "$LINK_PATH")" && cd "$(dirname "$CURRENT_LINKED")" && pwd)/$(basename "$CURRENT_LINKED")"
+  fi
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Dirty worktree handler — shared by --merged and explicit removal paths
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Check if a worktree has uncommitted changes and apply the ON_DIRTY policy.
+# Returns: 0 = proceed with removal, 1 = skip this worktree
+# Reads globals: ON_DIRTY
+_check_dirty() {
+  local wt_path="$1"
+
+  if ! wt_has_uncommitted_changes "$wt_path"; then
+    return 0  # clean — proceed
+  fi
+
+  local summary
+  summary="$(wt_uncommitted_summary "$wt_path")"
+
+  case "$ON_DIRTY" in
+    skip)
+      warn "Skipping $wt_path — has uncommitted changes ($summary)"
+      return 1
+      ;;
+    remove)
+      warn "$wt_path has uncommitted changes ($summary) — removing anyway"
+      return 0
+      ;;
+    warn)
+      warn "$wt_path has uncommitted changes!"
+      [[ -n "$summary" ]] && echo "   ($summary)"
+      if ! prompt_confirm "${YELLOW}Remove worktree with uncommitted changes? [y/N]${NC}" "n"; then
+        echo "   ${BLUE}Tip:${NC} use --on-dirty=skip to skip dirty worktrees without prompting"
+        return 1
+      fi
+      echo "   ${BLUE}Tip:${NC} use --on-dirty=remove to remove dirty worktrees without prompting"
+      return 0
+      ;;
+  esac
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Core removal helper — shared by --merged and explicit removal paths
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Remove a worktree, fix active symlink if needed, and handle branch deletion.
 #
-# Handle --merged mode: find and remove all worktrees with merged branches
+# Usage: _do_remove_worktree <worktree-path> [mode]
+#   mode: "merged"   — branch is verified merged; force-delete it unconditionally
+#         "explicit" — respect DELETE_BRANCH flag / prompt interactively (default)
 #
+# Reads globals: MAIN_REPO_ABS, LINK_PATH, CURRENT_LINKED, WT_MAIN_REPO_ROOT,
+#                DELETE_BRANCH, SKIP_CONFIRM
+# Mutates: CURRENT_LINKED (cleared after symlink switch)
+_do_remove_worktree() {
+  local wt_path="$1"
+  local mode="${2:-explicit}"
+
+  # Capture branch name before removal (git info won't be available after)
+  local wt_branch
+  wt_branch="$(git -C "$wt_path" rev-parse --abbrev-ref HEAD 2>/dev/null)" || wt_branch=""
+
+  # Check if this is the currently linked worktree
+  local is_linked=false
+  if [[ -n "$CURRENT_LINKED" && "$wt_path" == "$CURRENT_LINKED" ]]; then
+    is_linked=true
+  fi
+
+  # Remove the worktree
+  echo "Removing: $wt_path ($wt_branch)"
+  cd "$WT_MAIN_REPO_ROOT"
+  if ! git worktree remove --force -- "$wt_path" 2>/dev/null; then
+    error "Failed to remove $wt_path"
+    return 1
+  fi
+  success "Worktree removed: $wt_path"
+
+  # Fix active symlink if the removed worktree was the current target
+  if [[ "$is_linked" == "true" ]]; then
+    echo "Switching symlink to main repository..."
+    if wt_atomic_symlink "$MAIN_REPO_ABS" "$LINK_PATH"; then
+      success "Symlink updated: $LINK_PATH -> $MAIN_REPO_ABS"
+    else
+      error "Failed to re-link $LINK_PATH to main repo"
+    fi
+    CURRENT_LINKED=""
+  fi
+
+  # Branch deletion
+  if [[ -z "$wt_branch" || "$wt_branch" == "HEAD" ]]; then
+    return 0
+  fi
+
+  local main_branch
+  main_branch="$(git -C "$WT_MAIN_REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null)" || main_branch=""
+  if [[ "$wt_branch" == "$main_branch" ]]; then
+    warn "Branch '$wt_branch' is checked out in main repo — cannot delete"
+  elif [[ "$mode" == "merged" ]]; then
+    # Branch is verified merged (regular or squash) — safe to force-delete
+    # (git branch -d fails on squash-merged branches since it only checks ancestry)
+    if git -C "$WT_MAIN_REPO_ROOT" branch -D "$wt_branch" 2>/dev/null; then
+      success "Branch '$wt_branch' deleted."
+    else
+      warn "Could not delete branch '$wt_branch'"
+    fi
+  elif [[ "$DELETE_BRANCH" == "true" ]]; then
+    if git -C "$WT_MAIN_REPO_ROOT" branch -d "$wt_branch" 2>/dev/null; then
+      success "Branch '$wt_branch' deleted."
+    else
+      warn "Branch '$wt_branch' has unmerged changes."
+      if prompt_confirm "  Force delete branch? [y/N]" "n"; then
+        git -C "$WT_MAIN_REPO_ROOT" branch -D "$wt_branch"
+        success "Branch '$wt_branch' force-deleted."
+      fi
+    fi
+  elif [[ "$SKIP_CONFIRM" != "true" ]]; then
+    if prompt_confirm "Delete branch '$wt_branch'? [y/N]" "n"; then
+      if git -C "$WT_MAIN_REPO_ROOT" branch -d "$wt_branch" 2>/dev/null; then
+        success "Branch '$wt_branch' deleted."
+      else
+        warn "Branch '$wt_branch' has unmerged changes."
+        if prompt_confirm "  Force delete branch? [y/N]" "n"; then
+          git -C "$WT_MAIN_REPO_ROOT" branch -D "$wt_branch"
+          success "Branch '$wt_branch' force-deleted."
+        fi
+      fi
+    fi
+  fi
+
+  return 0
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# --merged mode: find and remove all worktrees with merged branches
+# ─────────────────────────────────────────────────────────────────────────────
+
 if [[ "$REMOVE_MERGED" == "true" ]]; then
   echo "Scanning for worktrees with branches merged into $WT_BASE_BRANCH..."
   echo
 
   cd "$WT_MAIN_REPO_ROOT"
 
-  # Get list of merged branches (excluding base branch itself)
-  MERGED_BRANCHES=()
-  while IFS= read -r branch; do
-    # Skip empty lines and the base branch
-    [[ -z "$branch" ]] && continue
-    [[ "$branch" == "$WT_BASE_BRANCH" ]] && continue
-    MERGED_BRANCHES+=("$branch")
-  done < <(git branch --merged "$WT_BASE_BRANCH" --format='%(refname:short)' 2>/dev/null)
+  # Check if a branch is merged into the base branch.
+  # Detects both regular merges (commit ancestry) and squash merges
+  # (by creating a temporary squash commit and checking via git cherry).
+  _is_branch_merged() {
+    local branch="$1"
+    local base="$2"
+
+    # Fast path: regular merge (commit is ancestor of base)
+    if git merge-base --is-ancestor "$branch" "$base" 2>/dev/null; then
+      return 0
+    fi
+
+    # Slow path: squash merge detection
+    # Create a temporary commit representing the branch squashed onto the merge-base,
+    # then check if git cherry considers it already applied to base.
+    local merge_base tree dangling cherry
+    merge_base="$(git merge-base "$base" "$branch" 2>/dev/null)" || return 1
+    tree="$(git rev-parse "$branch^{tree}" 2>/dev/null)" || return 1
+    dangling="$(git commit-tree "$tree" -p "$merge_base" -m _ 2>/dev/null)" || return 1
+    cherry="$(git cherry "$base" "$dangling" 2>/dev/null)"
+    [[ "$cherry" == "-"* ]]
+  }
 
   # Find worktrees with merged branches
   MERGED_WORKTREES=()
@@ -141,13 +320,11 @@ if [[ "$REMOVE_MERGED" == "true" ]]; then
         [[ "$wt_abs" == "$MAIN_REPO_ABS" ]] && continue
         # Get branch name
         wt_branch="$(git -C "$wt_abs" rev-parse --abbrev-ref HEAD 2>/dev/null)" || continue
-        # Check if branch is in merged list
-        for merged in "${MERGED_BRANCHES[@]}"; do
-          if [[ "$wt_branch" == "$merged" ]]; then
-            MERGED_WORKTREES+=("$wt_abs")
-            break
-          fi
-        done
+        [[ "$wt_branch" == "HEAD" ]] && continue  # skip detached HEAD
+        # Check if branch is merged (regular or squash)
+        if _is_branch_merged "$wt_branch" "$WT_BASE_BRANCH"; then
+          MERGED_WORKTREES+=("$wt_abs")
+        fi
         ;;
     esac
   done < <(git worktree list --porcelain)
@@ -180,31 +357,14 @@ if [[ "$REMOVE_MERGED" == "true" ]]; then
   REMOVED=0
   SKIPPED=0
   for wt in "${MERGED_WORKTREES[@]}"; do
-    wt_branch="$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null)"
-    
-    # Skip if uncommitted changes and -y wasn't passed
-    if wt_has_uncommitted_changes "$wt"; then
-      if [[ "$SKIP_CONFIRM" == "true" ]]; then
-        warn "Skipping $wt ($wt_branch) - has uncommitted changes"
-        SKIPPED=$((SKIPPED + 1))
-        continue
-      else
-        echo
-        warn "$wt has uncommitted changes"
-        if ! prompt_confirm "  Remove anyway? [y/N]" "n"; then
-          SKIPPED=$((SKIPPED + 1))
-          continue
-        fi
-      fi
+    if ! _check_dirty "$wt"; then
+      SKIPPED=$((SKIPPED + 1))
+      continue
     fi
 
-    echo "Removing: $wt ($wt_branch)"
-    if git worktree remove --force -- "$wt" 2>/dev/null; then
-      # Also delete the branch
-      git branch -d "$wt_branch" 2>/dev/null || true
+    if _do_remove_worktree "$wt" "merged"; then
       REMOVED=$((REMOVED + 1))
     else
-      warn "Failed to remove $wt"
       SKIPPED=$((SKIPPED + 1))
     fi
   done
@@ -215,141 +375,104 @@ if [[ "$REMOVE_MERGED" == "true" ]]; then
   exit 0
 fi
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Explicit removal: interactive picker or named worktree(s)
+# ─────────────────────────────────────────────────────────────────────────────
+
 #
-# Pick target worktree (interactive or from argument)
+# Pick target worktree(s) — interactive if none given, or resolve each argument
 #
-if [[ -z "$TARGET_WORKTREE" ]]; then
+if [[ ${#TARGET_WORKTREES[@]} -eq 0 ]]; then
   echo "Select a worktree to remove:"
   echo
-  TARGET_WORKTREE="$(select_git_worktree exclude_main)" || exit 1
-else
-  TARGET_WORKTREE="$(wt_resolve_and_validate "$TARGET_WORKTREE")" || exit 1
+  selected="$(select_git_worktree exclude_main)" || exit 1
+  TARGET_WORKTREES=("$selected")
 fi
 
-# Capture branch name before removal (git info won't be available after)
-WORKTREE_BRANCH="$(git -C "$TARGET_WORKTREE" rev-parse --abbrev-ref HEAD 2>/dev/null)" || WORKTREE_BRANCH=""
+# Resolve all targets, skipping any that can't be found (like git checkout behavior)
+RESOLVED_WORKTREES=()
+for target in "${TARGET_WORKTREES[@]}"; do
+  if ! resolved="$(wt_resolve_and_validate "$target")"; then
+    # wt_resolve_and_validate already printed a specific error message
+    continue
+  fi
+  if [[ "$resolved" == "$MAIN_REPO_ABS" ]]; then
+    warn "Skipping '$target' — cannot remove the main repository"
+    continue
+  fi
+  RESOLVED_WORKTREES+=("$resolved")
+done
 
-# Safety check: don't remove the main repo
-if [[ "$TARGET_WORKTREE" == "$MAIN_REPO_ABS" ]]; then
-  error "Cannot remove the main repository: $TARGET_WORKTREE"
+if [[ ${#RESOLVED_WORKTREES[@]} -eq 0 ]]; then
+  error "No valid worktrees to remove."
   exit 1
 fi
 
-echo
-echo "Selected worktree to remove: $TARGET_WORKTREE"
+# Wrapper: confirmation logic + core removal for explicit (non-merged) path
+_remove_one_worktree() {
+  local wt_path="$1"
 
-#
-# Check if this is the currently linked worktree
-#
-IS_CURRENTLY_LINKED=false
-LINK_PATH="$WT_ACTIVE_WORKTREE"
-if [[ -d "$(dirname "$LINK_PATH")" ]]; then
-  LINK_PATH="$(cd "$(dirname "$LINK_PATH")" && pwd)/$(basename "$LINK_PATH")"
-fi
-
-if [[ -L "$LINK_PATH" ]]; then
-  CURRENT_LINKED="$(readlink "$LINK_PATH")"
-  if [[ "$CURRENT_LINKED" != /* ]]; then
-    CURRENT_LINKED="$(cd "$(dirname "$LINK_PATH")" && cd "$(dirname "$CURRENT_LINKED")" && pwd)/$(basename "$CURRENT_LINKED")"
-  fi
-
-  if [[ "$TARGET_WORKTREE" == "$CURRENT_LINKED" ]]; then
-    IS_CURRENTLY_LINKED=true
-    echo
+  # Warn if this is the currently linked worktree
+  if [[ -n "$CURRENT_LINKED" && "$wt_path" == "$CURRENT_LINKED" ]]; then
     warn "This worktree is currently linked at: $LINK_PATH"
     echo "   The symlink will be switched to main repository after removal."
   fi
-fi
 
-#
-# Check for uncommitted changes
-#
-HAS_UNCOMMITTED=false
-if wt_has_uncommitted_changes "$TARGET_WORKTREE"; then
-  HAS_UNCOMMITTED=true
-  echo
-  warn "This worktree has uncommitted changes!"
-  UNCOMMITTED_SUMMARY="$(wt_uncommitted_summary "$TARGET_WORKTREE")"
-  if [[ -n "$UNCOMMITTED_SUMMARY" ]]; then
-    echo "   ($UNCOMMITTED_SUMMARY)"
+  # Check dirty worktree policy
+  if ! _check_dirty "$wt_path"; then
+    return 1
   fi
-fi
 
-#
-# Confirmation prompt (always required if uncommitted changes exist)
-#
-if [[ "$SKIP_CONFIRM" == "true" && "$HAS_UNCOMMITTED" == "false" ]]; then
-  # Skip confirmation only if -y was passed AND no uncommitted changes
-  :
-else
-  echo
-  if [[ "$HAS_UNCOMMITTED" == "true" ]]; then
-    if ! prompt_confirm "${YELLOW}Remove worktree with uncommitted changes? [y/N]${NC}" "n"; then
-      echo "Aborted."
-      exit 0
-    fi
-  else
+  # Confirmation (only for single target — multi already confirmed in bulk)
+  if [[ "$SKIP_CONFIRM" != "true" && ${#RESOLVED_WORKTREES[@]} -eq 1 ]]; then
     if ! prompt_confirm "Are you sure you want to remove this worktree? [y/N]" "n"; then
+      return 1
+    fi
+  fi
+
+  _do_remove_worktree "$wt_path" "explicit"
+}
+
+# Multi-target: show summary and bulk confirm, then remove each
+if [[ ${#RESOLVED_WORKTREES[@]} -gt 1 ]]; then
+  echo "Worktrees to remove:"
+  echo
+  for wt in "${RESOLVED_WORKTREES[@]}"; do
+    local_branch="$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null)" || local_branch="(unknown)"
+    has_changes=""
+    if wt_has_uncommitted_changes "$wt"; then
+      has_changes=" ${RED}[dirty]${NC}"
+    fi
+    echo "  - $wt ($local_branch)$has_changes"
+  done
+  echo
+
+  if [[ "$SKIP_CONFIRM" != "true" ]]; then
+    if ! prompt_confirm "Remove ${#RESOLVED_WORKTREES[@]} worktree(s)? [y/N]" "n"; then
       echo "Aborted."
       exit 0
     fi
   fi
-fi
 
-#
-# Remove the worktree
-#
-echo
-echo "Removing worktree: $TARGET_WORKTREE"
-
-cd "$WT_MAIN_REPO_ROOT"
-git worktree remove --force -- "$TARGET_WORKTREE"
-
-success "Worktree removed successfully."
-
-#
-# Auto-switch symlink to main repo if the removed worktree was currently linked
-#
-if [[ "$IS_CURRENTLY_LINKED" == "true" ]]; then
   echo
-  echo "Switching symlink to main repository..."
-  if ! wt_atomic_symlink "$MAIN_REPO_ABS" "$LINK_PATH"; then
-    error "Failed to re-link $LINK_PATH to main repo"
-    exit 1
-  fi
-  success "Symlink updated: $LINK_PATH -> $MAIN_REPO_ABS"
-fi
-
-#
-# Optionally delete the branch
-#
-if [[ -n "$WORKTREE_BRANCH" && "$WORKTREE_BRANCH" != "HEAD" ]]; then
-  # Check if this branch is checked out in main repo
-  MAIN_BRANCH="$(git -C "$WT_MAIN_REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null)" || MAIN_BRANCH=""
-  if [[ "$WORKTREE_BRANCH" == "$MAIN_BRANCH" ]]; then
-    warn "Branch '$WORKTREE_BRANCH' is checked out in main repo — cannot delete"
-  elif [[ "$DELETE_BRANCH" == "true" ]]; then
-    if git -C "$WT_MAIN_REPO_ROOT" branch -d "$WORKTREE_BRANCH" 2>/dev/null; then
-      success "Branch '$WORKTREE_BRANCH' deleted."
+  REMOVED=0
+  SKIPPED=0
+  for wt in "${RESOLVED_WORKTREES[@]}"; do
+    if _remove_one_worktree "$wt"; then
+      REMOVED=$((REMOVED + 1))
     else
-      warn "Branch '$WORKTREE_BRANCH' has unmerged changes."
-      if prompt_confirm "  Force delete branch? [y/N]" "n"; then
-        git -C "$WT_MAIN_REPO_ROOT" branch -D "$WORKTREE_BRANCH"
-        success "Branch '$WORKTREE_BRANCH' force-deleted."
-      fi
+      SKIPPED=$((SKIPPED + 1))
     fi
-  elif [[ "$SKIP_CONFIRM" != "true" ]]; then
     echo
-    if prompt_confirm "Delete branch '$WORKTREE_BRANCH'? [y/N]" "n"; then
-      if git -C "$WT_MAIN_REPO_ROOT" branch -d "$WORKTREE_BRANCH" 2>/dev/null; then
-        success "Branch '$WORKTREE_BRANCH' deleted."
-      else
-        warn "Branch '$WORKTREE_BRANCH' has unmerged changes."
-        if prompt_confirm "  Force delete branch? [y/N]" "n"; then
-          git -C "$WT_MAIN_REPO_ROOT" branch -D "$WORKTREE_BRANCH"
-          success "Branch '$WORKTREE_BRANCH' force-deleted."
-        fi
-      fi
-    fi
+  done
+  echo "Done. Removed $REMOVED worktree(s)."
+  if [[ $SKIPPED -gt 0 ]]; then
+    warn "Skipped $SKIPPED worktree(s)."
   fi
+
+else
+  # Single target
+  echo
+  echo "Selected worktree to remove: ${RESOLVED_WORKTREES[0]}"
+  _remove_one_worktree "${RESOLVED_WORKTREES[0]}" || true
 fi
