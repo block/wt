@@ -92,7 +92,8 @@ _wt_remove() {
     '(-y --yes)'{-y,--yes}'[Skip confirmation prompt]' \
     '(-b --branch)'{-b,--branch}'[Also delete the git branch]' \
     '--merged[Remove all worktrees with merged branches]' \
-    '1:worktree:->worktree' && return 0
+    '--on-dirty=[Dirty worktree policy]:mode:(warn skip remove)' \
+    '*:worktree:->worktree' && return 0
 
   case "$state" in
     worktree)

@@ -84,6 +84,19 @@ __wt_do_cd() {
   fi
 }
 
+# helper for removing worktrees with auto-cd if cwd was removed
+__wt_do_remove() {
+  local old_pwd="$PWD"
+  _wt_run wt-remove "$@"
+  local rc=$?
+  # If the removal succeeded and our cwd no longer exists, cd to main repo
+  if [[ $rc -eq 0 && ! -d "$old_pwd" ]]; then
+    cd "$WT_MAIN_REPO_ROOT" || return 1
+    info "Working directory was removed; changed to $WT_MAIN_REPO_ROOT"
+  fi
+  return $rc
+}
+
 # main wt command
 wt() {
   local cmd="$1"
@@ -93,7 +106,7 @@ wt() {
     add)             _wt_run wt-add "$@" ;;
     adopt)           _wt_run wt-adopt "$@" ;;
     switch)          _wt_run wt-switch "$@" ;;
-    remove)          _wt_run wt-remove "$@" ;;
+    remove)          __wt_do_remove "$@" ;;
     list)            _wt_run wt-list "$@" ;;
     context) _wt_run wt-context "$@" && wt_read_config --force ;;
     metadata-export) _wt_run wt-metadata-export "$@" ;;
