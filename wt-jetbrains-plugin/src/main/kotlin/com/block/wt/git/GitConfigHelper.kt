@@ -67,7 +67,8 @@ object GitConfigHelper {
     /**
      * Writes wt.* config to git local config (.git/config).
      * Uses individual `git config --local wt.<key> <value>` calls.
-     * Note: the shell CLI never writes to git config (read-only); only the plugin writes.
+     * Both the CLI (via _wt_write_git_config in lib/wt-context-setup) and the plugin
+     * write wt.* keys to git local config. The key names and semantics are shared.
      */
     fun writeConfig(repoPath: Path, config: ContextConfig) {
         val mainGitDir = GitDirResolver.resolveMainGitDir(repoPath)
