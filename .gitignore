@@ -13,6 +13,10 @@ logs/
 *.tmp
 tmp/
 
+# Potential test artifacts
+test_wt/
+test_git_repo/
+
 # Environment/secrets
 .env
 .env.*
@@ -36,3 +40,4 @@ Thumbs.db
 .claude/
 CLAUDE.md
 [Aa]gent*.md
+thoughts/
