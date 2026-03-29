@@ -258,3 +258,33 @@ teardown() {
     assert [ -f "$WORKTREE/.idea/config.xml" ]
     assert_equal "$(cat "$WORKTREE/.idea/config.xml")" "config content"
 }
+
+# =============================================================================
+# Nested metadata pruning tests
+# =============================================================================
+
+@test "wt-metadata-import does not import nested metadata inside parent pattern" {
+    sed -i.bak 's/WT_METADATA_PATTERNS=".*"/WT_METADATA_PATTERNS=".ijwb .idea"/' "$TEST_HOME/.wt/repos/test.conf"
+
+    # Create .ijwb containing .idea in the real repo (standard Bazel plugin structure)
+    mkdir -p "$REPO/myproject/.ijwb/.idea"
+    echo "config" > "$REPO/myproject/.ijwb/config.xml"
+    echo "idea-config" > "$REPO/myproject/.ijwb/.idea/workspace.xml"
+
+    # Export to vault first (creates symlinks, which is the real-world structure)
+    run "$TEST_HOME/.wt/bin/wt-metadata-export" -y
+    assert_success
+    # Vault should have a symlink for .ijwb, not a separate .idea entry
+    assert [ -L "$WT_IDEA_FILES_BASE/myproject/.ijwb" ]
+
+    # Import into worktree
+    run "$TEST_HOME/.wt/bin/wt-metadata-import" -y "$WT_IDEA_FILES_BASE" "$WORKTREE"
+    assert_success
+
+    # .ijwb should be imported (with .idea inside it via the copy)
+    assert [ -d "$WORKTREE/myproject/.ijwb" ]
+    assert [ -f "$WORKTREE/myproject/.ijwb/.idea/workspace.xml" ]
+
+    # Output should NOT show a separate .idea import for the nested dir
+    refute_output --partial "myproject/.ijwb/.idea"
+}

@@ -755,6 +755,35 @@ teardown() {
 }
 
 # =============================================================================
+# Tests for _wt_prune_nested_paths()
+# =============================================================================
+
+@test "_wt_prune_nested_paths removes nested paths" {
+    result=$(printf '%s\n' "/a/.ijwb" "/a/.ijwb/.idea" "/b/.idea" | _wt_prune_nested_paths)
+    assert_equal "$result" "$(printf '%s\n' "/a/.ijwb" "/b/.idea")"
+}
+
+@test "_wt_prune_nested_paths keeps siblings" {
+    result=$(printf '%s\n' "/a/.idea" "/a/.ijwb" | _wt_prune_nested_paths)
+    assert_equal "$result" "$(printf '%s\n' "/a/.idea" "/a/.ijwb")"
+}
+
+@test "_wt_prune_nested_paths handles empty input" {
+    result=$(printf '' | _wt_prune_nested_paths)
+    assert_equal "$result" ""
+}
+
+@test "_wt_prune_nested_paths handles single path" {
+    result=$(printf '%s\n' "/a/.idea" | _wt_prune_nested_paths)
+    assert_equal "$result" "/a/.idea"
+}
+
+@test "_wt_prune_nested_paths handles multi-level nesting" {
+    result=$(printf '%s\n' "/a/.ijwb" "/a/.ijwb/.idea" "/a/.ijwb/.idea/.run" | _wt_prune_nested_paths)
+    assert_equal "$result" "/a/.ijwb"
+}
+
+# =============================================================================
 # Tests for _wt_is_valid_path_config()
 # =============================================================================
 

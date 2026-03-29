@@ -186,63 +186,69 @@ copy_real_metadata() {
   cp -a "$real_path" "$dst"
 }
 
-# Import a single pattern
-# Args: $1 = pattern name (e.g., ".ijwb")
-import_pattern() {
-  local pattern="$1"
-  local count=0
+# Find all metadata directories across all patterns and prune nested paths.
+# Uses -L to follow symlinks in the vault.
+# Outputs: one path per line, with nested paths removed.
+find_all_import_dirs() {
+  local all_paths=()
 
-  echo "Importing '$pattern' directories..."
+  for pattern in $WT_METADATA_PATTERNS; do
+    while IFS= read -r _entry_path; do
+      [[ -n "$_entry_path" ]] && all_paths+=("$_entry_path")
+    done < <(find -L "$SOURCE_DIR" \( -type l -o -type d \) -name "$pattern" -print 2>/dev/null)
+  done
 
-  # Find all matching directories (symlinks or real directories) under the source directory
-  # Use -L to follow symlinks (source path might be a symlink)
-  # Note: Use process substitution (< <(...)) instead of pipe to avoid subshell variable scope issues
-  while IFS= read -r -d '' META_SRC; do
-    # Parent dir relative to SOURCE_DIR
-    PARENT_SRC="$(dirname "$META_SRC")"
-
-    # Handle pattern at root (PARENT_SRC == SOURCE_DIR)
-    if [[ "$PARENT_SRC" == "$SOURCE_DIR" ]]; then
-      REL_PATH=""
-    else
-      REL_PATH="${PARENT_SRC#"$SOURCE_DIR"/}"
-    fi
-
-    # Corresponding target parent
-    if [[ -z "$REL_PATH" ]]; then
-      TARGET_PARENT="$TARGET_DIR"
-    else
-      TARGET_PARENT="$TARGET_DIR/$REL_PATH"
-    fi
-    TARGET_META="$TARGET_PARENT/$pattern"
-
-    echo "  Found source: $META_SRC"
-    echo "  -> Installing to: $TARGET_META"
-
-    mkdir -p "$TARGET_PARENT"
-
-    if [[ -e "$TARGET_META" || -L "$TARGET_META" ]]; then
-      rm -rf "$TARGET_META"
-    fi
-
-    if ! copy_real_metadata "$META_SRC" "$TARGET_META"; then
-      echo "     Skipping due to broken symlink"
-      echo "     Removing broken symlink from vault: $META_SRC"
-      rm -f "$META_SRC"
-    fi
-
-    count=$((count + 1))
-  done < <(find -L "$SOURCE_DIR" \( -type l -o -type d \) -name "$pattern" -print0 2>/dev/null)
-
-  if [[ $count -eq 0 ]]; then
-    echo "  (no '$pattern' directories found in vault)"
+  if [[ ${#all_paths[@]} -eq 0 ]]; then
+    return
   fi
+
+  printf '%s\n' "${all_paths[@]}" | _wt_prune_nested_paths
 }
 
-# Import each configured pattern
-for pattern in $WT_METADATA_PATTERNS; do
-  import_pattern "$pattern"
+# Import all metadata directories (pruned across patterns)
+count=0
+while IFS= read -r META_SRC; do
+  [[ -z "$META_SRC" ]] && continue
+
+  pattern="$(basename "$META_SRC")"
+  PARENT_SRC="$(dirname "$META_SRC")"
+
+  if [[ "$PARENT_SRC" == "$SOURCE_DIR" ]]; then
+    REL_PATH=""
+  else
+    REL_PATH="${PARENT_SRC#"$SOURCE_DIR"/}"
+  fi
+
+  if [[ -z "$REL_PATH" ]]; then
+    TARGET_PARENT="$TARGET_DIR"
+  else
+    TARGET_PARENT="$TARGET_DIR/$REL_PATH"
+  fi
+  TARGET_META="$TARGET_PARENT/$pattern"
+
+  echo "  Found source: $META_SRC"
+  echo "  -> Installing to: $TARGET_META"
+
+  mkdir -p "$TARGET_PARENT"
+
+  if [[ -e "$TARGET_META" || -L "$TARGET_META" ]]; then
+    rm -rf "$TARGET_META"
+  fi
+
+  if ! copy_real_metadata "$META_SRC" "$TARGET_META"; then
+    echo "     Skipping due to broken symlink"
+    echo "     Removing broken symlink from vault: $META_SRC"
+    rm -f "$META_SRC"
+  fi
+
+  count=$((count + 1))
+done < <(find_all_import_dirs)
+
+if [[ $count -eq 0 ]]; then
+  echo "  (no metadata directories found in vault)"
+else
   echo
-done
+  echo "Imported $count metadata directories."
+fi
 
 success "Done importing metadata."

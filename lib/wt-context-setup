@@ -124,23 +124,10 @@ _wt_detect_metadata_patterns() {
     return
   fi
 
-  local sorted_paths
-  sorted_paths=$(printf '%s\n' "${all_paths[@]}" | sort)
-
   local kept_paths=()
   while IFS= read -r _entry_path; do
-    [[ -z "$_entry_path" ]] && continue
-    local dominated=false
-    for kept in ${kept_paths[@]+"${kept_paths[@]}"}; do
-      if [[ "$_entry_path" == "$kept/"* ]]; then
-        dominated=true
-        break
-      fi
-    done
-    if [[ "$dominated" == "false" ]]; then
-      kept_paths+=("$_entry_path")
-    fi
-  done <<< "$sorted_paths"
+    [[ -n "$_entry_path" ]] && kept_paths+=("$_entry_path")
+  done < <(printf '%s\n' "${all_paths[@]}" | _wt_prune_nested_paths)
 
   local patterns=()
   for _entry_path in ${kept_paths[@]+"${kept_paths[@]}"}; do
