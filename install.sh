@@ -6,6 +6,7 @@
 # This script:
 #   1. Copies the toolkit to ~/.wt/
 #   2. Adds source line to shell rc file (respects ZDOTDIR, falls back to .bash_profile)
+#   2b. Adds ~/.wt/bin to PATH in .zshenv/.bash_profile for non-interactive shell support
 #   3. Runs the context setup flow to configure the first repository
 #   4. Optionally sets up nightly cron job to refresh Bazel IDE metadata
 #
@@ -42,6 +43,24 @@ append_if_missing() {
   fi
 }
 
+# Append a PATH line to a file, creating the file if it doesn't exist
+# Unlike append_if_missing, this creates the file because .zshenv may not exist yet
+append_path_if_missing() {
+  local file="$1"
+  local line="$2"
+
+  # Check if already configured
+  if [[ -f "$file" ]] && grep -qF '.wt/bin' "$file"; then
+    echo "  Already configured: $file"
+    return 0
+  fi
+
+  # Create file if it doesn't exist, or append to existing
+  printf "\n%s\n" "$line" >> "$file"
+  echo "  ✓ Updated $file"
+  return 0
+}
+
 # Copy toolkit to installation directory
 install_toolkit() {
   echo "Installing worktree-toolkit to $INSTALL_DIR ..."
@@ -57,6 +76,9 @@ install_toolkit() {
 
   # Make bin scripts executable
   chmod +x "$INSTALL_DIR"/bin/wt-*
+
+  # Make the standalone wrapper executable
+  [[ -f "$INSTALL_DIR/bin/wt" ]] && chmod +x "$INSTALL_DIR/bin/wt"
 
   # Make lib/wt-metadata-refresh executable (for cron job)
   [[ -f "$INSTALL_DIR/lib/wt-metadata-refresh" ]] && chmod +x "$INSTALL_DIR"/lib/wt-metadata-refresh
@@ -97,6 +119,31 @@ configure_shell_rc() {
   fi
 }
 
+# Add ~/.wt/bin to PATH in shell profile files
+# Uses .zshenv (always loaded) for zsh and .bash_profile (login shells) for bash
+configure_path() {
+  local path_line='export PATH="$HOME/.wt/bin:$PATH"'
+  local configured=false
+
+  echo "Configuring PATH..."
+
+  # Zsh: use .zshenv (loaded for ALL zsh instances, including non-interactive)
+  local zshenv="${ZDOTDIR:-$HOME}/.zshenv"
+  if append_path_if_missing "$zshenv" "$path_line"; then
+    configured=true
+  fi
+
+  # Bash: use .bash_profile (login shells — covers macOS Terminal.app)
+  local bash_profile="$HOME/.bash_profile"
+  if append_path_if_missing "$bash_profile" "$path_line"; then
+    configured=true
+  fi
+
+  if [[ "$configured" == false ]]; then
+    warn "Could not configure PATH automatically. Add this line to your shell profile:"
+    warn "  $path_line"
+  fi
+}
 
 # Set up cron job for metadata refresh
 setup_cron_job() {
@@ -193,6 +240,9 @@ main() {
   echo
 
   configure_shell_rc
+  echo
+
+  configure_path
   echo
 
   if prompt_confirm "Run repository context setup? [Y/n]" "y"; then
