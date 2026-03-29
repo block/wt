@@ -11,12 +11,12 @@ If this produces output (a list of worktrees or a "no contexts" message), `wt` i
 
 ### Fallback check
 
-If `wt` is not in PATH but might be installed:
+If `wt` is not found, check if it's installed but the shell hasn't been reloaded:
 ```bash
-~/.wt/bin/wt list
+ls ~/.wt/wt.sh
 ```
 
-If this works, the PATH is not configured. Suggest the user add `export PATH="$HOME/.wt/bin:$PATH"` to their `~/.zshenv` (zsh) or `~/.bash_profile` (bash), then reload the shell.
+If the file exists, the user just needs to reload their shell: `source ~/.zshrc` (or open a new terminal).
 
 ## Installing the CLI
 
@@ -44,10 +44,9 @@ source ~/.zshrc   # or: source ~/.bash_profile
 
 The installer will:
 1. Copy the toolkit to `~/.wt/`
-2. Add `source ~/.wt/wt.sh` to your shell rc file
-3. Add `~/.wt/bin` to PATH via `.zshenv` / `.bash_profile`
-4. Prompt for repository context setup (which repo to manage)
-5. Optionally set up a nightly metadata refresh cron job
+2. Add `source ~/.wt/wt.sh` to your shell rc file (`.zshrc` / `.bashrc`)
+3. Prompt for repository context setup (which repo to manage)
+4. Optionally set up a nightly metadata refresh cron job
 
 ### Post-install verification
 
@@ -60,8 +59,7 @@ wt help          # Should show the full help text
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| `wt: command not found` | PATH not configured or shell not reloaded | Add `export PATH="$HOME/.wt/bin:$PATH"` to `~/.zshenv`, then `source ~/.zshenv` |
-| `wt` works in terminal but not in scripts/agents | `.zshrc` not sourced in non-interactive shells | Verify `~/.zshenv` has the PATH line (the installer adds this automatically) |
+| `wt: command not found` | Shell not reloaded after install | Run `source ~/.zshrc` or open a new terminal |
 | `wt list` shows nothing | No repository context configured | Run `wt context add` to set up the first repo |
 | `wt` hangs on first run | Large repo, first-time git operations | Normal — wait for git to finish. Subsequent runs will be fast. |
 

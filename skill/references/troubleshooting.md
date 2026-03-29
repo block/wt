@@ -4,18 +4,12 @@ Common errors and how to resolve them. Handle these without asking the user unle
 
 ## `wt: command not found`
 
-**Cause**: PATH not configured for non-interactive shells. This is the most common issue for AI agents.
+**Cause**: `wt` is not installed, or the user's shell has not been reloaded after installation.
 
 **Resolution**:
-1. Try the full path: `~/.wt/bin/wt list`
-2. If that works, use `~/.wt/bin/wt` for all subsequent commands in this session. Also suggest the user add to `~/.zshenv`:
-   ```bash
-   export PATH="$HOME/.wt/bin:$PATH"
-   ```
-   Then reload: `source ~/.zshenv`
-3. If the full path also fails, `wt` is not installed. See [installation.md](installation.md).
-
-**Do NOT** attempt to `source ~/.wt/wt.sh` — this file must be sourced in an interactive shell and will fail or behave unexpectedly in scripts and agent environments.
+1. Check if `wt` is installed: `ls ~/.wt/wt.sh`
+2. If it exists, the shell needs to be reloaded. Suggest the user run `source ~/.zshrc` (or open a new terminal).
+3. If it doesn't exist, `wt` is not installed. See [installation.md](installation.md).
 
 ## `fatal: '<branch>' is already checked out`
 
