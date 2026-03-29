@@ -204,7 +204,7 @@ class ExternalChangeWatcher(
 
             // Active worktree symlink changed (scoped to its parent directory)
             if (fileName == config?.activeWorktree?.fileName?.toString()
-                && watchedPath == config?.activeWorktree?.parent) return true
+                && watchedPath == config.activeWorktree.parent) return true
 
             // .git/worktrees/ changes — worktree created/removed
             val gitWorktreesDir = config?.mainRepoRoot?.resolve(".git/worktrees")
