@@ -9,7 +9,9 @@ Manage git worktrees using the `wt` CLI. Follow these steps in order.
 
 ## Step 0 — Availability check
 
-Run `wt list`. If the command is not found, follow [references/installation.md](references/installation.md) and **stop**. Do not fall back to raw `git worktree` commands.
+Run `wt list`. If the command is not found (common in non-interactive shells), try `~/.wt/bin/wt list` directly. If neither works, follow [references/installation.md](references/installation.md) and **stop**. Do not fall back to raw `git worktree` commands or `source ~/.wt/wt.sh`.
+
+**Important**: In non-interactive shells (scripts, AI agents), always use `~/.wt/bin/wt` if `wt` is not in PATH. Do not attempt to source `wt.sh` — it requires an interactive shell.
 
 ## Step 1 — Conflict detection
 
