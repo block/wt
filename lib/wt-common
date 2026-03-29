@@ -373,6 +373,31 @@ _wt_expand_path() {
   echo "${path/#\~\//$HOME/}"
 }
 
+# Prune paths where an ancestor is already in the set.
+# When metadata patterns nest (e.g., .ijwb contains .idea), only the
+# outermost directory needs to be exported/imported — the children are
+# already included.
+# Reads newline-separated absolute paths from stdin, writes pruned paths to stdout.
+_wt_prune_nested_paths() {
+  local sorted
+  sorted=$(sort)
+  local kept_paths=()
+  while IFS= read -r _entry_path; do
+    [[ -z "$_entry_path" ]] && continue
+    local dominated=false
+    for kept in ${kept_paths[@]+"${kept_paths[@]}"}; do
+      if [[ "$_entry_path" == "$kept/"* ]]; then
+        dominated=true
+        break
+      fi
+    done
+    if [[ "$dominated" == "false" ]]; then
+      kept_paths+=("$_entry_path")
+      echo "$_entry_path"
+    fi
+  done <<< "$sorted"
+}
+
 # Check if a path value is valid for a directory config variable.
 # Valid means: absolute path (starts with /) and contains no glob characters.
 # Args: $1 = path value
