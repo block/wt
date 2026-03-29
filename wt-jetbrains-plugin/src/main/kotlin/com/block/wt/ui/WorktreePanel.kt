@@ -12,8 +12,12 @@ import com.block.wt.services.WorktreeService
 import com.block.wt.settings.WtPluginSettings
 import com.intellij.ide.BrowserUtil
 import com.intellij.openapi.Disposable
+import com.intellij.ide.DataManager
 import com.intellij.openapi.actionSystem.ActionManager
 import com.intellij.openapi.actionSystem.ActionPlaces
+import com.intellij.openapi.actionSystem.ActionUiKind
+import com.intellij.openapi.actionSystem.AnAction
+import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.DataKey
 import com.intellij.openapi.actionSystem.DataProvider
 import com.intellij.openapi.actionSystem.DefaultActionGroup
@@ -203,7 +207,7 @@ class WorktreePanel(private val project: Project) : JPanel(BorderLayout()), Data
                 button("Add Context...") {
                     val action = ActionManager.getInstance().getAction("Wt.AddContext")
                     if (action != null) {
-                        ActionUtil.invokeAction(action, this@WorktreePanel, ActionPlaces.TOOLWINDOW_CONTENT, null, null)
+                        invokeAction(action)
                     }
                 }.align(Align.CENTER)
             }
@@ -401,6 +405,18 @@ class WorktreePanel(private val project: Project) : JPanel(BorderLayout()), Data
         }
     }
 
+    private fun invokeAction(action: AnAction) {
+        val dataContext = DataManager.getInstance().getDataContext(this@WorktreePanel)
+        val event = AnActionEvent.createEvent(
+            dataContext,
+            action.templatePresentation.clone(),
+            ActionPlaces.TOOLWINDOW_CONTENT,
+            ActionUiKind.NONE,
+            null
+        )
+        ActionUtil.performAction(action, event)
+    }
+
     private fun handlePRClick(wt: WorktreeInfo) {
         when (val pr = wt.prInfo) {
             is PullRequestInfo.Open,
@@ -410,14 +426,13 @@ class WorktreePanel(private val project: Project) : JPanel(BorderLayout()), Data
                 // Try to show the PR for the current branch in the Pull Requests tool window
                 val showAction = ActionManager.getInstance().getAction("Github.Pull.Request.Show.In.Toolwindow")
                 if (showAction != null) {
-                    ActionUtil.invokeAction(showAction, this@WorktreePanel, ActionPlaces.TOOLWINDOW_CONTENT, null, null)
+                    invokeAction(showAction)
                 } else {
                     val url = when (pr) {
                         is PullRequestInfo.Open -> pr.url
                         is PullRequestInfo.Draft -> pr.url
                         is PullRequestInfo.Merged -> pr.url
                         is PullRequestInfo.Closed -> pr.url
-                        else -> return
                     }
                     BrowserUtil.browse(url)
                 }
@@ -425,7 +440,7 @@ class WorktreePanel(private val project: Project) : JPanel(BorderLayout()), Data
             is PullRequestInfo.NoPR -> {
                 val createAction = ActionManager.getInstance().getAction("Github.Create.Pull.Request")
                 if (createAction != null) {
-                    ActionUtil.invokeAction(createAction, this@WorktreePanel, ActionPlaces.TOOLWINDOW_CONTENT, null, null)
+                    invokeAction(createAction)
                 } else {
                     val branch = wt.branch ?: return
                     val slug = WorktreeService.getInstance(project).repoSlug ?: return

@@ -17,6 +17,7 @@ import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.project.RootsChangeRescanningInfo
 import com.intellij.openapi.roots.ex.ProjectRootManagerEx
 import com.intellij.openapi.vcs.ProjectLevelVcsManager
 import com.intellij.openapi.vcs.changes.VcsDirtyScopeManager
@@ -132,7 +133,8 @@ class SymlinkSwitchService(
 
                 // Fire synthetic roots-changed event so indexer and module system see the new tree
                 WriteAction.run<Nothing> {
-                    ProjectRootManagerEx.getInstanceEx(project).makeRootsChange({}, false, true)
+                    ProjectRootManagerEx.getInstanceEx(project)
+                        .makeRootsChange({}, RootsChangeRescanningInfo.TOTAL_RESCAN)
                 }
 
                 ProjectView.getInstance(project).refresh()
@@ -147,7 +149,7 @@ class SymlinkSwitchService(
             indicator?.text = "Updating git state..."
             app.invokeAndWait({
                 val vcsManager = ProjectLevelVcsManager.getInstance(project)
-                vcsManager.setDirectoryMappings(vcsManager.directoryMappings.toList())
+                vcsManager.setDirectoryMappings(vcsManager.getDirectoryMappings().toList())
             }, ModalityState.defaultModalityState())
             withContext(Dispatchers.IO) {
                 val repos = GitRepositoryManager.getInstance(project).repositories

@@ -37,8 +37,7 @@ class TerminalNavigatorTest {
         // PID 999999999 should not exist — should not crash
         val tty = TerminalNavigator.resolveTty(999999999L)
         // Result is null when PID doesn't exist (ps returns no output or error)
-        // This test just verifies no exception is thrown
-        assertTrue(tty == null || tty is String)
+        // This test just verifies no exception is thrown — reaching here means success
     }
 
     // --- Terminal owner resolution ---
@@ -53,7 +52,7 @@ class TerminalNavigatorTest {
     fun testGetProcessCommForNonexistentPid() {
         // Should not crash for non-existent PID
         val comm = TerminalNavigator.getProcessComm(999999999L)
-        assertTrue(comm == null || comm is String)
+        // This test just verifies no exception is thrown — reaching here means success
     }
 
     @Test
