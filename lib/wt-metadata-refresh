@@ -188,7 +188,7 @@ parse_bazelproject_directories() {
   awk '
     /^directories:/ { in_dirs=1; next }
     /^[a-z_]+:/ { in_dirs=0 }
-    in_dirs && /^[[:space:]]+[^#]/ { gsub(/^[[:space:]]+/, ""); print }
+    in_dirs { gsub(/^[[:space:]]+/, ""); if ($0 != "" && !/^#/) print }
   ' "$bazelproject_file"
 }
 
@@ -281,17 +281,10 @@ refresh_targets_file() {
   # Run bazel query from the MAIN REPO ROOT (not project root)
   # This is important because .bazelproject directories are relative to repo root
   local query_output
-  local query_exit_code=0
-
   query_output=$(
     cd "$WT_MAIN_REPO_ROOT" 2>/dev/null && \
-    bazel query "$full_query" --output=label 2>/dev/null | sort
-  ) || query_exit_code=$?
-
-  if [[ $query_exit_code -ne 0 ]]; then
-    warn "  Bazel query failed for $project_name (exit code: $query_exit_code)"
-    return 1
-  fi
+    { bazel query "$full_query" --output=label --keep_going 2>/dev/null || true; } | sort
+  )
 
   if [[ -z "$query_output" ]]; then
     warn "  Bazel query returned empty results for $project_name"
