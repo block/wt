@@ -59,11 +59,7 @@ else
 fi
 
 # Source wt-adopt for adoption status checks
-if [[ -f "$LIB_DIR/wt-adopt" ]]; then
-  . "$LIB_DIR/wt-adopt"
-elif [[ -f "$HOME/.wt/lib/wt-adopt" ]]; then
-  . "$HOME/.wt/lib/wt-adopt"
-fi
+wt_source wt-adopt
 
 # Interactively pick a worktree from WT_MAIN_REPO_ROOT
 # Runs in a subshell to avoid changing the caller's working directory
@@ -86,9 +82,10 @@ select_git_worktree() {
       exit 1
     fi
 
-    # Get absolute path of main repo
+    # Get absolute path of main repo (use pwd -P so symlinks in the path
+    # resolve to the physical form matching worktree entries below)
     local main_repo_abs
-    main_repo_abs="$(cd "$WT_MAIN_REPO_ROOT" && pwd)"
+    main_repo_abs="$(cd "$WT_MAIN_REPO_ROOT" && pwd -P)"
     
     # Get currently linked worktree for display
     local linked_worktree

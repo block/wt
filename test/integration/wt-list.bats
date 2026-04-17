@@ -295,6 +295,27 @@ teardown() {
     assert_output --partial "--porcelain"
 }
 
+@test "wt-list --porcelain errors when WT_MAIN_REPO_ROOT does not exist" {
+    rm -f "$TEST_HOME/.wt/current"
+    export WT_MAIN_REPO_ROOT="/nonexistent/path"
+
+    run "$TEST_HOME/.wt/bin/wt-list" --porcelain
+    assert_failure
+    assert_output --partial "does not exist"
+}
+
+@test "wt-list --porcelain errors when WT_MAIN_REPO_ROOT is not a git repo" {
+    local not_git="$BATS_TEST_TMPDIR/not-a-git-repo"
+    mkdir -p "$not_git"
+
+    rm -f "$TEST_HOME/.wt/current"
+    export WT_MAIN_REPO_ROOT="$not_git"
+
+    run "$TEST_HOME/.wt/bin/wt-list" --porcelain
+    assert_failure
+    assert_output --partial "not a git"
+}
+
 # =============================================================================
 # Edge cases
 # =============================================================================
