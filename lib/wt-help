@@ -27,8 +27,9 @@ Worktree Commands:
   remove [worktree]         Remove a worktree
                             - interactive worktree selection if omitted
                             - use --merged to remove all merged-branch worktrees
-  list [-v]                 List all worktrees with status
+  list [-v] [--porcelain]   List all worktrees with status
                             - use -v for dirty/ahead/behind indicators
+                            - use --porcelain for machine-readable output
   cd [worktree]             Change directory to a worktree
                             - interactive worktree selection if omitted
 
@@ -60,6 +61,7 @@ Examples:
   wt cd                           # Interactive: cd to selected worktree
   wt list                         # Show all worktrees (fast)
   wt list -v                      # Show worktrees with dirty/ahead/behind
+  wt list --porcelain             # Machine-readable output (for scripts)
   wt remove                       # Interactive: remove a worktree
   wt remove --merged              # Remove all worktrees with merged branches
 

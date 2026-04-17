@@ -213,6 +213,14 @@ _wt_cd_complete() {
   fi
 }
 
+_wt_list_complete() {
+  local cur
+  COMPREPLY=()
+  cur="${COMP_WORDS[COMP_CWORD]}"
+
+  COMPREPLY+=( $(compgen -W "-v --verbose --porcelain -h --help" -- "$cur") )
+}
+
 # --- Helper: get context list ---
 _wt_context_list() {
   local repos_dir="$HOME/.wt/repos"
@@ -303,6 +311,7 @@ type wt-adopt >/dev/null 2>&1 && complete -F _wt_switch_complete wt-adopt
 type wt-switch >/dev/null 2>&1 && complete -F _wt_switch_complete wt-switch
 type wt-remove >/dev/null 2>&1 && complete -F _wt_remove_complete wt-remove
 type wt-cd >/dev/null 2>&1 && complete -F _wt_cd_complete wt-cd
+type wt-list >/dev/null 2>&1 && complete -F _wt_list_complete wt-list
 type wt-context >/dev/null 2>&1 && complete -F _wt_context_complete wt-context
 type wt-metadata-export >/dev/null 2>&1 && complete -F _wt_metadata_export_complete wt-metadata-export
 type wt-metadata-import >/dev/null 2>&1 && complete -F _wt_metadata_import_complete wt-metadata-import
@@ -351,6 +360,9 @@ _wt_completion_bash() {
           local IFS=$'\n'
           COMPREPLY+=($(compgen -W "$branches" -- "$cur"))
         fi
+        ;;
+      list)
+        COMPREPLY=($(compgen -W "-v --verbose --porcelain -h --help" -- "$cur"))
         ;;
       context)
         local contexts

@@ -123,6 +123,14 @@ _wt_cd() {
   esac
 }
 
+# Completion for wt-list / wt list: flags
+_wt_list() {
+  _arguments \
+    '(-v --verbose)'{-v,--verbose}'[Show dirty/ahead/behind status]' \
+    '--porcelain[Machine-readable output]' \
+    '(-h --help)'{-h,--help}'[Show help]'
+}
+
 # Completion for wt-context / wt context
 _wt_context() {
   local context state
@@ -298,6 +306,7 @@ compdef _wt_switch wt-adopt
 compdef _wt_switch wt-switch
 compdef _wt_remove wt-remove
 compdef _wt_cd wt-cd
+compdef _wt_list wt-list
 compdef _wt_context wt-context
 compdef _wt_metadata_export wt-metadata-export
 compdef _wt_metadata_import wt-metadata-import
@@ -348,6 +357,7 @@ _wt_completion() {
         adopt)                  _wt_switch ;;
         switch|cd)              _wt_switch ;;
         remove)                 _wt_remove ;;
+        list)                   _wt_list ;;
         context)                _wt_context ;;
         metadata-export|ijwb-export)  _wt_metadata_export ;;
         metadata-import|ijwb-import)  _wt_metadata_import ;;
