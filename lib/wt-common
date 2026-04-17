@@ -725,6 +725,129 @@ wt_format_worktree() {
   printf "${BOLD}%s${NC} ${BLUE}(%s)${NC} %s" "$wt_abs" "$branch" "$indicators"
 }
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Porcelain listing
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Output augmented porcelain listing of all worktrees.
+# Passes through all native `git worktree list --porcelain` lines verbatim,
+# then appends wt.* lines per entry before the blank separator.
+#
+# wt-specific lines:
+#   wt.active   — this worktree is the WT_ACTIVE_WORKTREE symlink target
+#   wt.adopted  — the adoption marker file exists
+#   wt.dirty    — has uncommitted changes (only with --verbose)
+#   wt.ahead N  — N commits ahead of upstream (only with --verbose)
+#   wt.behind N — N commits behind upstream (only with --verbose)
+#
+# Usage: wt_list_porcelain [--verbose]
+# Outputs: augmented porcelain to stdout
+wt_list_porcelain() {
+  local verbose=false
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --verbose) verbose=true ;;
+      *) ;;
+    esac
+    shift
+  done
+
+  # Pre-resolve paths for comparison
+  local main_repo_abs
+  main_repo_abs="$(cd "$WT_MAIN_REPO_ROOT" && pwd -P)" || return 1
+
+  local active_worktree
+  active_worktree="$(wt_get_linked_worktree)"
+
+  # Ensure wt_is_adopted is available
+  if ! declare -f wt_is_adopted >/dev/null 2>&1; then
+    local lib_dir="${LIB_DIR:-}"
+    if [[ -n "$lib_dir" && -f "$lib_dir/wt-adopt" ]]; then
+      . "$lib_dir/wt-adopt"
+    elif [[ -f "$HOME/.wt/lib/wt-adopt" ]]; then
+      . "$HOME/.wt/lib/wt-adopt"
+    fi
+  fi
+
+  local wt_path="" branch="" is_detached=false
+  local in_entry=false
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ -z "$line" ]]; then
+      # End of entry — append wt.* lines, then blank separator
+      if [[ "$in_entry" == true ]]; then
+        local wt_abs
+        wt_abs="$(cd "$wt_path" 2>/dev/null && pwd -P)" || { echo; in_entry=false; continue; }
+
+        # wt.active
+        if [[ -n "$active_worktree" && "$wt_abs" == "$active_worktree" ]]; then
+          echo "wt.active"
+        fi
+
+        # wt.adopted
+        if declare -f wt_is_adopted >/dev/null 2>&1 && wt_is_adopted "$wt_abs" 2>/dev/null; then
+          echo "wt.adopted"
+        fi
+
+        # Verbose: dirty, ahead/behind
+        if [[ "$verbose" == true ]]; then
+          if wt_has_uncommitted_changes "$wt_abs"; then
+            echo "wt.dirty"
+          fi
+
+          if [[ "$is_detached" != true && -n "$branch" ]]; then
+            local short_branch="${branch#refs/heads/}"
+            local upstream
+            upstream="$(git -C "$wt_abs" rev-parse --abbrev-ref "@{upstream}" 2>/dev/null || true)"
+            if [[ -n "$upstream" ]]; then
+              local counts
+              counts="$(git -C "$wt_abs" rev-list --left-right --count "$short_branch...$upstream" 2>/dev/null || true)"
+              if [[ -n "$counts" ]]; then
+                local ahead behind
+                ahead="$(echo "$counts" | cut -f1)"
+                behind="$(echo "$counts" | cut -f2)"
+                [[ "$ahead" -gt 0 ]] && echo "wt.ahead $ahead"
+                [[ "$behind" -gt 0 ]] && echo "wt.behind $behind"
+              fi
+            fi
+          fi
+        fi
+
+        echo  # blank separator
+        in_entry=false
+      fi
+      continue
+    fi
+
+    case "$line" in
+      worktree\ *)
+        wt_path="${line#worktree }"
+        branch=""
+        is_detached=false
+        in_entry=true
+        echo "$line"
+        ;;
+      branch\ *)
+        branch="${line#branch }"
+        echo "$line"
+        ;;
+      detached)
+        is_detached=true
+        echo "$line"
+        ;;
+      *)
+        # Pass through HEAD, bare, locked, prunable, etc.
+        echo "$line"
+        ;;
+    esac
+  done < <(git -C "$main_repo_abs" worktree list --porcelain; echo)
+  # The trailing `echo` ensures the last entry's blank line is processed
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Worktree status helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
 # Check if a worktree has uncommitted changes
 # Usage: wt_has_uncommitted_changes <worktree-path>
 # Returns: 0 if uncommitted changes exist, 1 if clean
