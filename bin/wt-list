@@ -14,12 +14,13 @@
 #
 # Indicators:
 # -----------
-# *        = Currently linked worktree (symlink target)
-# [main]   = The main repository root
-# [linked] = This worktree is currently linked at WT_ACTIVE_WORKTREE
-# [dirty]  = Has uncommitted changes (only with -v)
-# [↑N]     = N commits ahead of upstream (only with -v)
-# [↓N]     = N commits behind upstream (only with -v)
+# *           = Currently linked worktree (symlink target)
+# [main]      = The main repository root
+# [linked]    = This worktree is currently linked at WT_ACTIVE_WORKTREE
+# [unadopted] = Worktree not adopted by wt (yellow; red if also linked)
+# [dirty]     = Has uncommitted changes (only with -v)
+# [↑N]        = N commits ahead of upstream (only with -v)
+# [↓N]        = N commits behind upstream (only with -v)
 #
 # Usage:
 #   wt-list           # Fast: shows path, branch, [main], [linked]
@@ -44,24 +45,33 @@ else
 fi
 wt_require_valid_config || exit 1
 
+# Source wt-adopt for adoption status checks
+wt_source wt-adopt
+
 usage() {
   cat <<EOF
-Usage: $(basename "$0") [-v|--verbose]
+Usage: $(basename "$0") [-v|--verbose] [--porcelain]
 
 List all git worktrees with status indicators.
 
 Options:
   -v, --verbose   Show dirty/ahead/behind status (slower)
+  --porcelain     Machine-readable output (augmented git worktree list --porcelain)
   -h, --help      Show this help message
 EOF
 }
 
 # Parse arguments
 VERBOSE=false
+PORCELAIN=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -v|--verbose)
       VERBOSE=true
+      shift
+      ;;
+    --porcelain)
+      PORCELAIN=true
       shift
       ;;
     -h|--help)
@@ -76,14 +86,30 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Show context banner if contexts are configured
-wt_show_context_banner
-
-# Validate main repo exists
+# Validate main repo exists (shared by both modes so porcelain doesn't
+# silently return an empty listing when the config points at a non-repo)
 if [[ ! -d "$WT_MAIN_REPO_ROOT" ]]; then
   error "WT_MAIN_REPO_ROOT does not exist: $WT_MAIN_REPO_ROOT"
   exit 1
 fi
+
+if ! git -C "$WT_MAIN_REPO_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  error "$WT_MAIN_REPO_ROOT is not a git repository or worktree."
+  exit 1
+fi
+
+# Porcelain mode: output augmented porcelain directly
+if [[ "$PORCELAIN" == true ]]; then
+  if [[ "$VERBOSE" == true ]]; then
+    wt_list_porcelain --verbose
+  else
+    wt_list_porcelain
+  fi
+  exit $?
+fi
+
+# Show context banner if contexts are configured
+wt_show_context_banner
 
 # Get absolute path of main repo (use pwd -P to resolve symlinks for consistent comparison)
 # Note: git worktree list stores physical paths, so we need to match that behavior
@@ -96,11 +122,6 @@ LINKED_WORKTREE="$(wt_get_linked_worktree)"
 (
   cd "$WT_MAIN_REPO_ROOT" || exit 1
 
-  if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    error "$WT_MAIN_REPO_ROOT is not a git repository or worktree."
-    exit 1
-  fi
-
   echo
 
   while IFS= read -r line; do
@@ -109,14 +130,34 @@ LINKED_WORKTREE="$(wt_get_linked_worktree)"
         wt="${line#worktree }"
         wt_abs="$(_wt_realpath "$wt")" || continue
 
-        # Determine prefix (linked indicator)
-        prefix="  "
+        # Check adoption status (skip for main repo — adoption doesn't apply)
+        is_linked=false
+        is_unadopted=false
         if [[ -n "$LINKED_WORKTREE" && "$wt_abs" == "$LINKED_WORKTREE" ]]; then
+          is_linked=true
+        fi
+        if [[ "$wt_abs" != "$MAIN_REPO_ABS" ]] && ! wt_is_adopted "$wt_abs" 2>/dev/null; then
+          is_unadopted=true
+        fi
+
+        # Determine prefix: * for linked, space otherwise
+        prefix="  "
+        if [[ "$is_linked" == true ]]; then
           prefix="${GREEN}*${NC} "
         fi
 
-        # Print with shared formatting
-        printf "%s%s\n" "$prefix" "$(wt_format_worktree "$wt_abs" "$MAIN_REPO_ABS" "$LINKED_WORKTREE" "$VERBOSE")"
+        # Build unadopted badge (red if also linked, yellow otherwise)
+        unadopted_badge=""
+        if [[ "$is_unadopted" == true ]]; then
+          if [[ "$is_linked" == true ]]; then
+            unadopted_badge="${RED}[unadopted]${NC} "
+          else
+            unadopted_badge="${YELLOW}[unadopted]${NC} "
+          fi
+        fi
+
+        # Print with shared formatting + unadopted badge
+        printf "%s%s%s\n" "$prefix" "$(wt_format_worktree "$wt_abs" "$MAIN_REPO_ABS" "$LINKED_WORKTREE" "$VERBOSE")" "$unadopted_badge"
         ;;
     esac
   done < <(git worktree list --porcelain)

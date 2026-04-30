@@ -163,6 +163,163 @@ teardown() {
 # Edge cases
 # =============================================================================
 
+# =============================================================================
+# Unadopted indicator tests
+# =============================================================================
+
+@test "wt-list shows [unadopted] for non-adopted worktree" {
+    create_branch "$REPO" "feature-raw"
+    local wt_path="$WT_WORKTREES_BASE/feature-raw"
+    create_worktree "$REPO" "$wt_path" "feature-raw"
+    # Worktree is NOT adopted — no wt_mark_adopted call
+
+    run "$TEST_HOME/.wt/bin/wt-list"
+    assert_success
+
+    local raw_line
+    raw_line=$(echo "$output" | grep "feature-raw" | head -1)
+    [[ "$raw_line" == *"[unadopted]"* ]] || fail "Expected [unadopted] on unadopted worktree line, got: $raw_line"
+}
+
+@test "wt-list does not show [unadopted] for adopted worktree" {
+    source "$TEST_HOME/.wt/lib/wt-adopt"
+
+    create_branch "$REPO" "feature-adopted"
+    local wt_path="$WT_WORKTREES_BASE/feature-adopted"
+    create_worktree "$REPO" "$wt_path" "feature-adopted"
+    local norm_wt_path
+    norm_wt_path="$(cd "$wt_path" && pwd -P)"
+    wt_mark_adopted "$norm_wt_path"
+
+    run "$TEST_HOME/.wt/bin/wt-list"
+    assert_success
+    refute_output --partial "[unadopted]"
+}
+
+@test "wt-list does not show [unadopted] for main repo" {
+    run "$TEST_HOME/.wt/bin/wt-list"
+    assert_success
+
+    local main_line
+    main_line=$(echo "$output" | grep -F "$REPO" | grep "\[main\]" | head -1)
+    [[ "$main_line" != *"[unadopted]"* ]] || fail "Main repo should not show [unadopted], got: $main_line"
+}
+
+@test "wt-list shows * prefix and [unadopted] for linked unadopted worktree" {
+    create_branch "$REPO" "feature-linked-raw"
+    local wt_path="$WT_WORKTREES_BASE/feature-linked-raw"
+    create_worktree "$REPO" "$wt_path" "feature-linked-raw"
+    local norm_wt_path
+    norm_wt_path="$(cd "$wt_path" && pwd -P)"
+
+    # Link but don't adopt
+    ln -s "$norm_wt_path" "$WT_ACTIVE_WORKTREE"
+
+    run "$TEST_HOME/.wt/bin/wt-list"
+    assert_success
+
+    local linked_line
+    linked_line=$(echo "$output" | grep "feature-linked-raw" | head -1)
+    [[ "$linked_line" == *"*"* ]] || fail "Expected * prefix on linked line, got: $linked_line"
+    [[ "$linked_line" == *"[linked]"* ]] || fail "Expected [linked] on linked line, got: $linked_line"
+    [[ "$linked_line" == *"[unadopted]"* ]] || fail "Expected [unadopted] on linked unadopted line, got: $linked_line"
+}
+
+# =============================================================================
+# Porcelain mode tests (--porcelain)
+# =============================================================================
+
+@test "wt-list --porcelain outputs worktree lines" {
+    run "$TEST_HOME/.wt/bin/wt-list" --porcelain
+    assert_success
+    assert_output --partial "worktree $REPO"
+    assert_output --partial "branch refs/heads/main"
+}
+
+@test "wt-list --porcelain includes wt.adopted for adopted worktrees" {
+    source "$TEST_HOME/.wt/lib/wt-adopt"
+
+    create_branch "$REPO" "feature-adopted"
+    local wt_path="$WT_WORKTREES_BASE/feature-adopted"
+    create_worktree "$REPO" "$wt_path" "feature-adopted"
+    local norm_wt_path
+    norm_wt_path="$(cd "$wt_path" && pwd -P)"
+    wt_mark_adopted "$norm_wt_path"
+
+    run "$TEST_HOME/.wt/bin/wt-list" --porcelain
+    assert_success
+    assert_output --partial "wt.adopted"
+}
+
+@test "wt-list --porcelain includes wt.active when active symlink exists" {
+    create_branch "$REPO" "feature-active"
+    local wt_path="$WT_WORKTREES_BASE/feature-active"
+    create_worktree "$REPO" "$wt_path" "feature-active"
+    local norm_wt_path
+    norm_wt_path="$(cd "$wt_path" && pwd -P)"
+
+    ln -s "$norm_wt_path" "$WT_ACTIVE_WORKTREE"
+
+    run "$TEST_HOME/.wt/bin/wt-list" --porcelain
+    assert_success
+    assert_output --partial "wt.active"
+}
+
+@test "wt-list --porcelain does not include color codes" {
+    run "$TEST_HOME/.wt/bin/wt-list" --porcelain
+    assert_success
+
+    # ANSI escape codes start with \033[ or \e[
+    if echo "$output" | grep -qP '\033\['; then
+        fail "Porcelain output should not contain ANSI color codes"
+    fi
+}
+
+@test "wt-list --porcelain -v includes wt.dirty for dirty worktree" {
+    make_repo_dirty "$REPO"
+
+    run "$TEST_HOME/.wt/bin/wt-list" --porcelain -v
+    assert_success
+    assert_output --partial "wt.dirty"
+}
+
+@test "wt-list --porcelain -v does not include wt.dirty for clean worktree" {
+    run "$TEST_HOME/.wt/bin/wt-list" --porcelain -v
+    assert_success
+    refute_output --partial "wt.dirty"
+}
+
+@test "wt-list --porcelain shows --porcelain in help" {
+    run "$TEST_HOME/.wt/bin/wt-list" -h
+    assert_success
+    assert_output --partial "--porcelain"
+}
+
+@test "wt-list --porcelain errors when WT_MAIN_REPO_ROOT does not exist" {
+    rm -f "$TEST_HOME/.wt/current"
+    export WT_MAIN_REPO_ROOT="/nonexistent/path"
+
+    run "$TEST_HOME/.wt/bin/wt-list" --porcelain
+    assert_failure
+    assert_output --partial "does not exist"
+}
+
+@test "wt-list --porcelain errors when WT_MAIN_REPO_ROOT is not a git repo" {
+    local not_git="$BATS_TEST_TMPDIR/not-a-git-repo"
+    mkdir -p "$not_git"
+
+    rm -f "$TEST_HOME/.wt/current"
+    export WT_MAIN_REPO_ROOT="$not_git"
+
+    run "$TEST_HOME/.wt/bin/wt-list" --porcelain
+    assert_failure
+    assert_output --partial "not a git"
+}
+
+# =============================================================================
+# Edge cases
+# =============================================================================
+
 @test "wt-list handles worktree with special characters in path" {
     # Create a branch and worktree with spaces in directory name
     create_branch "$REPO" "feature-spaces"
