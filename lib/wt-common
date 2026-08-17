@@ -714,6 +714,13 @@ wt_worktree_branch_list() {
   done < <(git -C "$WT_MAIN_REPO_ROOT" worktree list --porcelain 2>/dev/null)
 }
 
+# List absolute paths of all registered worktrees (including the main repo).
+# Usage: _wt_worktree_list
+# Outputs: one worktree path per line to stdout
+_wt_worktree_list() {
+  git -C "${WT_MAIN_REPO_ROOT:-.}" worktree list --porcelain 2>/dev/null | sed -n 's/^worktree //p'
+}
+
 # Get the currently linked worktree path (resolves symlink)
 # Usage: wt_get_linked_worktree
 # Outputs: absolute physical path to linked worktree, or empty if none
