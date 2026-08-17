@@ -131,6 +131,64 @@ _wt_normalize_conf_value() {
   printf '%s\n' "$value"
 }
 
+# Read a single key's value from a .conf file (first match wins).
+# Usage: wt_conf_get <conf-file> <KEY>
+# Outputs: normalized value to stdout (nothing if file or key is missing)
+wt_conf_get() {
+  local conf_file="$1"
+  local key="$2"
+
+  [[ -f "$conf_file" ]] || return 0
+
+  local line
+  line="$(grep -E "^${key}=" "$conf_file" 2>/dev/null | head -1)" || true
+  [[ -z "$line" ]] && return 0
+
+  _wt_normalize_conf_value "${line#*=}"
+}
+
+# Get the directory where context config files are stored
+# Returns: ~/.wt/repos
+wt_get_repos_dir() {
+  echo "$HOME/.wt/repos"
+}
+
+# Get the path to the current context file
+# Returns: ~/.wt/current
+wt_get_current_file() {
+  echo "$HOME/.wt/current"
+}
+
+# List all available contexts (repo names)
+# Outputs: one context name per line
+#
+# Enumerates via find instead of a glob: this function runs in zsh
+# (completions), where an unmatched glob aborts under default nomatch.
+wt_list_contexts() {
+  local repos_dir
+  repos_dir="$(wt_get_repos_dir)"
+
+  [[ -d "$repos_dir" ]] || return 0
+
+  local conf name
+  while IFS= read -r conf; do
+    [[ -f "$conf" ]] || continue
+    name="${conf##*/}"
+    printf '%s\n' "${name%.conf}"
+  done < <(find "$repos_dir" -maxdepth 1 -name '*.conf' 2>/dev/null | sort)
+}
+
+# Get the current context name
+# Returns: context name, or empty string if not set
+wt_get_current_context() {
+  local current_file
+  current_file="$(wt_get_current_file)"
+
+  if [[ -f "$current_file" ]]; then
+    head -1 "$current_file" | tr -d '[:space:]'
+  fi
+}
+
 # Parse context config file into shell variables (no sourcing)
 # Only sets variables that aren't already set in the environment.
 #
@@ -213,17 +271,16 @@ wt_read_git_config() {
   local gc_active_worktree="" gc_base_branch="" gc_metadata_patterns="" gc_context_name=""
   local has_any=false
 
-  local key value line lkey
+  local key value line
   while IFS= read -r line; do
     [[ -z "$line" ]] && continue
     key="${line%% *}"
     value="${line#* }"
     has_any=true
 
-    # git config keys are case-insensitive; lowercase for matching
-    # (use tr for bash 3.2 compatibility — ${key,,} requires bash 4.0+)
-    lkey="$(printf '%s' "$key" | tr '[:upper:]' '[:lower:]')"
-    case "$lkey" in
+    # git config --get-regexp prints key names lowercased (wt.* keys have
+    # no case-preserving subsection), so match the raw key directly
+    case "$key" in
       wt.worktreesbase)     gc_worktrees_base="$value" ;;
       wt.ideafilesbase)     gc_idea_files_base="$value" ;;
       wt.activeworktree)    gc_active_worktree="$value" ;;
@@ -485,6 +542,52 @@ _wt_prune_nested_paths() {
   done <<< "$sorted"
 }
 
+# Build OR'd `find -name` arguments for a space-separated pattern list into
+# the global array _WT_METADATA_FIND_NAMES (bash 3.2 cannot return arrays).
+# Args: $1 = space-separated patterns
+_wt_metadata_find_names() {
+  _WT_METADATA_FIND_NAMES=()
+  local pattern
+  for pattern in $1; do
+    if [[ ${#_WT_METADATA_FIND_NAMES[@]} -gt 0 ]]; then
+      _WT_METADATA_FIND_NAMES+=(-o)
+    fi
+    _WT_METADATA_FIND_NAMES+=(-name "$pattern")
+  done
+}
+
+# Find metadata entries matching WT_METADATA_PATTERNS under a root directory.
+# One find traversal with OR'd -name clauses covers all patterns; matches
+# both directories and files (e.g. a root-level .bazelproject file); nested
+# matches are pruned so only the outermost path per subtree is emitted.
+# Scans at most 5 levels deep — the vault mirrors the repo layout, so the
+# same depth policy applies to both sides of the export/import round-trip.
+# Usage: wt_find_metadata_dirs <root> [--follow]
+#   --follow — follow symlinks (for vault scans, where entries are symlinks)
+# Outputs: one absolute path per line
+wt_find_metadata_dirs() {
+  local root="" follow=false arg
+  for arg in "$@"; do
+    case "$arg" in
+      --follow) follow=true ;;
+      *) root="$arg" ;;
+    esac
+  done
+
+  [[ -n "$root" && -d "$root" ]] || return 0
+
+  _wt_metadata_find_names "${WT_METADATA_PATTERNS:-}"
+  [[ ${#_WT_METADATA_FIND_NAMES[@]} -eq 0 ]] && return 0
+
+  if [[ "$follow" == true ]]; then
+    find -L "$root" -maxdepth 5 \( -type l -o -type d -o -type f \) \
+      \( "${_WT_METADATA_FIND_NAMES[@]}" \) 2>/dev/null | _wt_prune_nested_paths
+  else
+    find "$root" -maxdepth 5 \( -type d -o -type f \) \
+      \( "${_WT_METADATA_FIND_NAMES[@]}" \) 2>/dev/null | _wt_prune_nested_paths
+  fi
+}
+
 # md5 hex digest of a string (the string itself, not a file at that path).
 # Args: $1 = string to hash
 # Outputs: 32-char hex digest to stdout
@@ -659,15 +762,11 @@ wt_show_context_banner() {
 
 # Source a library script from lib/ directory
 # Usage: wt_source <script_name>
-# Requires LIB_DIR to be set by the calling script (usually SCRIPT_DIR/../lib)
+# Uses LIB_DIR when set by the calling script (usually SCRIPT_DIR/../lib),
+# falling back to ~/.wt/lib otherwise
 wt_source() {
   local script="$1"
-  local lib_dir="${LIB_DIR:-}"
-
-  if [[ -z "$lib_dir" ]]; then
-    echo "Error: LIB_DIR not set before calling wt_source" >&2
-    return 1
-  fi
+  local lib_dir="${LIB_DIR:-$HOME/.wt/lib}"
 
   if [[ -f "$lib_dir/$script" ]]; then
     . "$lib_dir/$script"
@@ -675,6 +774,27 @@ wt_source() {
     . "$HOME/.wt/lib/$script"
   else
     echo "Error: Cannot find $script in $lib_dir or ~/.wt/lib/" >&2
+    return 1
+  fi
+}
+
+# Locate a wt executable by name.
+# Search order: $SCRIPT_DIR, $BIN_DIR, ~/.wt/bin, then PATH.
+# Usage: wt_find_bin <name>
+# Outputs: executable path (or bare name if resolved via PATH) to stdout
+# Returns: 0 if found, 1 if not
+wt_find_bin() {
+  local name="$1"
+
+  if [[ -n "${SCRIPT_DIR:-}" && -x "$SCRIPT_DIR/$name" ]]; then
+    printf '%s\n' "$SCRIPT_DIR/$name"
+  elif [[ -n "${BIN_DIR:-}" && -x "$BIN_DIR/$name" ]]; then
+    printf '%s\n' "$BIN_DIR/$name"
+  elif [[ -x "$HOME/.wt/bin/$name" ]]; then
+    printf '%s\n' "$HOME/.wt/bin/$name"
+  elif command -v "$name" >/dev/null 2>&1; then
+    printf '%s\n' "$name"
+  else
     return 1
   fi
 }
@@ -951,8 +1071,7 @@ wt_status_probe() {
       counts="$(git --no-optional-locks -C "$wt_abs" rev-list --left-right --count "$branch...$upstream" 2>/dev/null || true)"
       if [[ -n "$counts" ]]; then
         local ahead behind
-        ahead="$(echo "$counts" | cut -f1)"
-        behind="$(echo "$counts" | cut -f2)"
+        IFS=$'\t' read -r ahead behind <<< "$counts"
         [[ "$ahead" -gt 0 ]] && echo "ahead $ahead"
         [[ "$behind" -gt 0 ]] && echo "behind $behind"
       fi

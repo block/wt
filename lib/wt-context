@@ -24,50 +24,53 @@
 # Path helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Get the directory where context config files are stored
-# Returns: ~/.wt/repos
-wt_get_repos_dir() {
-  echo "$HOME/.wt/repos"
-}
+# wt_get_repos_dir, wt_get_current_file, wt_list_contexts, and
+# wt_get_current_context are defined canonically in lib/wt-common (so
+# completions can use them without sourcing this file). The guarded stubs
+# below only cover sourcing this file without wt-common.
 
-# Get the path to the current context file
-# Returns: ~/.wt/current
-wt_get_current_file() {
-  echo "$HOME/.wt/current"
-}
+if ! declare -f wt_get_repos_dir >/dev/null 2>&1; then
+  wt_get_repos_dir() {
+    echo "$HOME/.wt/repos"
+  }
+fi
+
+if ! declare -f wt_get_current_file >/dev/null 2>&1; then
+  wt_get_current_file() {
+    echo "$HOME/.wt/current"
+  }
+fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Context listing and querying
 # ─────────────────────────────────────────────────────────────────────────────
 
-# List all available contexts (repo names)
-# Outputs: one context name per line
-wt_list_contexts() {
-  local repos_dir
-  repos_dir="$(wt_get_repos_dir)"
+if ! declare -f wt_list_contexts >/dev/null 2>&1; then
+  wt_list_contexts() {
+    local repos_dir
+    repos_dir="$(wt_get_repos_dir)"
 
-  if [[ ! -d "$repos_dir" ]]; then
-    return 0
-  fi
+    [[ -d "$repos_dir" ]] || return 0
 
-  for conf in "$repos_dir"/*.conf; do
-    [[ -f "$conf" ]] || continue
-    local name
-    name="$(basename "$conf" .conf)"
-    echo "$name"
-  done
-}
+    local conf name
+    while IFS= read -r conf; do
+      [[ -f "$conf" ]] || continue
+      name="${conf##*/}"
+      printf '%s\n' "${name%.conf}"
+    done < <(find "$repos_dir" -maxdepth 1 -name '*.conf' 2>/dev/null | sort)
+  }
+fi
 
-# Get the current context name
-# Returns: context name, or empty string if not set
-wt_get_current_context() {
-  local current_file
-  current_file="$(wt_get_current_file)"
+if ! declare -f wt_get_current_context >/dev/null 2>&1; then
+  wt_get_current_context() {
+    local current_file
+    current_file="$(wt_get_current_file)"
 
-  if [[ -f "$current_file" ]]; then
-    head -1 "$current_file" | tr -d '[:space:]'
-  fi
-}
+    if [[ -f "$current_file" ]]; then
+      head -1 "$current_file" | tr -d '[:space:]'
+    fi
+  }
+fi
 
 # Check if a context exists
 # Args: $1 = context name
@@ -98,9 +101,7 @@ wt_get_context_repo_root() {
   local config_path
   config_path="$(wt_get_context_config_path "$name")"
 
-  if [[ -f "$config_path" ]]; then
-    grep -E '^WT_MAIN_REPO_ROOT=' "$config_path" 2>/dev/null | cut -d'"' -f2
-  fi
+  wt_conf_get "$config_path" WT_MAIN_REPO_ROOT
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -135,27 +136,18 @@ wt_set_current_context() {
 # Displays a numbered menu and returns the selected context name
 # All UI output goes to stderr, selection to stdout
 select_context() {
-  local repos_dir current_context
-  repos_dir="$(wt_get_repos_dir)"
+  local current_context
   current_context="$(wt_get_current_context)"
-
-  if [[ ! -d "$repos_dir" ]] || ! compgen -G "$repos_dir/*.conf" >/dev/null 2>&1; then
-    echoerr "No contexts configured."
-    echoerr "Run 'wt context add' to add a repository."
-    return 1
-  fi
 
   local -a contexts=()
   local -a paths=()
 
-  for conf in "$repos_dir"/*.conf; do
-    [[ -f "$conf" ]] || continue
-    local name path
-    name="$(basename "$conf" .conf)"
-    path="$(wt_get_context_repo_root "$name")"
+  local name
+  while IFS= read -r name; do
+    [[ -z "$name" ]] && continue
     contexts+=("$name")
-    paths+=("$path")
-  done
+    paths+=("$(wt_get_context_repo_root "$name")")
+  done < <(wt_list_contexts)
 
   if [[ ${#contexts[@]} -eq 0 ]]; then
     echoerr "No contexts configured."

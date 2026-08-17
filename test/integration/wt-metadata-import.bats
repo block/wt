@@ -294,3 +294,20 @@ teardown() {
     # Output should NOT show a separate .idea import for the nested dir
     refute_output --partial "myproject/.ijwb/.idea"
 }
+
+# =============================================================================
+# File-entry import (vault symlink to a file, e.g. root .bazelproject)
+# =============================================================================
+
+@test "wt-metadata-import imports a file entry from the vault" {
+    sed -i.bak2 's/WT_METADATA_PATTERNS=".idea"/WT_METADATA_PATTERNS=".bazelproject"/' "$TEST_HOME/.wt/repos/test.conf"
+    echo "directories: ." > "$REPO/.bazelproject"
+    ln -s "$REPO/.bazelproject" "$WT_IDEA_FILES_BASE/.bazelproject"
+
+    run "$TEST_HOME/.wt/bin/wt-metadata-import" -y "$WORKTREE"
+    assert_success
+
+    assert [ -f "$WORKTREE/.bazelproject" ]
+    assert [ ! -L "$WORKTREE/.bazelproject" ]
+    assert_equal "$(cat "$WORKTREE/.bazelproject")" "directories: ."
+}

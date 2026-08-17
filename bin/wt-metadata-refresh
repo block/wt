@@ -29,7 +29,7 @@
 #
 # Cron Setup:
 #   # Run nightly at 2am with full shell environment, log output
-#   0 2 * * * /bin/zsh -lc '~/.wt/lib/wt-metadata-refresh' >> ~/.wt/logs/metadata-refresh.log 2>&1
+#   0 2 * * * /bin/zsh -lc '~/.wt/bin/wt-metadata-refresh' >> ~/.wt/logs/metadata-refresh.log 2>&1
 #
 # Note:
 #   The bazel query approach may include more targets than IntelliJ's native sync
@@ -39,21 +39,11 @@
 
 set -euo pipefail
 
-# Resolve script, lib, and bin directories
-# Note: This script lives in lib/, so LIB_DIR is the same as SCRIPT_DIR
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LIB_DIR="$SCRIPT_DIR"
-BIN_DIR="$SCRIPT_DIR/../bin"
-
-# Bootstrap: source wt-common from lib/
-if [[ -f "$LIB_DIR/wt-common" ]]; then
-  . "$LIB_DIR/wt-common"
-elif [[ -f "$HOME/.wt/lib/wt-common" ]]; then
-  . "$HOME/.wt/lib/wt-common"
-else
-  echo "Error: Cannot find wt-common" >&2
-  exit 1
-fi
+LIB_DIR="$SCRIPT_DIR/../lib"
+[[ -f "$LIB_DIR/wt-common" ]] || LIB_DIR="$HOME/.wt/lib"
+[[ -f "$LIB_DIR/wt-common" ]] || { echo "Error: Cannot find wt-common" >&2; exit 1; }
+. "$LIB_DIR/wt-common"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Configuration
@@ -363,13 +353,8 @@ do_export() {
   log "Re-exporting all metadata directories to vault..."
   log "Patterns: ${WT_METADATA_PATTERNS:-"(none)"}"
 
-  # Find wt-metadata-export: try bin directory first, then PATH
   local metadata_export=""
-  if [[ -x "$BIN_DIR/wt-metadata-export" ]]; then
-    metadata_export="$BIN_DIR/wt-metadata-export"
-  elif command -v wt-metadata-export >/dev/null 2>&1; then
-    metadata_export="wt-metadata-export"
-  else
+  if ! metadata_export="$(wt_find_bin wt-metadata-export)"; then
     error "Cannot find wt-metadata-export"
     return 1
   fi

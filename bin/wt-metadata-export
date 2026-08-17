@@ -17,11 +17,11 @@
 # Behavior:
 # ---------
 # 1. Accepts a <source-directory> and <target-directory>.
-# 2. For each pattern in WT_METADATA_PATTERNS:
-#    - Recursively finds all matching directories under the source
+# 2. Scans the source once for all WT_METADATA_PATTERNS entries
+#    (directories and files), then for each match:
 #    - Computes the relative path from the source root
 #    - Recreates that directory structure under the target
-#    - Creates symbolic links to the source directories
+#    - Creates symbolic links to the source entries
 #
 # Usage:
 #   wt-metadata-export                              # Use defaults from env vars
@@ -34,19 +34,11 @@
 
 set -euo pipefail
 
-# Resolve script and lib directories
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB_DIR="$SCRIPT_DIR/../lib"
-
-# Bootstrap: source wt-common from lib/
-if [[ -f "$LIB_DIR/wt-common" ]]; then
-  . "$LIB_DIR/wt-common"
-elif [[ -f "$HOME/.wt/lib/wt-common" ]]; then
-  . "$HOME/.wt/lib/wt-common"
-else
-  echo "Error: Cannot find wt-common" >&2
-  exit 1
-fi
+[[ -f "$LIB_DIR/wt-common" ]] || LIB_DIR="$HOME/.wt/lib"
+[[ -f "$LIB_DIR/wt-common" ]] || { echo "Error: Cannot find wt-common" >&2; exit 1; }
+. "$LIB_DIR/wt-common"
 wt_require_valid_config || exit 1
 
 usage() {
@@ -154,34 +146,14 @@ if [[ "$SKIP_CONFIRM" != "true" ]]; then
   echo
 fi
 
-# Find all metadata directories and prune nested paths
-# Outputs: one path per line, with nested paths removed
-# (e.g., if .ijwb contains .idea, only .ijwb is listed)
-find_all_metadata_dirs() {
-  local all_paths=()
-
-  for pattern in $WT_METADATA_PATTERNS; do
-    while IFS= read -r _entry_path; do
-      [[ -n "$_entry_path" ]] && all_paths+=("$_entry_path")
-    done < <(find "$SOURCE_DIR" -maxdepth 5 -type d -name "$pattern" 2>/dev/null)
-  done
-
-  if [[ ${#all_paths[@]} -eq 0 ]]; then
-    return
-  fi
-
-  printf '%s\n' "${all_paths[@]}" | _wt_prune_nested_paths
-}
-
 echo "Finding and deduplicating metadata directories..."
 echo
 
 # Clean up existing symlinks in vault for all patterns
-for pattern in $WT_METADATA_PATTERNS; do
-  find "$TARGET_DIR" -type l -name "$pattern" -print0 2>/dev/null | while IFS= read -r -d '' OLD_LINK; do
-    rm -f "$OLD_LINK"
-  done
-done
+_wt_metadata_find_names "$WT_METADATA_PATTERNS"
+if [[ ${#_WT_METADATA_FIND_NAMES[@]} -gt 0 ]]; then
+  find "$TARGET_DIR" -type l \( "${_WT_METADATA_FIND_NAMES[@]}" \) -delete 2>/dev/null || true
+fi
 
 # Find all metadata dirs (deduplicated) and export them
 count=0
@@ -221,7 +193,7 @@ while IFS= read -r META_DIR; do
   ln -sfn "$META_DIR" "$DEST_META"
 
   count=$((count + 1))
-done < <(find_all_metadata_dirs)
+done < <(wt_find_metadata_dirs "$SOURCE_DIR")
 
 if [[ $count -eq 0 ]]; then
   echo "  (no metadata directories found)"

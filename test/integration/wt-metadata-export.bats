@@ -216,3 +216,37 @@ teardown() {
     assert_failure
     assert_output --partial "does not exist"
 }
+
+# =============================================================================
+# File-entry export (root-level .bazelproject file)
+# =============================================================================
+
+@test "wt-metadata-export exports a root-level metadata file" {
+    sed -i.bak 's/WT_METADATA_PATTERNS=""/WT_METADATA_PATTERNS=".bazelproject"/' "$TEST_HOME/.wt/repos/test.conf"
+    echo "directories: ." > "$REPO/.bazelproject"
+
+    run "$TEST_HOME/.wt/bin/wt-metadata-export" -y
+    assert_success
+
+    assert [ -L "$WT_IDEA_FILES_BASE/.bazelproject" ]
+    assert_equal "$(readlink "$WT_IDEA_FILES_BASE/.bazelproject")" "$REPO/.bazelproject"
+    assert_equal "$(cat "$WT_IDEA_FILES_BASE/.bazelproject")" "directories: ."
+}
+
+@test "wt-metadata-export cleans up stale vault symlinks across patterns" {
+    sed -i.bak 's/WT_METADATA_PATTERNS=""/WT_METADATA_PATTERNS=".idea .ijwb"/' "$TEST_HOME/.wt/repos/test.conf"
+    create_metadata_dirs "$REPO" ".idea"
+
+    # Stale symlinks in the vault for both patterns (targets no longer exist)
+    ln -s "$REPO/gone/.idea" "$WT_IDEA_FILES_BASE/.idea"
+    ln -s "$REPO/gone/.ijwb" "$WT_IDEA_FILES_BASE/.ijwb"
+
+    run "$TEST_HOME/.wt/bin/wt-metadata-export" -y
+    assert_success
+
+    # .idea re-linked to the live source; stale .ijwb link removed
+    assert [ -L "$WT_IDEA_FILES_BASE/.idea" ]
+    assert_equal "$(readlink "$WT_IDEA_FILES_BASE/.idea")" "$REPO/.idea"
+    assert [ ! -e "$WT_IDEA_FILES_BASE/.ijwb" ]
+    assert [ ! -L "$WT_IDEA_FILES_BASE/.ijwb" ]
+}
