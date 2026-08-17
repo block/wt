@@ -226,6 +226,67 @@ teardown() {
 }
 
 # =============================================================================
+# Missing worktree tests
+# =============================================================================
+
+@test "wt-list shows [missing] for registered worktree whose directory was deleted" {
+    create_branch "$REPO" "feature-gone"
+    local wt_path="$WT_WORKTREES_BASE/feature-gone"
+    create_worktree "$REPO" "$wt_path" "feature-gone"
+    rm -rf "$wt_path"
+
+    run "$TEST_HOME/.wt/bin/wt-list"
+    assert_success
+
+    local missing_line
+    missing_line=$(echo "$output" | grep "feature-gone" | head -1)
+    [[ -n "$missing_line" ]] || fail "Expected missing worktree in output, got: $output"
+    [[ "$missing_line" == *"[missing]"* ]] || fail "Expected [missing] on missing worktree line, got: $missing_line"
+}
+
+@test "wt-list does not show [missing] for existing worktrees" {
+    create_branch "$REPO" "feature-present"
+    local wt_path="$WT_WORKTREES_BASE/feature-present"
+    create_worktree "$REPO" "$wt_path" "feature-present"
+
+    run "$TEST_HOME/.wt/bin/wt-list"
+    assert_success
+    refute_output --partial "[missing]"
+}
+
+# =============================================================================
+# Dangling active symlink tests
+# =============================================================================
+
+@test "wt-list warns when active symlink is dangling" {
+    create_branch "$REPO" "feature-dangle"
+    local wt_path="$WT_WORKTREES_BASE/feature-dangle"
+    create_worktree "$REPO" "$wt_path" "feature-dangle"
+    local norm_wt_path
+    norm_wt_path="$(cd "$wt_path" && pwd -P)"
+    ln -s "$norm_wt_path" "$WT_ACTIVE_WORKTREE"
+
+    # Remove the worktree behind wt's back (raw git usage)
+    git -C "$REPO" worktree remove --force "$norm_wt_path" >/dev/null 2>&1
+
+    run "$TEST_HOME/.wt/bin/wt-list"
+    assert_success
+    assert_output --partial "dangling"
+    assert_output --partial "wt switch"
+}
+
+@test "wt-list does not warn about dangling symlink when link target exists" {
+    create_branch "$REPO" "feature-alive"
+    local wt_path="$WT_WORKTREES_BASE/feature-alive"
+    create_worktree "$REPO" "$wt_path" "feature-alive"
+    ln -s "$(cd "$wt_path" && pwd -P)" "$WT_ACTIVE_WORKTREE"
+
+    run "$TEST_HOME/.wt/bin/wt-list"
+    assert_success
+    refute_output --partial "dangling"
+}
+
+# =============================================================================
 # Porcelain mode tests (--porcelain)
 # =============================================================================
 

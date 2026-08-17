@@ -370,6 +370,46 @@ create_removable_worktree() {
 }
 
 # =============================================================================
+# Stale (registered-but-missing) worktree tests
+# =============================================================================
+
+@test "wt-remove -y removes stale registration when branch's worktree directory is missing" {
+    local wt_path
+    wt_path=$(create_removable_worktree "stale-branch")
+    rm -rf "$wt_path"
+
+    run "$TEST_HOME/.wt/bin/wt-remove" -y "stale-branch"
+    assert_success
+    assert_output --partial "missing"
+    assert_output --partial "Stale worktree registration removed"
+
+    # Registration is gone — the branch is no longer considered checked out
+    run git -C "$REPO" worktree list
+    refute_output --partial "stale-branch"
+}
+
+@test "wt-remove -y removes stale registration by worktree path" {
+    local wt_path
+    wt_path=$(create_removable_worktree "stale-path")
+    local norm_wt_path
+    norm_wt_path="$(cd "$wt_path" && pwd -P)"
+    rm -rf "$wt_path"
+
+    run "$TEST_HOME/.wt/bin/wt-remove" -y "$norm_wt_path"
+    assert_success
+    assert_output --partial "Stale worktree registration removed"
+
+    run git -C "$REPO" worktree list
+    refute_output --partial "stale-path"
+}
+
+@test "wt-remove still fails for paths that were never worktrees" {
+    run "$TEST_HOME/.wt/bin/wt-remove" -y "/nonexistent/never/a/worktree"
+    assert_failure
+    assert_output --partial "not found"
+}
+
+# =============================================================================
 # Squash-merge detection tests
 # =============================================================================
 
