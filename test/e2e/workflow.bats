@@ -156,6 +156,11 @@ teardown() {
 
     # Load and verify variables
     source "$TEST_HOME/.wt/lib/wt-common"
+    # Exported WT_* vars are user overrides that survive --force reloads;
+    # drop the fixture exports from load_test_context so the reload
+    # reflects the newly selected context
+    unset WT_MAIN_REPO_ROOT WT_WORKTREES_BASE WT_IDEA_FILES_BASE \
+          WT_ACTIVE_WORKTREE WT_BASE_BRANCH WT_METADATA_PATTERNS WT_CONTEXT_NAME
     wt_read_config --mode=context --force
     assert_equal "$WT_MAIN_REPO_ROOT" "$REPO2"
 

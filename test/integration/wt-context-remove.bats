@@ -80,6 +80,29 @@ teardown() {
     assert_failure
 }
 
+@test "remove parses .conf values with trailing whitespace and inline comments" {
+    create_test_context "messy-conf" "$REPO1"
+
+    # Simulate a hand-edited .conf: trailing whitespace and inline comments
+    local conf="$TEST_HOME/.wt/repos/messy-conf.conf"
+    {
+        printf 'WT_MAIN_REPO_ROOT="%s"   \n' "$REPO1"
+        printf 'WT_WORKTREES_BASE="%s"  # created by wt\n' "$TEST_HOME/.wt/repos/messy-conf/worktrees"
+        printf 'WT_ACTIVE_WORKTREE="%s" \n' "$TEST_HOME/active"
+        printf 'WT_IDEA_FILES_BASE="%s"\n' "$TEST_HOME/.wt/repos/messy-conf/idea-files"
+        printf 'WT_BASE_BRANCH="main"\n'
+    } > "$conf"
+
+    set_wt_git_config "$REPO1" "wt.enabled" "true" "wt.contextName" "messy-conf"
+
+    run "$TEST_HOME/.wt/bin/wt-context" remove -y "messy-conf"
+    assert_success
+
+    # Git config cleanup only happens when the parsed repo_root is clean
+    run git -C "$REPO1" config --local --get wt.enabled
+    assert_failure
+}
+
 # =============================================================================
 # ~/.wt/current handling tests
 # =============================================================================

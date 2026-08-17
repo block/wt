@@ -38,6 +38,18 @@ teardown() {
     assert_output --partial "Usage:"
 }
 
+@test "wt with no arguments prints help under set -u" {
+    cp "$PROJECT_ROOT/wt.sh" "$TEST_HOME/.wt/wt.sh"
+
+    run bash -c '
+        set -u
+        source "$HOME/.wt/wt.sh"
+        wt
+    '
+    assert_success
+    assert_output --partial "Unified Worktree Toolkit"
+}
+
 @test "_WT_ROOT default in wt.sh matches INSTALL_DIR in install.sh" {
     # Extract the default path from wt.sh: _WT_ROOT="${_WT_ROOT:-$HOME/.wt}"
     local wt_line

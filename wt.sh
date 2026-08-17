@@ -107,7 +107,7 @@ __wt_do_remove() {
 
 # main wt command
 wt() {
-  local cmd="$1"
+  local cmd="${1:-}"
   shift 2>/dev/null || true
 
   case "$cmd" in

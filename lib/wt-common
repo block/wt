@@ -69,17 +69,51 @@ _wt_resolve_parent() {
   printf '%s/%s\n' "$dir" "$base"
 }
 
+# Check whether a variable carries the export attribute (bash and zsh)
+_wt_var_is_exported() {
+  local decl flags
+  decl="$(declare -p "$1" 2>/dev/null)" || return 1
+  case "$decl" in
+    "export "*) return 0 ;;
+    "declare -"* | "typeset -"*)
+      flags="${decl#* -}"
+      flags="${flags%% *}"
+      [[ "$flags" == *x* ]] && return 0
+      ;;
+  esac
+  return 1
+}
+
 # Clear all WT_* config variables to allow fresh reload
 # Used before wt_read_config() when we need to pick up context changes
 # in the current shell (e.g., completions, help)
+#
+# Config loaders assign values without exporting, so a WT_* variable with
+# the export attribute is a user-set override and must survive the reload.
 wt_clear_config_vars() {
-  unset WT_MAIN_REPO_ROOT
-  unset WT_WORKTREES_BASE
-  unset WT_IDEA_FILES_BASE
-  unset WT_ACTIVE_WORKTREE
-  unset WT_BASE_BRANCH
-  unset WT_METADATA_PATTERNS
-  unset WT_CONTEXT_NAME
+  local var
+  for var in WT_MAIN_REPO_ROOT WT_WORKTREES_BASE WT_IDEA_FILES_BASE \
+             WT_ACTIVE_WORKTREE WT_BASE_BRANCH WT_METADATA_PATTERNS \
+             WT_CONTEXT_NAME; do
+    _wt_var_is_exported "$var" || unset "$var"
+  done
+}
+
+# Normalize a raw value parsed from a .conf line: trim surrounding
+# whitespace, strip surrounding quotes, and drop anything after the
+# closing quote of a quoted value (e.g. a trailing inline comment).
+_wt_normalize_conf_value() {
+  local value="$1"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  if [[ "$value" == \"*\"* ]]; then
+    value="${value#\"}"
+    value="${value%%\"*}"
+  else
+    value="${value#\"}"
+    value="${value%\"}"
+  fi
+  printf '%s\n' "$value"
 }
 
 # Parse context config file into shell variables (no sourcing)
@@ -112,9 +146,7 @@ wt_read_context_config() {
   while IFS='=' read -r key value; do
     # Skip empty lines and comments
     [[ -z "$key" || "$key" =~ ^[[:space:]]*# ]] && continue
-    # Strip quotes from value
-    value="${value#\"}"
-    value="${value%\"}"
+    value="$(_wt_normalize_conf_value "$value")"
     # Only set if not already set in environment (allows env override)
     # Use eval with proper escaping for both bash and zsh compatibility
     eval "current_val=\"\${$key:-}\""
@@ -243,7 +275,7 @@ wt_read_config() {
     wt_clear_config_vars
   fi
 
-  local rc_git=0 rc_ctx=0
+  local rc=0 rc_git=0 rc_ctx=0
 
   case "$mode" in
     ordered)
@@ -251,43 +283,54 @@ wt_read_config() {
       wt_read_context_config 2>/dev/null || rc_ctx=$?
       # Fail only if both sources failed
       if [[ $rc_git -ne 0 && $rc_ctx -ne 0 ]]; then
-        return 1
+        rc=1
       fi
       ;;
     git)
-      wt_read_git_config
+      wt_read_git_config || rc=$?
       ;;
     context)
-      wt_read_context_config
+      wt_read_context_config || rc=$?
       ;;
   esac
+
+  # A forced reload cleared the variables, so restore the fallback defaults
+  # for anything the config sources did not set (matches source-time state)
+  if [[ "$force" == true ]]; then
+    wt_apply_default_config
+  fi
+
+  return $rc
+}
+
+# Fallback defaults (used when no context is configured or config missing values)
+# These provide backward compatibility for single-repo setups
+wt_apply_default_config() {
+  # Main monorepo root (where `git worktree` is managed)
+  : "${WT_MAIN_REPO_ROOT:="$HOME/.wt/repos/repo/base"}"
+
+  # Base directory where new worktrees will be created by default
+  : "${WT_WORKTREES_BASE:="$HOME/.wt/repos/repo/worktrees"}"
+
+  # Base directory for project metadata vault (IDE configs: .ijwb, .idea, .vscode, etc.)
+  : "${WT_IDEA_FILES_BASE:="$HOME/.wt/repos/repo/idea-files"}"
+
+  # Symlink path that points to the currently active worktree (for IDE integration)
+  : "${WT_ACTIVE_WORKTREE:="$HOME/Development/java"}"
+
+  # Default primary branch to sync from when creating new worktrees
+  : "${WT_BASE_BRANCH:="master"}"
+
+  # Project metadata patterns to preserve across worktrees (space-separated)
+  : "${WT_METADATA_PATTERNS:=""}"
+
+  # Context name (for display purposes)
+  : "${WT_CONTEXT_NAME:=""}"
 }
 
 # Load config at source time
 wt_read_config || true
-
-# Fallback defaults (used when no context is configured or config missing values)
-# These provide backward compatibility for single-repo setups
-# Main monorepo root (where `git worktree` is managed)
-: "${WT_MAIN_REPO_ROOT:="$HOME/.wt/repos/repo/base"}"
-
-# Base directory where new worktrees will be created by default
-: "${WT_WORKTREES_BASE:="$HOME/.wt/repos/repo/worktrees"}"
-
-# Base directory for project metadata vault (IDE configs: .ijwb, .idea, .vscode, etc.)
-: "${WT_IDEA_FILES_BASE:="$HOME/.wt/repos/repo/idea-files"}"
-
-# Symlink path that points to the currently active worktree (for IDE integration)
-: "${WT_ACTIVE_WORKTREE:="$HOME/Development/java"}"
-
-# Default primary branch to sync from when creating new worktrees
-: "${WT_BASE_BRANCH:="master"}"
-
-# Project metadata patterns to preserve across worktrees (space-separated)
-: "${WT_METADATA_PATTERNS:=""}"
-
-# Context name (for display purposes)
-: "${WT_CONTEXT_NAME:=""}"
+wt_apply_default_config
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Worktree pointer maintenance
