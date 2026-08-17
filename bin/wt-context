@@ -195,9 +195,9 @@ remove_context() {
       rm "$active_worktree"
       mv "$repo_root" "$active_worktree"
 
-      # Fix worktree .git pointers after repo move
-      # Only update worktrees that were adopted by this context
-      _wt_update_worktree_pointers "$active_worktree" "adopted" "$context_name"
+      # Fix worktree .git pointers after repo move; the move stales every
+      # registered worktree's gitdir pointer regardless of adoption state
+      _wt_update_worktree_pointers "$active_worktree" "all"
 
       # Update repo_root for subsequent marker removal
       repo_root="$active_worktree"
