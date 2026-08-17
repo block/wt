@@ -140,9 +140,12 @@ remove_context() {
 
   # Parse config values from the .conf file
   local repo_root worktrees_base active_worktree
-  repo_root="$(grep '^WT_MAIN_REPO_ROOT=' "$conf_file" | head -1 | sed 's/^[^=]*=//; s/^"//; s/"$//')"
-  worktrees_base="$(grep '^WT_WORKTREES_BASE=' "$conf_file" | head -1 | sed 's/^[^=]*=//; s/^"//; s/"$//')"
-  active_worktree="$(grep '^WT_ACTIVE_WORKTREE=' "$conf_file" | head -1 | sed 's/^[^=]*=//; s/^"//; s/"$//')"
+  repo_root="$(grep '^WT_MAIN_REPO_ROOT=' "$conf_file" | head -1 | sed 's/^[^=]*=//')"
+  worktrees_base="$(grep '^WT_WORKTREES_BASE=' "$conf_file" | head -1 | sed 's/^[^=]*=//')"
+  active_worktree="$(grep '^WT_ACTIVE_WORKTREE=' "$conf_file" | head -1 | sed 's/^[^=]*=//')"
+  repo_root="$(_wt_normalize_conf_value "$repo_root")"
+  worktrees_base="$(_wt_normalize_conf_value "$worktrees_base")"
+  active_worktree="$(_wt_normalize_conf_value "$active_worktree")"
 
   # Expand ~ in paths
   repo_root="$(_wt_expand_path "$repo_root")"

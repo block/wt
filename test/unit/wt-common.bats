@@ -721,22 +721,69 @@ teardown() {
 
 # --- --force ---
 
-@test "wt_read_config --force clears existing variables" {
-    export WT_BASE_BRANCH="stale-value"
-    export WT_WORKTREES_BASE="stale-wt"
+@test "wt_read_config --force clears stale config-loaded variables" {
+    # Simulate config-loaded values: set without the export attribute
+    unset WT_BASE_BRANCH WT_WORKTREES_BASE
+    WT_BASE_BRANCH="stale-value"
+    WT_WORKTREES_BASE="stale-wt"
 
     local non_git_dir="$BATS_TEST_TMPDIR/not-a-repo"
     mkdir -p "$non_git_dir"
     cd "$non_git_dir"
 
     # No context configured, no git config — force should clear vars
-    # (returns non-zero since both sources fail, but vars are still cleared)
+    # (returns non-zero since both sources fail) and re-apply defaults
     rm -f "$HOME/.wt/current"
     wt_read_config --force || true
 
-    # Variables should be cleared (not "stale-value")
-    assert_equal "${WT_BASE_BRANCH:-}" ""
-    assert_equal "${WT_WORKTREES_BASE:-}" ""
+    # Variables should be reset to the fallback defaults (not "stale-value")
+    assert_equal "${WT_BASE_BRANCH:-}" "master"
+    assert_equal "${WT_WORKTREES_BASE:-}" "$HOME/.wt/repos/repo/worktrees"
+}
+
+@test "wt_read_config --force re-applies fallback defaults after load failure" {
+    unset WT_MAIN_REPO_ROOT WT_ACTIVE_WORKTREE
+
+    local non_git_dir="$BATS_TEST_TMPDIR/not-a-repo"
+    mkdir -p "$non_git_dir"
+    cd "$non_git_dir"
+
+    rm -f "$HOME/.wt/current"
+    wt_read_config --force || true
+
+    assert_equal "${WT_MAIN_REPO_ROOT:-}" "$HOME/.wt/repos/repo/base"
+    assert_equal "${WT_ACTIVE_WORKTREE:-}" "$HOME/Development/java"
+}
+
+@test "wt_read_config --force preserves user-exported WT_* overrides" {
+    local repo
+    repo=$(create_mock_repo)
+    create_test_context "myctx" "$repo"
+
+    export WT_BASE_BRANCH="user-override"
+
+    cd "$repo"
+    wt_read_config --force
+
+    # Exported override survives the forced reload...
+    assert_equal "$WT_BASE_BRANCH" "user-override"
+    # ...while non-exported variables still reload from the context config
+    assert_equal "$WT_MAIN_REPO_ROOT" "$repo"
+}
+
+@test "wt_read_config --force keeps user overrides visible to child processes" {
+    local repo
+    repo=$(create_mock_repo)
+    create_test_context "myctx" "$repo"
+
+    export WT_BASE_BRANCH="user-override"
+
+    cd "$repo"
+    wt_read_config --force
+
+    # bin/wt-* run as child processes and must still see the override
+    run bash -c 'printf "%s" "${WT_BASE_BRANCH:-}"'
+    assert_output "user-override"
 }
 
 @test "wt_read_config without --force preserves existing variables" {
@@ -752,6 +799,43 @@ teardown() {
     # Without force, pre-existing env var should be preserved
     # (wt_read_context_config only sets vars not already set)
     assert_equal "$WT_BASE_BRANCH" "pre-existing"
+}
+
+# =============================================================================
+# Tests for wt_read_context_config() value parsing
+# =============================================================================
+
+@test "wt_read_context_config strips trailing whitespace after quoted value" {
+    mkdir -p "$HOME/.wt/repos"
+    printf 'WT_BASE_BRANCH="develop"   \n' > "$HOME/.wt/repos/wsctx.conf"
+    echo "wsctx" > "$HOME/.wt/current"
+
+    unset WT_BASE_BRANCH WT_CONTEXT_NAME
+    wt_read_context_config
+
+    assert_equal "$WT_BASE_BRANCH" "develop"
+}
+
+@test "wt_read_context_config strips inline comment after quoted value" {
+    mkdir -p "$HOME/.wt/repos"
+    printf 'WT_BASE_BRANCH="develop"  # deployment branch\n' > "$HOME/.wt/repos/cmtctx.conf"
+    echo "cmtctx" > "$HOME/.wt/current"
+
+    unset WT_BASE_BRANCH WT_CONTEXT_NAME
+    wt_read_context_config
+
+    assert_equal "$WT_BASE_BRANCH" "develop"
+}
+
+@test "wt_read_context_config preserves whitespace inside quoted value" {
+    mkdir -p "$HOME/.wt/repos"
+    printf 'WT_METADATA_PATTERNS=".idea .ijwb"\n' > "$HOME/.wt/repos/patctx.conf"
+    echo "patctx" > "$HOME/.wt/current"
+
+    unset WT_METADATA_PATTERNS WT_CONTEXT_NAME
+    wt_read_context_config
+
+    assert_equal "$WT_METADATA_PATTERNS" ".idea .ijwb"
 }
 
 # =============================================================================
