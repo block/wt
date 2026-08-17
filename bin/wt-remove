@@ -187,6 +187,43 @@ _check_dirty() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Bazel output base cleanup — best-effort, never fails removal
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Remove the Bazel output base dedicated to a worktree, if one exists.
+# Bazel names each output base after the md5 of the workspace path string,
+# so we hash the worktree path and probe the known output user roots.
+# (Never resolve bazel-out via readlink — with a shared output base it
+# points at the shared directory, not this worktree's own output base.)
+_cleanup_bazel_output_base() {
+  local wt_path="$1"
+
+  local path_hash
+  path_hash="$(_wt_md5_string "$wt_path" 2>/dev/null)" || return 0
+  [[ -n "$path_hash" ]] || return 0
+
+  local root output_base size
+  for root in \
+    "$HOME/Library/Caches/bazel/_bazel_${USER:-}" \
+    "/private/var/tmp/_bazel_${USER:-}" \
+    "$HOME/.cache/bazel/_bazel_${USER:-}"
+  do
+    [[ -d "$root" ]] || continue
+    output_base="$root/$path_hash"
+    [[ -d "$output_base" && ! -L "$output_base" ]] || continue
+    [[ -d "$output_base/execroot" ]] || continue
+
+    size="$(du -sh "$output_base" 2>/dev/null | cut -f1)"
+    if rm -rf "$output_base" 2>/dev/null; then
+      success "Bazel output base removed: $output_base (freed ${size:-unknown})"
+    else
+      warn "Could not remove Bazel output base: $output_base"
+    fi
+  done
+  return 0
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Core removal helper — shared by --merged and explicit removal paths
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -222,6 +259,8 @@ _do_remove_worktree() {
     return 1
   fi
   success "Worktree removed: $wt_path"
+
+  _cleanup_bazel_output_base "$wt_path" || true
 
   # Fix active symlink if the removed worktree was the current target
   if [[ "$is_linked" == "true" ]]; then

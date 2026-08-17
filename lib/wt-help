@@ -105,5 +105,7 @@ Configuration (from ${current_context:-"defaults"}):
                         [current: $WT_BASE_BRANCH]
   WT_METADATA_PATTERNS  Patterns to preserve (space-separated)
                         [current: $WT_METADATA_PATTERNS]
+  WT_SEED_FILES         Root files copied from main repo into new worktrees
+                        (space-separated) [current: $WT_SEED_FILES]
 EOF
 }

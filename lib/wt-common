@@ -94,7 +94,7 @@ wt_clear_config_vars() {
   local var
   for var in WT_MAIN_REPO_ROOT WT_WORKTREES_BASE WT_IDEA_FILES_BASE \
              WT_ACTIVE_WORKTREE WT_BASE_BRANCH WT_METADATA_PATTERNS \
-             WT_CONTEXT_NAME; do
+             WT_SEED_FILES WT_CONTEXT_NAME; do
     _wt_var_is_exported "$var" || unset "$var"
   done
 }
@@ -324,6 +324,10 @@ wt_apply_default_config() {
   # Project metadata patterns to preserve across worktrees (space-separated)
   : "${WT_METADATA_PATTERNS:=""}"
 
+  # Repo-root-relative files to copy from the main repo into new worktrees
+  # (space-separated, e.g. "user.bazelrc")
+  : "${WT_SEED_FILES:=""}"
+
   # Context name (for display purposes)
   : "${WT_CONTEXT_NAME:=""}"
 }
@@ -439,6 +443,21 @@ _wt_prune_nested_paths() {
       echo "$_entry_path"
     fi
   done <<< "$sorted"
+}
+
+# md5 hex digest of a string (the string itself, not a file at that path).
+# Args: $1 = string to hash
+# Outputs: 32-char hex digest to stdout
+# Returns: 0 on success, 1 if no md5 tool is available
+_wt_md5_string() {
+  local input="$1"
+  if command -v md5 >/dev/null 2>&1; then
+    md5 -qs "$input"
+  elif command -v md5sum >/dev/null 2>&1; then
+    printf '%s' "$input" | md5sum | cut -d' ' -f1
+  else
+    return 1
+  fi
 }
 
 # Check if a path value is valid for a directory config variable.

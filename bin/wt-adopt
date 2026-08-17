@@ -4,7 +4,7 @@
 # ==========================================================
 #
 # Takes any existing git worktree and gives it the "wt treatment":
-# imports metadata from the vault, installs Bazel symlinks, and places
+# imports metadata from the vault, seeds configured root files, and places
 # a marker file so wt commands recognize it as managed.
 #
 # Usage:

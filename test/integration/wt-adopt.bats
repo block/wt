@@ -147,23 +147,77 @@ teardown() {
 }
 
 # =============================================================================
-# Treatment: Bazel symlinks
+# Treatment: seed files
 # =============================================================================
 
-@test "adopt installs Bazel symlinks when present" {
-    # Create fake bazel symlinks in main repo
-    ln -s "/fake/bazel/output" "$REPO/bazel-out"
-    ln -s "/fake/bazel/bin" "$REPO/bazel-bin"
-
+@test "adopt does not install Bazel symlinks" {
     create_branch "$REPO" "feature-bazel"
     local wt="$BATS_TEST_TMPDIR/wt/feature-bazel"
     create_worktree "$REPO" "$wt" "feature-bazel"
     wt="$(cd "$wt" && pwd -P)"
 
+    # Create bazel symlinks AFTER worktree creation so they stay untracked
+    ln -s "/fake/bazel/output" "$REPO/bazel-out"
+    ln -s "/fake/bazel/bin" "$REPO/bazel-bin"
+
     run "$TEST_HOME/.wt/bin/wt-adopt" "$wt"
     assert_success
-    assert [ -L "$wt/bazel-out" ]
-    assert [ -L "$wt/bazel-bin" ]
+    assert_is_adopted "$wt"
+    assert [ ! -L "$wt/bazel-out" ]
+    assert [ ! -L "$wt/bazel-bin" ]
+}
+
+@test "adopt seeds configured root files from main repo" {
+    create_branch "$REPO" "feature-seed"
+    local wt="$BATS_TEST_TMPDIR/wt/feature-seed"
+    create_worktree "$REPO" "$wt" "feature-seed"
+    wt="$(cd "$wt" && pwd -P)"
+
+    # Create seed files AFTER worktree creation so they stay untracked
+    # (create_branch's "git add ." would otherwise commit them into the branch)
+    echo "7.1.0" > "$REPO/.bazelversion"
+    echo "build --config=dev" > "$REPO/user.bazelrc"
+    export WT_SEED_FILES=".bazelversion user.bazelrc"
+
+    run "$TEST_HOME/.wt/bin/wt-adopt" "$wt"
+    assert_success
+    assert_is_adopted "$wt"
+    assert [ -f "$wt/.bazelversion" ]
+    assert_equal "$(cat "$wt/.bazelversion")" "7.1.0"
+    assert [ -f "$wt/user.bazelrc" ]
+}
+
+@test "adopt does not overwrite existing seed files in worktree" {
+    create_branch "$REPO" "feature-seed-keep"
+    local wt="$BATS_TEST_TMPDIR/wt/feature-seed-keep"
+    create_worktree "$REPO" "$wt" "feature-seed-keep"
+    wt="$(cd "$wt" && pwd -P)"
+
+    echo "main-repo-content" > "$REPO/user.bazelrc"
+    echo "worktree-content" > "$wt/user.bazelrc"
+    export WT_SEED_FILES="user.bazelrc"
+
+    run "$TEST_HOME/.wt/bin/wt-adopt" "$wt"
+    assert_success
+    assert_is_adopted "$wt"
+    assert_equal "$(cat "$wt/user.bazelrc")" "worktree-content"
+}
+
+@test "adopt succeeds when a seed file cannot be copied" {
+    create_branch "$REPO" "feature-seed-fail"
+    local wt="$BATS_TEST_TMPDIR/wt/feature-seed-fail"
+    create_worktree "$REPO" "$wt" "feature-seed-fail"
+    wt="$(cd "$wt" && pwd -P)"
+
+    # nodir/ exists only in the main repo, so cp into the worktree fails
+    mkdir -p "$REPO/nodir"
+    echo "nested" > "$REPO/nodir/seed.conf"
+    export WT_SEED_FILES="nodir/seed.conf"
+
+    run "$TEST_HOME/.wt/bin/wt-adopt" "$wt"
+    assert_success
+    assert_is_adopted "$wt"
+    assert_output --partial "Could not seed nodir/seed.conf"
 }
 
 # =============================================================================
@@ -330,7 +384,7 @@ teardown() {
 # Keep existing files option
 # =============================================================================
 
-@test "adopt keep preserves existing metadata but installs bazel symlinks" {
+@test "adopt keep preserves existing metadata but still seeds files" {
     # Set up patterns and vault
     sed -i.bak 's/WT_METADATA_PATTERNS=""/WT_METADATA_PATTERNS=".idea"/' \
         "$TEST_HOME/.wt/repos/test.conf"
@@ -339,8 +393,7 @@ teardown() {
     run "$TEST_HOME/.wt/bin/wt-metadata-export" -y "$REPO" "$WT_IDEA_FILES_BASE"
     assert_success
 
-    # Create fake bazel symlinks in main repo
-    ln -s "/fake/bazel/output" "$REPO/bazel-out"
+    echo "7.1.0" > "$REPO/.bazelversion"
 
     # Create worktree with pre-existing .idea containing known content
     local wt="$BATS_TEST_TMPDIR/wt/keep-test"
@@ -352,6 +405,7 @@ teardown() {
     # Override _wt_is_interactive so the prompt appears even in a pipe,
     # then pipe "k" (keep) to choose the keep-existing-files option.
     run bash -c '
+        export WT_SEED_FILES=".bazelversion"
         source "'"$TEST_HOME/.wt/lib/wt-common"'"
         source "'"$TEST_HOME/.wt/lib/wt-adopt"'"
         _wt_is_interactive() { return 0; }
@@ -364,8 +418,8 @@ teardown() {
     assert [ -f "$wt/.idea/workspace.xml" ]
     assert_equal "$(cat "$wt/.idea/workspace.xml")" "my-precious-config"
 
-    # Bazel symlinks should still be installed
-    assert [ -L "$wt/bazel-out" ]
+    # Seed files should still be copied
+    assert [ -f "$wt/.bazelversion" ]
 }
 
 # =============================================================================

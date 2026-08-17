@@ -302,3 +302,30 @@ teardown() {
     current_content=$(cat "$REPO/file.txt")
     assert_equal "$current_content" "$original_content"
 }
+
+# =============================================================================
+# Seed file tests (WT_SEED_FILES)
+# =============================================================================
+
+@test "wt-add seeds configured root files into the new worktree" {
+    create_branch "$REPO" "seed-branch"
+    echo "7.1.0" > "$REPO/.bazelversion"
+    export WT_SEED_FILES=".bazelversion"
+
+    run "$TEST_HOME/.wt/bin/wt-add" seed-branch
+    assert_success
+    assert [ -f "$WT_WORKTREES_BASE/seed-branch/.bazelversion" ]
+    assert_equal "$(cat "$WT_WORKTREES_BASE/seed-branch/.bazelversion")" "7.1.0"
+}
+
+@test "wt-add -b seeds gitignored files from main repo" {
+    (cd "$REPO" && echo "user.bazelrc" > .gitignore \
+        && git add .gitignore && git commit -m "ignore user.bazelrc") >/dev/null 2>&1
+    echo "build --config=dev" > "$REPO/user.bazelrc"
+    export WT_SEED_FILES="user.bazelrc"
+
+    run "$TEST_HOME/.wt/bin/wt-add" -b seed-new-branch
+    assert_success
+    assert [ -f "$WT_WORKTREES_BASE/seed-new-branch/user.bazelrc" ]
+    assert_equal "$(cat "$WT_WORKTREES_BASE/seed-new-branch/user.bazelrc")" "build --config=dev"
+}

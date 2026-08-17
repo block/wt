@@ -179,29 +179,58 @@ _resolve_git_dir() {
 }
 
 # =============================================================================
-# wt_install_bazel_symlinks
+# wt_seed_files
 # =============================================================================
 
-@test "wt_install_bazel_symlinks copies symlinks from main repo" {
-    # Create fake bazel symlinks in main repo
-    ln -s "/fake/bazel/output" "$REPO/bazel-out"
-    ln -s "/fake/bazel/bin" "$REPO/bazel-bin"
+@test "wt_seed_files copies configured files from main repo" {
+    echo "7.1.0" > "$REPO/.bazelversion"
+    echo "build --disk_cache=/tmp/cache" > "$REPO/user.bazelrc"
+    export WT_SEED_FILES=".bazelversion user.bazelrc"
 
-    wt_install_bazel_symlinks "$WORKTREE"
+    wt_seed_files "$WORKTREE"
 
-    assert [ -L "$WORKTREE/bazel-out" ]
-    assert [ -L "$WORKTREE/bazel-bin" ]
-    local target
-    target="$(readlink "$WORKTREE/bazel-out")"
-    assert_equal "$target" "/fake/bazel/output"
+    assert [ -f "$WORKTREE/.bazelversion" ]
+    assert [ -f "$WORKTREE/user.bazelrc" ]
+    assert_equal "$(cat "$WORKTREE/.bazelversion")" "7.1.0"
 }
 
-@test "wt_install_bazel_symlinks skips missing symlinks" {
-    # Main repo has no bazel symlinks
-    wt_install_bazel_symlinks "$WORKTREE"
+@test "wt_seed_files skips files missing in main repo" {
+    export WT_SEED_FILES="does-not-exist.bazelrc"
 
-    assert [ ! -L "$WORKTREE/bazel-out" ]
-    assert [ ! -L "$WORKTREE/bazel-bin" ]
+    run wt_seed_files "$WORKTREE"
+    assert_success
+    assert [ ! -e "$WORKTREE/does-not-exist.bazelrc" ]
+}
+
+@test "wt_seed_files does not overwrite existing files in worktree" {
+    echo "main-repo-content" > "$REPO/user.bazelrc"
+    echo "worktree-content" > "$WORKTREE/user.bazelrc"
+    export WT_SEED_FILES="user.bazelrc"
+
+    wt_seed_files "$WORKTREE"
+
+    assert_equal "$(cat "$WORKTREE/user.bazelrc")" "worktree-content"
+}
+
+@test "wt_seed_files does nothing when WT_SEED_FILES is empty" {
+    export WT_SEED_FILES=""
+
+    run wt_seed_files "$WORKTREE"
+    assert_success
+}
+
+@test "wt_seed_files warns on copy failure and continues with next file" {
+    mkdir -p "$REPO/nodir"
+    echo "nested" > "$REPO/nodir/seed.conf"
+    echo "7.1.0" > "$REPO/.bazelversion"
+    # nodir/ does not exist in the worktree, so cp fails for the first file
+    export WT_SEED_FILES="nodir/seed.conf .bazelversion"
+
+    run --separate-stderr wt_seed_files "$WORKTREE"
+    assert_success
+    [[ "$stderr" == *"Could not seed nodir/seed.conf"* ]] || \
+        fail "stderr should warn about failed seed, got: $stderr"
+    assert [ -f "$WORKTREE/.bazelversion" ]
 }
 
 # =============================================================================
@@ -257,25 +286,12 @@ _resolve_git_dir() {
     assert_failure  # no conflicts
 }
 
-@test "wt_check_adoption_conflicts ignores bazel symlinks" {
+@test "wt_check_adoption_conflicts ignores bazel output directories" {
     export WT_METADATA_PATTERNS=""
     export WT_IDEA_FILES_BASE=""
 
-    # Create bazel-out as a symlink in worktree
-    ln -s "/some/target" "$WORKTREE/bazel-out"
-
-    run wt_check_adoption_conflicts "$WORKTREE"
-    assert_failure  # no conflicts (symlinks are safe)
-}
-
-@test "wt_check_adoption_conflicts detects bazel real directory" {
-    export WT_METADATA_PATTERNS=""
-    export WT_IDEA_FILES_BASE=""
-
-    # Create bazel-out as a real directory in worktree
     mkdir -p "$WORKTREE/bazel-out"
 
     run wt_check_adoption_conflicts "$WORKTREE"
-    assert_success
-    assert_output --partial "bazel-out (real directory)"
+    assert_failure  # no conflicts
 }
