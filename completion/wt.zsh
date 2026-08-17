@@ -8,16 +8,13 @@
 #       * Provide completion for wt-* commands and the unified `wt` command.
 #
 #   - If `fzf` is available:
-#       * TAB is wrapped:
-#            - If the command is `wt-add`, invoke an FZF branch picker.
-#            - Otherwise, delegate to the original TAB binding.
-#       * Ctrl+X Ctrl+A always invokes the FZF branch picker.
+#       * Ctrl+X Ctrl+A invokes an FZF branch picker.
 #
-#   - If `fzf` is NOT available:
-#       * Use normal zsh completion:
+#   - Always:
+#       * Normal zsh completion:
 #            - wt-add: first arg completes from git branches (WT_MAIN_REPO_ROOT
 #              or current repo), plus files.
-#            - Other wt-* commands: file completion.
+#            - Other wt-* commands: dedicated completers.
 #
 # This file is designed for personal use.
 
@@ -75,6 +72,29 @@ _wt_switch() {
     worktree)
       local -a branches
       branches=("${(f)$(wt_worktree_branch_list)}")
+
+      if (( ${#branches[@]} > 0 )); then
+        _describe 'branch names' branches
+      fi
+      ;;
+  esac
+}
+
+# Completion for wt-adopt / wt adopt: flags + worktree branch names (main repo excluded)
+_wt_adopt() {
+  local context state
+  typeset -A opt_args
+
+  _arguments -C \
+    '--force[Skip conflict checks]' \
+    '--redo[Re-run adoption treatment]' \
+    '(-h --help)'{-h,--help}'[Show help]' \
+    '1:worktree:->worktree' && return 0
+
+  case "$state" in
+    worktree)
+      local -a branches
+      branches=("${(f)$(wt_worktree_branch_list exclude_main)}")
 
       if (( ${#branches[@]} > 0 )); then
         _describe 'branch names' branches
@@ -173,7 +193,11 @@ _wt_context() {
       if [[ "${words[2]}" == "add" ]]; then
         _files -/
       elif [[ "${words[2]}" == "remove" ]]; then
-        local -a rm_contexts
+        local -a rm_contexts rm_opts
+        rm_opts=(
+          '-y:Skip confirmation prompt'
+          '--yes:Skip confirmation prompt'
+        )
         local repos_dir="$HOME/.wt/repos"
         if [[ -d "$repos_dir" ]]; then
           for conf in "$repos_dir"/*.conf(N); do
@@ -185,6 +209,7 @@ _wt_context() {
         if (( ${#rm_contexts[@]} > 0 )); then
           _describe 'contexts' rm_contexts
         fi
+        _describe 'options' rm_opts
       fi
       ;;
   esac
@@ -220,8 +245,34 @@ _wt_metadata_import() {
   esac
 }
 
+# Completion for wt-add: branch names plus files
+_wt_add() {
+  emulate -L zsh -o extended_glob
+
+  local context state
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-b --branch)'{-b,--branch}'[Create new branch]:branch name:->branch' \
+    '1:branch or path:->first' \
+    '*:files:_files' && return 0
+
+  case "$state" in
+    branch|first)
+      local -a branches
+      branches=("${(f)$(_wt_branch_list)}")
+
+      if (( ${#branches[@]} > 0 )); then
+        _describe 'branches' branches || _files
+      else
+        _files
+      fi
+      ;;
+  esac
+}
+
 # ═══════════════════════════════════════════════════════════════════════════════
-# FZF-specific setup (wt-add only — other commands use shared functions above)
+# FZF-specific setup (optional Ctrl+X Ctrl+A branch picker; TAB is left untouched)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 if (( $+commands[fzf] )); then
@@ -252,84 +303,9 @@ if (( $+commands[fzf] )); then
 
   zle -N wt_fzf_branch_complete
 
-  # Capture original TAB widget so we can delegate for non-wt-add commands.
-  typeset -g WT_ORIG_TAB_WIDGET=""
-  {
-    local binding
-    binding=($(bindkey '^I' 2>/dev/null))
-    WT_ORIG_TAB_WIDGET="${binding[2]:-}"
-  } 2>/dev/null
-
-  # Dispatcher: if command starts with wt-add, use FZF; otherwise call original TAB binding.
-  wt_tab_dispatch() {
-    emulate -L zsh -o extended_glob
-
-    local -a words
-    words=(${(z)BUFFER})
-    local first="${words[1]:-}"
-
-    if [[ "$first" == "wt-add" ]]; then
-      wt_fzf_branch_complete
-      return
-    fi
-
-    if [[ -n "$WT_ORIG_TAB_WIDGET" && "$WT_ORIG_TAB_WIDGET" != "wt_tab_dispatch" ]]; then
-      zle "$WT_ORIG_TAB_WIDGET"
-    else
-      zle complete-word
-    fi
-  }
-
-  zle -N wt_tab_dispatch
-
-  # Bind TAB to our dispatcher
-  bindkey '^I' wt_tab_dispatch
-
-  # Bind Ctrl+X Ctrl+A to always trigger FZF-based branch picker
+  # Bind Ctrl+X Ctrl+A to trigger FZF-based branch picker
   bindkey '^X^A' wt_fzf_branch_complete
-
-else
-  # Non-FZF: standard completion for wt-add
-  _wt_add() {
-    emulate -L zsh -o extended_glob
-
-    local context state
-    typeset -A opt_args
-
-    _arguments -C \
-      '(-b --branch)'{-b,--branch}'[Create new branch]:branch name:->branch' \
-      '1:branch or path:->first' \
-      '*:files:_files' && return 0
-
-    case "$state" in
-      branch|first)
-        local -a branches
-        branches=("${(f)$(_wt_branch_list)}")
-
-        if (( ${#branches[@]} > 0 )); then
-          _describe 'branches' branches || _files
-        else
-          _files
-        fi
-        ;;
-    esac
-  }
-
-  compdef _wt_add wt-add
 fi
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Register standalone wt-* completions
-# ═══════════════════════════════════════════════════════════════════════════════
-
-compdef _wt_switch wt-adopt
-compdef _wt_switch wt-switch
-compdef _wt_remove wt-remove
-compdef _wt_cd wt-cd
-compdef _wt_list wt-list
-compdef _wt_context wt-context
-compdef _wt_metadata_export wt-metadata-export
-compdef _wt_metadata_import wt-metadata-import
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Unified `wt` command completion
@@ -337,7 +313,7 @@ compdef _wt_metadata_import wt-metadata-import
 
 _wt_completion() {
   # Force reload config to pick up context changes in current shell
-  wt_read_config --mode=context --force || true
+  wt_read_config --force || true
 
   local -a commands
   commands=(
@@ -374,7 +350,7 @@ _wt_completion() {
           branches=("${(f)$(git branch -a 2>/dev/null | sed 's/^[* ]*//' | sed 's|remotes/origin/||')}")
           (( ${#branches[@]} > 0 )) && _describe 'branch' branches
           ;;
-        adopt)                  _wt_switch ;;
+        adopt)                  _wt_adopt ;;
         switch|cd)              _wt_switch ;;
         remove)                 _wt_remove ;;
         list)                   _wt_list ;;
@@ -385,4 +361,20 @@ _wt_completion() {
       ;;
   esac
 }
-compdef _wt_completion wt
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Register completions (only when compinit has made compdef available)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+if (( $+functions[compdef] )); then
+  compdef _wt_add wt-add
+  compdef _wt_adopt wt-adopt
+  compdef _wt_switch wt-switch
+  compdef _wt_remove wt-remove
+  compdef _wt_cd wt-cd
+  compdef _wt_list wt-list
+  compdef _wt_context wt-context
+  compdef _wt_metadata_export wt-metadata-export
+  compdef _wt_metadata_import wt-metadata-import
+  compdef _wt_completion wt
+fi

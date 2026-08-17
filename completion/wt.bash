@@ -187,6 +187,24 @@ _wt_switch_complete() {
   fi
 }
 
+_wt_adopt_complete() {
+  local cur
+  COMPREPLY=()
+  cur="${COMP_WORDS[COMP_CWORD]}"
+
+  if [[ "$cur" == -* ]]; then
+    COMPREPLY+=( $(compgen -W "--force --redo -h --help" -- "$cur") )
+    return 0
+  fi
+
+  local branches
+  branches="$(wt_worktree_branch_list exclude_main)"
+  if [[ -n "$branches" ]]; then
+    local IFS=$'\n'
+    COMPREPLY+=( $(compgen -W "$branches" -- "$cur") )
+  fi
+}
+
 _wt_remove_complete() {
   local cur
   COMPREPLY=()
@@ -329,7 +347,7 @@ _wt_metadata_import_complete() {
 
 # --- Wire up standalone wt-* completions (only if commands exist on PATH) ---
 type wt-add >/dev/null 2>&1 && complete -F _wt_add_complete wt-add
-type wt-adopt >/dev/null 2>&1 && complete -F _wt_switch_complete wt-adopt
+type wt-adopt >/dev/null 2>&1 && complete -F _wt_adopt_complete wt-adopt
 type wt-switch >/dev/null 2>&1 && complete -F _wt_switch_complete wt-switch
 type wt-remove >/dev/null 2>&1 && complete -F _wt_remove_complete wt-remove
 type wt-cd >/dev/null 2>&1 && complete -F _wt_cd_complete wt-cd
@@ -344,7 +362,7 @@ type wt-metadata-import >/dev/null 2>&1 && complete -F _wt_metadata_import_compl
 
 _wt_completion_bash() {
   # Force reload config to pick up context changes in current shell
-  wt_read_config --mode=context --force || true
+  wt_read_config --force || true
   local cur
   COMPREPLY=()
   cur="${COMP_WORDS[COMP_CWORD]}"
@@ -360,11 +378,15 @@ _wt_completion_bash() {
         COMPREPLY=($(compgen -W "$branches" -- "$cur"))
         ;;
       adopt)
-        local branches
-        branches="$(wt_worktree_branch_list)"
-        if [[ -n "$branches" ]]; then
-          local IFS=$'\n'
-          COMPREPLY+=($(compgen -W "$branches" -- "$cur"))
+        if [[ "$cur" == -* ]]; then
+          COMPREPLY+=($(compgen -W "--force --redo -h --help" -- "$cur"))
+        else
+          local branches
+          branches="$(wt_worktree_branch_list exclude_main)"
+          if [[ -n "$branches" ]]; then
+            local IFS=$'\n'
+            COMPREPLY+=($(compgen -W "$branches" -- "$cur"))
+          fi
         fi
         ;;
       switch|cd)
@@ -401,14 +423,14 @@ _wt_completion_bash() {
         if [[ ${COMP_CWORD} -eq 2 ]]; then
           local worktrees
           if [[ -n "$WT_MAIN_REPO_ROOT" ]] && [[ -d "$WT_MAIN_REPO_ROOT" ]]; then
-            worktrees=$(git -C "$WT_MAIN_REPO_ROOT" worktree list --porcelain 2>/dev/null | grep '^worktree ' | cut -d' ' -f2-)
+            worktrees=$(_wt_worktree_list)
             COMPREPLY=($(compgen -W "$worktrees" -- "$cur"))
           fi
           COMPREPLY+=($(compgen -d -- "$cur"))
         elif [[ ${COMP_CWORD} -eq 3 ]]; then
           local worktrees
           if [[ -n "$WT_MAIN_REPO_ROOT" ]] && [[ -d "$WT_MAIN_REPO_ROOT" ]]; then
-            worktrees=$(git -C "$WT_MAIN_REPO_ROOT" worktree list --porcelain 2>/dev/null | grep '^worktree ' | cut -d' ' -f2-)
+            worktrees=$(_wt_worktree_list)
             COMPREPLY=($(compgen -W "$worktrees" -- "$cur"))
           fi
         fi
