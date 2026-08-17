@@ -173,3 +173,32 @@ teardown() {
     assert_success
     assert_output --partial "wt.ahead 1"
 }
+
+@test "wt_list_porcelain --verbose attaches wt.dirty to the correct entries with multiple worktrees" {
+    create_branch "$REPO" "feature-clean"
+    create_branch "$REPO" "feature-dirty"
+    create_worktree "$REPO" "$WT_WORKTREES_BASE/feature-clean" "feature-clean"
+    create_worktree "$REPO" "$WT_WORKTREES_BASE/feature-dirty" "feature-dirty"
+    make_repo_dirty "$WT_WORKTREES_BASE/feature-dirty"
+
+    run wt_list_porcelain --verbose
+    assert_success
+
+    local dirty_entry clean_entry
+    dirty_entry=$(echo "$output" | awk "/^worktree .*feature-dirty/,/^$/")
+    clean_entry=$(echo "$output" | awk "/^worktree .*feature-clean/,/^$/")
+    [[ "$dirty_entry" == *"wt.dirty"* ]] || fail "Expected wt.dirty in feature-dirty entry: $dirty_entry"
+    [[ "$clean_entry" != *"wt.dirty"* ]] || fail "Did not expect wt.dirty in feature-clean entry: $clean_entry"
+}
+
+@test "wt_list_porcelain --verbose preserves entry order" {
+    create_branch "$REPO" "feature-a"
+    create_branch "$REPO" "feature-b"
+    create_worktree "$REPO" "$WT_WORKTREES_BASE/feature-a" "feature-a"
+    create_worktree "$REPO" "$WT_WORKTREES_BASE/feature-b" "feature-b"
+
+    local fast_order verbose_order
+    fast_order=$(wt_list_porcelain | grep "^worktree ")
+    verbose_order=$(wt_list_porcelain --verbose | grep "^worktree ")
+    assert_equal "$verbose_order" "$fast_order"
+}

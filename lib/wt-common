@@ -927,13 +927,84 @@ wt_worktree_prefix_and_badge() {
   fi
 }
 
+# Probe one worktree's dirty/ahead/behind state.
+# --no-optional-locks keeps the status probe from contending with IDE index
+# refreshes; pass an empty branch (e.g. detached HEAD) to skip ahead/behind.
+# Usage: wt_status_probe <worktree_path> [branch]
+# Outputs lines (in this order, each only when applicable):
+#   dirty
+#   ahead N
+#   behind N
+wt_status_probe() {
+  local wt_abs="$1"
+  local branch="${2:-}"
+
+  local status
+  status="$(git --no-optional-locks -C "$wt_abs" status --porcelain 2>/dev/null || true)"
+  [[ -n "$status" ]] && echo "dirty"
+
+  if [[ -n "$branch" ]]; then
+    local upstream
+    upstream="$(git --no-optional-locks -C "$wt_abs" rev-parse --abbrev-ref "@{upstream}" 2>/dev/null || true)"
+    if [[ -n "$upstream" ]]; then
+      local counts
+      counts="$(git --no-optional-locks -C "$wt_abs" rev-list --left-right --count "$branch...$upstream" 2>/dev/null || true)"
+      if [[ -n "$counts" ]]; then
+        local ahead behind
+        ahead="$(echo "$counts" | cut -f1)"
+        behind="$(echo "$counts" | cut -f2)"
+        [[ "$ahead" -gt 0 ]] && echo "ahead $ahead"
+        [[ "$behind" -gt 0 ]] && echo "behind $behind"
+      fi
+    fi
+  fi
+  return 0
+}
+
+# Run wt_status_probe for many worktrees concurrently in a bounded job pool,
+# writing each result to <dir>/<index>. All jobs finish before this returns,
+# so callers read results in original entry order regardless of completion
+# order; wall time is roughly max(probe) instead of sum(probe).
+# Input (stdin): index<TAB>path<TAB>branch lines (branch empty to skip
+# ahead/behind).
+# Usage: wt_run_status_probes <dir> < input
+wt_run_status_probes() {
+  local dir="$1"
+  local max_jobs="${WT_STATUS_PROBE_JOBS:-6}"
+  # Pattern check, not [[ -ge ]]: a non-numeric value in an arithmetic test
+  # is a fatal nounset error in bash 3.2 that || cannot catch
+  case "$max_jobs" in
+    ''|0|*[!0-9]*) max_jobs=6 ;;
+  esac
+
+  local idx path branch pid
+  local pids=()
+  while IFS=$'\t' read -r idx path branch; do
+    [[ -n "$idx" ]] || continue
+    if [[ "${#pids[@]}" -ge "$max_jobs" ]]; then
+      wait "${pids[0]}" 2>/dev/null || true
+      pids=(${pids[@]+"${pids[@]:1}"})
+    fi
+    wt_status_probe "$path" "$branch" > "$dir/$idx" 2>/dev/null </dev/null &
+    pids+=("$!")
+  done
+
+  for pid in ${pids[@]+"${pids[@]}"}; do
+    wait "$pid" 2>/dev/null || true
+  done
+  return 0
+}
+
 # Format a worktree entry for display
-# Usage: wt_format_worktree <worktree_path> [main_repo_abs] [linked_worktree] [verbose] [branch]
+# Usage: wt_format_worktree <worktree_path> [main_repo_abs] [linked_worktree] [verbose] [branch] [probe_result]
 # Outputs: formatted string like "~/path (branch) [main] [linked] [dirty] [↑N] [↓N]"
 # When verbose is "true", includes slow status checks (dirty, ahead/behind)
 # When branch is given (e.g. from wt_worktree_entries), no git process is
 # spawned to derive it; pass "HEAD" for detached HEAD worktrees to match
 # what `git rev-parse --abbrev-ref HEAD` would print.
+# When probe_result is given (wt_status_probe output collected up front, e.g.
+# concurrently via wt_run_status_probes), the verbose path spawns no git
+# processes at all; otherwise it probes the worktree itself.
 wt_format_worktree() {
   local wt_abs="$1"
   local main_repo_abs="${2:-}"
@@ -960,27 +1031,23 @@ wt_format_worktree() {
 
   # Slow status checks - only when verbose mode is enabled
   if [[ "$verbose" == "true" ]]; then
-    # Check for uncommitted changes (SLOW - runs git status)
-    if wt_has_uncommitted_changes "$wt_abs"; then
-      indicators="${indicators}${RED}[dirty]${NC} "
+    local probe
+    if [[ $# -ge 6 ]]; then
+      probe="$6"
+    else
+      local probe_branch="$branch"
+      case "$branch" in detached|HEAD) probe_branch="" ;; esac
+      probe="$(wt_status_probe "$wt_abs" "$probe_branch")"
     fi
 
-    # Check ahead/behind upstream (can be slow for repos with many commits)
-    if [[ "$branch" != "detached" && "$branch" != "HEAD" ]]; then
-      local upstream
-      upstream="$(git -C "$wt_abs" rev-parse --abbrev-ref "@{upstream}" 2>/dev/null || true)"
-      if [[ -n "$upstream" ]]; then
-        local counts
-        counts="$(git -C "$wt_abs" rev-list --left-right --count "$branch...$upstream" 2>/dev/null || true)"
-        if [[ -n "$counts" ]]; then
-          local ahead behind
-          ahead="$(echo "$counts" | cut -f1)"
-          behind="$(echo "$counts" | cut -f2)"
-          [[ "$ahead" -gt 0 ]] && indicators="${indicators}${GREEN}[↑${ahead}]${NC} "
-          [[ "$behind" -gt 0 ]] && indicators="${indicators}${YELLOW}[↓${behind}]${NC} "
-        fi
-      fi
-    fi
+    local probe_line
+    while IFS= read -r probe_line; do
+      case "$probe_line" in
+        dirty)     indicators="${indicators}${RED}[dirty]${NC} " ;;
+        ahead\ *)  indicators="${indicators}${GREEN}[↑${probe_line#ahead }]${NC} " ;;
+        behind\ *) indicators="${indicators}${YELLOW}[↓${probe_line#behind }]${NC} " ;;
+      esac
+    done <<< "$probe"
   fi
 
   # Output formatted entry
@@ -1026,8 +1093,43 @@ wt_list_porcelain() {
   local adopted_set
   adopted_set="$(wt_adopted_worktree_paths)"
 
-  local wt_path="" branch="" is_detached=false
-  local in_entry=false
+  local porcelain
+  porcelain="$(git -C "$main_repo_abs" worktree list --porcelain)" || return 1
+
+  # Verbose: probe every worktree concurrently up front, keyed by entry index
+  # (both passes count `worktree ` lines, so indices always line up).
+  local probe_dir=""
+  if [[ "$verbose" == true ]]; then
+    probe_dir="$(mktemp -d "${TMPDIR:-/tmp}/wt-porcelain.XXXXXX")" || return 1
+    local probe_input="" p_idx=-1 p_path="" p_branch="" p_detached=false p_line
+    while IFS= read -r p_line || [[ -n "$p_line" ]]; do
+      case "$p_line" in
+        worktree\ *)
+          p_path="${p_line#worktree }"
+          p_branch=""
+          p_detached=false
+          p_idx=$((p_idx + 1))
+          ;;
+        branch\ *)
+          p_branch="${p_line#branch refs/heads/}"
+          ;;
+        detached)
+          p_detached=true
+          ;;
+        "")
+          if [[ -n "$p_path" && -d "$p_path" ]]; then
+            [[ "$p_detached" == true ]] && p_branch=""
+            probe_input="${probe_input}${p_idx}"$'\t'"${p_path}"$'\t'"${p_branch}"$'\n'
+          fi
+          p_path=""
+          ;;
+      esac
+    done <<< "$porcelain"$'\n'
+    wt_run_status_probes "$probe_dir" <<< "$probe_input"
+  fi
+
+  local line wt_path=""
+  local in_entry=false entry_index=-1
 
   while IFS= read -r line || [[ -n "$line" ]]; do
     if [[ -z "$line" ]]; then
@@ -1050,26 +1152,16 @@ wt_list_porcelain() {
 
         # Verbose: dirty, ahead/behind
         if [[ "$verbose" == true ]]; then
-          if wt_has_uncommitted_changes "$wt_abs"; then
-            echo "wt.dirty"
-          fi
-
-          if [[ "$is_detached" != true && -n "$branch" ]]; then
-            local short_branch="${branch#refs/heads/}"
-            local upstream
-            upstream="$(git -C "$wt_abs" rev-parse --abbrev-ref "@{upstream}" 2>/dev/null || true)"
-            if [[ -n "$upstream" ]]; then
-              local counts
-              counts="$(git -C "$wt_abs" rev-list --left-right --count "$short_branch...$upstream" 2>/dev/null || true)"
-              if [[ -n "$counts" ]]; then
-                local ahead behind
-                ahead="$(echo "$counts" | cut -f1)"
-                behind="$(echo "$counts" | cut -f2)"
-                [[ "$ahead" -gt 0 ]] && echo "wt.ahead $ahead"
-                [[ "$behind" -gt 0 ]] && echo "wt.behind $behind"
-              fi
-            fi
-          fi
+          local probe=""
+          [[ -f "$probe_dir/$entry_index" ]] && probe="$(cat "$probe_dir/$entry_index")"
+          local probe_line
+          while IFS= read -r probe_line; do
+            case "$probe_line" in
+              dirty)     echo "wt.dirty" ;;
+              ahead\ *)  echo "wt.ahead ${probe_line#ahead }" ;;
+              behind\ *) echo "wt.behind ${probe_line#behind }" ;;
+            esac
+          done <<< "$probe"
         fi
 
         echo  # blank separator
@@ -1081,26 +1173,21 @@ wt_list_porcelain() {
     case "$line" in
       worktree\ *)
         wt_path="${line#worktree }"
-        branch=""
-        is_detached=false
         in_entry=true
-        echo "$line"
-        ;;
-      branch\ *)
-        branch="${line#branch }"
-        echo "$line"
-        ;;
-      detached)
-        is_detached=true
+        entry_index=$((entry_index + 1))
         echo "$line"
         ;;
       *)
-        # Pass through HEAD, bare, locked, prunable, etc.
+        # Pass through HEAD, branch, detached, bare, locked, prunable, etc.
         echo "$line"
         ;;
     esac
-  done < <(git -C "$main_repo_abs" worktree list --porcelain; echo)
-  # The trailing `echo` ensures the last entry's blank line is processed
+  done <<< "$porcelain"$'\n'
+  # The appended newline restores the final blank line that "$( )" stripped,
+  # so the last entry is flushed.
+
+  [[ -n "$probe_dir" ]] && rm -rf "$probe_dir"
+  return 0
 }
 
 # ─────────────────────────────────────────────────────────────────────────────

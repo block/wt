@@ -144,7 +144,7 @@ wt cd ~/Development/java-worktrees/feature/foo
 
 ```bash
 wt list
-wt list -v            # Adds dirty/ahead/behind indicators (slower)
+wt list -v            # Adds dirty/ahead/behind indicators (slower; worktrees probed in parallel)
 wt list --porcelain   # Machine-readable output (for scripts and agents)
 ```
 
