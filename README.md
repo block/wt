@@ -245,7 +245,7 @@ wt metadata-import -y ~/Development/java-worktrees/feature/foo
 
 When most development work is done in worktrees, the Bazel IDE directories (`.ijwb`, `.aswb`, `.clwb`) in the main repository can become stale (targets files don't reflect new Bazel targets).
 
-The `lib/wt-metadata-refresh` script is designed to run as a cron job to keep metadata current.
+The `bin/wt-metadata-refresh` script is designed to run as a cron job to keep metadata current.
 
 **Note:** When IntelliJ has `derive_targets_from_directories: true` in `.bazelproject` (the default), it queries Bazel fresh on every sync. The `targets-*` file serves as a cache for initial project imports and may improve import speed.
 
@@ -261,20 +261,20 @@ mkdir -p ~/.wt/logs
 crontab -e
 
 # Add this line to run nightly at 2am (uses login shell for full PATH):
-0 2 * * * /bin/zsh -lc '~/.wt/lib/wt-metadata-refresh' >> ~/.wt/logs/metadata-refresh.log 2>&1
+0 2 * * * /bin/zsh -lc '~/.wt/bin/wt-metadata-refresh' >> ~/.wt/logs/metadata-refresh.log 2>&1
 ```
 
 You can also run the script manually:
 
 ```bash
 # Refresh all Bazel IDE directories and re-export to vault
-~/.wt/lib/wt-metadata-refresh
+~/.wt/bin/wt-metadata-refresh
 
 # Preview what would be refreshed (dry run)
-~/.wt/lib/wt-metadata-refresh --dry-run
+~/.wt/bin/wt-metadata-refresh --dry-run
 
 # Refresh targets files only (skip re-export step)
-~/.wt/lib/wt-metadata-refresh --no-export
+~/.wt/bin/wt-metadata-refresh --no-export
 ```
 
 The refresh script:
@@ -434,15 +434,15 @@ wt/
 │   ├── wt-remove
 │   ├── wt-switch
 │   ├── wt-metadata-import
-│   └── wt-metadata-export
+│   ├── wt-metadata-export
+│   └── wt-metadata-refresh  # Cron script to refresh Bazel IDE metadata
 ├── lib/                     # Shared libraries
 │   ├── wt-common            # Configuration and helpers
 │   ├── wt-adopt             # Worktree adoption helpers
 │   ├── wt-choose            # Interactive worktree selection
 │   ├── wt-context           # Multi-repo context management
 │   ├── wt-context-setup     # Context creation (wt context add)
-│   ├── wt-help              # Help text for wt command
-│   └── wt-metadata-refresh  # Cron script to refresh Bazel IDE metadata
+│   └── wt-help              # Help text for wt command
 ├── completion/              # Shell completions for wt-* scripts
 │   ├── wt.zsh
 │   └── wt.bash
@@ -462,7 +462,7 @@ These are located in `bin/` and work identically to the `wt` subcommands.
 
 The `bin/` directory is the subcommand registry: `wt <name>` dispatches to any executable `bin/wt-<name>`, and shell completion derives the top-level command list from the same directory. Only `cd`, `remove`, and `context` have dedicated dispatch branches (they need in-shell behavior), so adding a new subcommand is just dropping an executable `bin/wt-<name>` script.
 
-The `lib/wt-metadata-refresh` script is designed for cron jobs and can be run directly from its location.
+The `bin/wt-metadata-refresh` script is designed for cron jobs; run it directly or as `wt metadata-refresh`.
 
 ## Project Resources
 

@@ -24,19 +24,11 @@
 
 set -euo pipefail
 
-# Resolve script and lib directories
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB_DIR="$SCRIPT_DIR/../lib"
-
-# Bootstrap: source wt-common from lib/
-if [[ -f "$LIB_DIR/wt-common" ]]; then
-  . "$LIB_DIR/wt-common"
-elif [[ -f "$HOME/.wt/lib/wt-common" ]]; then
-  . "$HOME/.wt/lib/wt-common"
-else
-  echo "Error: Cannot find wt-common" >&2
-  exit 1
-fi
+[[ -f "$LIB_DIR/wt-common" ]] || LIB_DIR="$HOME/.wt/lib"
+[[ -f "$LIB_DIR/wt-common" ]] || { echo "Error: Cannot find wt-common" >&2; exit 1; }
+. "$LIB_DIR/wt-common"
 
 # Source wt-context library
 wt_source wt-context
@@ -140,12 +132,9 @@ remove_context() {
 
   # Parse config values from the .conf file
   local repo_root worktrees_base active_worktree
-  repo_root="$(grep '^WT_MAIN_REPO_ROOT=' "$conf_file" | head -1 | sed 's/^[^=]*=//')"
-  worktrees_base="$(grep '^WT_WORKTREES_BASE=' "$conf_file" | head -1 | sed 's/^[^=]*=//')"
-  active_worktree="$(grep '^WT_ACTIVE_WORKTREE=' "$conf_file" | head -1 | sed 's/^[^=]*=//')"
-  repo_root="$(_wt_normalize_conf_value "$repo_root")"
-  worktrees_base="$(_wt_normalize_conf_value "$worktrees_base")"
-  active_worktree="$(_wt_normalize_conf_value "$active_worktree")"
+  repo_root="$(wt_conf_get "$conf_file" WT_MAIN_REPO_ROOT)"
+  worktrees_base="$(wt_conf_get "$conf_file" WT_WORKTREES_BASE)"
+  active_worktree="$(wt_conf_get "$conf_file" WT_ACTIVE_WORKTREE)"
 
   # Expand ~ in paths
   repo_root="$(_wt_expand_path "$repo_root")"
@@ -246,11 +235,11 @@ remove_context() {
 # ─────────────────────────────────────────────────────────────────────────────
 
 list_contexts() {
-  local repos_dir current_context
-  repos_dir="$(wt_get_repos_dir)"
+  local current_context names
   current_context="$(wt_get_current_context)"
+  names="$(wt_list_contexts)"
 
-  if [[ ! -d "$repos_dir" ]] || ! compgen -G "$repos_dir/*.conf" >/dev/null 2>&1; then
+  if [[ -z "$names" ]]; then
     echo "No contexts configured."
     echo "Run 'wt context add' to add a repository."
     return 0
@@ -258,10 +247,9 @@ list_contexts() {
 
   echo
 
-  for conf in "$repos_dir"/*.conf; do
-    [[ -f "$conf" ]] || continue
-    local name path prefix
-    name="$(basename "$conf" .conf)"
+  local name path prefix
+  while IFS= read -r name; do
+    [[ -z "$name" ]] && continue
     path="$(wt_get_context_repo_root "$name")"
 
     if [[ "$name" == "$current_context" ]]; then
@@ -275,7 +263,7 @@ list_contexts() {
       printf " %s(current)%s" "$GREEN" "$NC"
     fi
     echo
-  done
+  done <<< "$names"
 
   echo
 }

@@ -322,3 +322,59 @@ EOF
     refute_output --partial "mode=context"
     assert_output --partial "wt_read_config --force"
 }
+
+# =============================================================================
+# Context enumeration uses the shared wt_list_contexts helper
+# =============================================================================
+
+@test "bash _wt_context_list emits context names via shared helper" {
+    local repo
+    repo=$(create_mock_repo)
+    create_test_context "ctx-one" "$repo"
+
+    run bash -c "
+        source '$PROJECT_ROOT/completion/wt.bash'
+        _wt_context_list
+    "
+    assert_success
+    assert_line "ctx-one"
+}
+
+@test "zsh context completion offers each context as a separate candidate" {
+    skip_if_no_zsh
+
+    local repo
+    repo=$(create_mock_repo)
+    create_test_context "ctx-one" "$repo"
+    create_test_context "ctx-two" "$repo"
+
+    cat > "$BATS_TEST_TMPDIR/t.zsh" <<EOF
+source "$PROJECT_ROOT/completion/wt.zsh" 2>/dev/null
+_arguments() { state=first; return 1 }
+_describe() {
+  local item
+  for item in "\${(@P)2}"; do
+    print -r -- "ITEM:\$item"
+  done
+}
+_wt_context
+EOF
+    run zsh -f "$BATS_TEST_TMPDIR/t.zsh"
+    assert_success
+    assert_line "ITEM:ctx-one"
+    assert_line "ITEM:ctx-two"
+}
+
+@test "zsh wt_list_contexts is null-glob safe with no contexts" {
+    skip_if_no_zsh
+
+    cat > "$BATS_TEST_TMPDIR/t.zsh" <<EOF
+setopt nomatch
+source "$TEST_HOME/.wt/lib/wt-common" 2>/dev/null
+wt_list_contexts
+print LIST_OK
+EOF
+    run zsh -f "$BATS_TEST_TMPDIR/t.zsh"
+    assert_success
+    assert_output --partial "LIST_OK"
+}

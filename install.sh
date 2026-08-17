@@ -58,9 +58,6 @@ install_toolkit() {
   # Make bin scripts executable
   chmod +x "$INSTALL_DIR"/bin/wt-*
 
-  # Make lib/wt-metadata-refresh executable (for cron job)
-  [[ -f "$INSTALL_DIR/lib/wt-metadata-refresh" ]] && chmod +x "$INSTALL_DIR"/lib/wt-metadata-refresh
-
   echo "  ✓ Installed to $INSTALL_DIR"
 }
 
@@ -100,7 +97,7 @@ configure_shell_rc() {
 
 # Set up cron job for metadata refresh
 setup_cron_job() {
-  local refresh_script="$INSTALL_DIR/lib/wt-metadata-refresh"
+  local refresh_script="$INSTALL_DIR/bin/wt-metadata-refresh"
 
   # Skip if refresh script doesn't exist
   if [[ ! -f "$refresh_script" ]]; then

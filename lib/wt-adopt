@@ -149,34 +149,34 @@ wt_check_adoption_conflicts() {
 
   # Check metadata patterns by scanning the vault (same as wt-metadata-import)
   if [[ -n "$vault" && -d "$vault" ]]; then
-    for pattern in ${WT_METADATA_PATTERNS:-}; do
-      while IFS= read -r -d '' meta_src; do
-        # Compute relative path from vault root (mirrors import_pattern logic)
-        local parent_src
-        parent_src="$(dirname "$meta_src")"
-        local rel_path=""
-        if [[ "$parent_src" != "$vault" ]]; then
-          rel_path="${parent_src#"$vault"/}"
-        fi
+    local meta_src name parent_src rel_path target_meta
+    while IFS= read -r meta_src; do
+      [[ -z "$meta_src" ]] && continue
 
-        # Map to corresponding target in worktree
-        local target_meta
+      # Compute relative path from vault root (mirrors import logic)
+      name="$(basename "$meta_src")"
+      parent_src="$(dirname "$meta_src")"
+      rel_path=""
+      if [[ "$parent_src" != "$vault" ]]; then
+        rel_path="${parent_src#"$vault"/}"
+      fi
+
+      # Map to corresponding target in worktree
+      if [[ -z "$rel_path" ]]; then
+        target_meta="$worktree_path/$name"
+      else
+        target_meta="$worktree_path/$rel_path/$name"
+      fi
+
+      # Check if target already exists
+      if [[ -e "$target_meta" || -L "$target_meta" ]]; then
         if [[ -z "$rel_path" ]]; then
-          target_meta="$worktree_path/$pattern"
+          conflicts+=("$name")
         else
-          target_meta="$worktree_path/$rel_path/$pattern"
+          conflicts+=("$rel_path/$name")
         fi
-
-        # Check if target already exists
-        if [[ -e "$target_meta" || -L "$target_meta" ]]; then
-          if [[ -z "$rel_path" ]]; then
-            conflicts+=("$pattern")
-          else
-            conflicts+=("$rel_path/$pattern")
-          fi
-        fi
-      done < <(find -L "$vault" \( -type l -o -type d \) -name "$pattern" -print0 2>/dev/null)
-    done
+      fi
+    done < <(wt_find_metadata_dirs --follow "$vault")
   fi
 
   if [[ ${#conflicts[@]} -eq 0 ]]; then
@@ -284,13 +284,7 @@ wt_adopt_worktree() {
   # 2. Import metadata (unless keeping existing files)
   if [[ "$keep_existing" != true ]]; then
     local metadata_import=""
-    if [[ -n "${SCRIPT_DIR:-}" && -x "$SCRIPT_DIR/wt-metadata-import" ]]; then
-      metadata_import="$SCRIPT_DIR/wt-metadata-import"
-    elif [[ -x "$HOME/.wt/bin/wt-metadata-import" ]]; then
-      metadata_import="$HOME/.wt/bin/wt-metadata-import"
-    elif command -v wt-metadata-import >/dev/null 2>&1; then
-      metadata_import="wt-metadata-import"
-    fi
+    metadata_import="$(wt_find_bin wt-metadata-import)" || metadata_import=""
 
     if [[ -n "$metadata_import" && -d "${WT_IDEA_FILES_BASE:-}" ]]; then
       info "Importing metadata into worktree: $worktree_path"

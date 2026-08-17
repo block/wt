@@ -35,19 +35,11 @@
 
 set -euo pipefail
 
-# Resolve script and lib directories
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB_DIR="$SCRIPT_DIR/../lib"
-
-# Bootstrap: source wt-common from lib/
-if [[ -f "$LIB_DIR/wt-common" ]]; then
-  . "$LIB_DIR/wt-common"
-elif [[ -f "$HOME/.wt/lib/wt-common" ]]; then
-  . "$HOME/.wt/lib/wt-common"
-else
-  echo "Error: Cannot find wt-common" >&2
-  exit 1
-fi
+[[ -f "$LIB_DIR/wt-common" ]] || LIB_DIR="$HOME/.wt/lib"
+[[ -f "$LIB_DIR/wt-common" ]] || { echo "Error: Cannot find wt-common" >&2; exit 1; }
+. "$LIB_DIR/wt-common"
 wt_require_valid_config || exit 1
 
 # Source wt-choose using the helper
@@ -186,25 +178,6 @@ copy_real_metadata() {
   cp -a "$real_path" "$dst"
 }
 
-# Find all metadata directories across all patterns and prune nested paths.
-# Uses -L to follow symlinks in the vault.
-# Outputs: one path per line, with nested paths removed.
-find_all_import_dirs() {
-  local all_paths=()
-
-  for pattern in $WT_METADATA_PATTERNS; do
-    while IFS= read -r _entry_path; do
-      [[ -n "$_entry_path" ]] && all_paths+=("$_entry_path")
-    done < <(find -L "$SOURCE_DIR" \( -type l -o -type d \) -name "$pattern" -print 2>/dev/null)
-  done
-
-  if [[ ${#all_paths[@]} -eq 0 ]]; then
-    return
-  fi
-
-  printf '%s\n' "${all_paths[@]}" | _wt_prune_nested_paths
-}
-
 # Import all metadata directories (pruned across patterns)
 count=0
 while IFS= read -r META_SRC; do
@@ -242,7 +215,7 @@ while IFS= read -r META_SRC; do
   fi
 
   count=$((count + 1))
-done < <(find_all_import_dirs)
+done < <(wt_find_metadata_dirs --follow "$SOURCE_DIR")
 
 if [[ $count -eq 0 ]]; then
   echo "  (no metadata directories found in vault)"

@@ -190,20 +190,13 @@ _wt_context() {
   case "$state" in
     first)
       local -a contexts subcommands
-      local repos_dir="$HOME/.wt/repos"
 
       subcommands=(
         'add:Add a new repository context'
         'remove:Remove a context and clean up all wt config'
       )
 
-      if [[ -d "$repos_dir" ]]; then
-        for conf in "$repos_dir"/*.conf(N); do
-          [[ -f "$conf" ]] || continue
-          local name="${conf:t:r}"
-          contexts+=("$name")
-        done
-      fi
+      contexts=(${(f)"$(wt_list_contexts)"})
 
       _describe 'subcommands' subcommands
       if (( ${#contexts[@]} > 0 )); then
@@ -219,14 +212,7 @@ _wt_context() {
           '-y:Skip confirmation prompt'
           '--yes:Skip confirmation prompt'
         )
-        local repos_dir="$HOME/.wt/repos"
-        if [[ -d "$repos_dir" ]]; then
-          for conf in "$repos_dir"/*.conf(N); do
-            [[ -f "$conf" ]] || continue
-            local name="${conf:t:r}"
-            rm_contexts+=("$name")
-          done
-        fi
+        rm_contexts=(${(f)"$(wt_list_contexts)"})
         if (( ${#rm_contexts[@]} > 0 )); then
           _describe 'contexts' rm_contexts
         fi

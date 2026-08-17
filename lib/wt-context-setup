@@ -137,23 +137,21 @@ _wt_derive_paths() {
 # Detect which known metadata patterns exist in a repository
 _wt_detect_metadata_patterns() {
   local repo="$1"
-  local all_paths=()
 
+  local known_patterns=""
+  local entry
   for entry in "${WT_KNOWN_METADATA[@]}"; do
-    local pattern="${entry%%:*}"
-    while IFS= read -r _entry_path; do
-      [[ -n "$_entry_path" ]] && all_paths+=("$_entry_path")
-    done < <(find "$repo" -maxdepth 5 -type d -name "$pattern" 2>/dev/null)
+    known_patterns="$known_patterns ${entry%%:*}"
   done
-
-  if [[ ${#all_paths[@]} -eq 0 ]]; then
-    return
-  fi
 
   local kept_paths=()
   while IFS= read -r _entry_path; do
     [[ -n "$_entry_path" ]] && kept_paths+=("$_entry_path")
-  done < <(printf '%s\n' "${all_paths[@]}" | _wt_prune_nested_paths)
+  done < <(WT_METADATA_PATTERNS="$known_patterns" wt_find_metadata_dirs "$repo")
+
+  if [[ ${#kept_paths[@]} -eq 0 ]]; then
+    return
+  fi
 
   local patterns=()
   for _entry_path in ${kept_paths[@]+"${kept_paths[@]}"}; do
@@ -585,14 +583,7 @@ _wt_sync_metadata() {
 
   # Find and run wt-metadata-export
   local metadata_export=""
-  local script_dir="${SCRIPT_DIR:-}"
-  if [[ -n "$script_dir" && -x "$script_dir/wt-metadata-export" ]]; then
-    metadata_export="$script_dir/wt-metadata-export"
-  elif [[ -x "$HOME/.wt/bin/wt-metadata-export" ]]; then
-    metadata_export="$HOME/.wt/bin/wt-metadata-export"
-  elif command -v wt-metadata-export >/dev/null 2>&1; then
-    metadata_export="wt-metadata-export"
-  fi
+  metadata_export="$(wt_find_bin wt-metadata-export)" || metadata_export=""
 
   if [[ -n "$metadata_export" ]]; then
     "$metadata_export" -y "$WT_MAIN_REPO_ROOT" "$WT_IDEA_FILES_BASE"
@@ -764,7 +755,7 @@ wt_setup_context() {
         echo
         warn "Context '$context_name' already exists."
         local existing_repo
-        existing_repo=$(grep '^WT_MAIN_REPO_ROOT=' "$repos_dir/$context_name.conf" 2>/dev/null | cut -d'"' -f2)
+        existing_repo=$(wt_conf_get "$repos_dir/$context_name.conf" WT_MAIN_REPO_ROOT)
         if [[ -n "$existing_repo" ]]; then
           echo "  Current config: $existing_repo"
         fi
@@ -808,7 +799,7 @@ wt_setup_context() {
       echo
       warn "Context '$context_name' already exists."
       local existing_repo
-      existing_repo=$(grep '^WT_MAIN_REPO_ROOT=' "$repos_dir/$context_name.conf" 2>/dev/null | cut -d'"' -f2)
+      existing_repo=$(wt_conf_get "$repos_dir/$context_name.conf" WT_MAIN_REPO_ROOT)
       if [[ -n "$existing_repo" ]]; then
         echo "  Current config: $existing_repo"
       fi

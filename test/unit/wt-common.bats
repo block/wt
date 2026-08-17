@@ -1625,3 +1625,190 @@ setup_entries_fixture() {
     assert_line "feature-a"
     refute_line "feature-gone"
 }
+
+# =============================================================================
+# Tests for wt_source() default lib dir
+# =============================================================================
+
+@test "wt_source falls back to ~/.wt/lib when LIB_DIR is unset" {
+    echo 'TEST_DEFAULT_LIB_LOADED=true' > "$TEST_HOME/.wt/lib/test-default-lib"
+
+    unset LIB_DIR
+    wt_source "test-default-lib"
+
+    assert_equal "$TEST_DEFAULT_LIB_LOADED" "true"
+}
+
+# =============================================================================
+# Tests for wt_conf_get()
+# =============================================================================
+
+@test "wt_conf_get reads a quoted value" {
+    printf '# comment\nWT_MAIN_REPO_ROOT="/tmp/repo"\n' > "$BATS_TEST_TMPDIR/x.conf"
+
+    run wt_conf_get "$BATS_TEST_TMPDIR/x.conf" WT_MAIN_REPO_ROOT
+    assert_success
+    assert_output "/tmp/repo"
+}
+
+@test "wt_conf_get reads an unquoted value" {
+    printf 'WT_WORKTREES_BASE=/unquoted/path\n' > "$BATS_TEST_TMPDIR/x.conf"
+
+    run wt_conf_get "$BATS_TEST_TMPDIR/x.conf" WT_WORKTREES_BASE
+    assert_success
+    assert_output "/unquoted/path"
+}
+
+@test "wt_conf_get normalizes trailing whitespace and inline comments" {
+    printf 'WT_MAIN_REPO_ROOT="/tmp/repo" \nWT_BASE_BRANCH="main"  # my comment\n' > "$BATS_TEST_TMPDIR/x.conf"
+
+    run wt_conf_get "$BATS_TEST_TMPDIR/x.conf" WT_MAIN_REPO_ROOT
+    assert_success
+    assert_output "/tmp/repo"
+
+    run wt_conf_get "$BATS_TEST_TMPDIR/x.conf" WT_BASE_BRANCH
+    assert_success
+    assert_output "main"
+}
+
+@test "wt_conf_get uses the first match when a key repeats" {
+    printf 'WT_BASE_BRANCH="first"\nWT_BASE_BRANCH="second"\n' > "$BATS_TEST_TMPDIR/x.conf"
+
+    run wt_conf_get "$BATS_TEST_TMPDIR/x.conf" WT_BASE_BRANCH
+    assert_success
+    assert_output "first"
+}
+
+@test "wt_conf_get returns empty for missing key or missing file" {
+    printf 'WT_BASE_BRANCH="main"\n' > "$BATS_TEST_TMPDIR/x.conf"
+
+    run wt_conf_get "$BATS_TEST_TMPDIR/x.conf" WT_NOPE
+    assert_success
+    assert_output ""
+
+    run wt_conf_get "$BATS_TEST_TMPDIR/does-not-exist.conf" WT_BASE_BRANCH
+    assert_success
+    assert_output ""
+}
+
+# =============================================================================
+# Tests for wt_find_metadata_dirs()
+# =============================================================================
+
+@test "wt_find_metadata_dirs matches dirs and files in one traversal and prunes nested" {
+    local root="$BATS_TEST_TMPDIR/scanroot"
+    mkdir -p "$root/.ijwb/.idea" "$root/sub/.idea"
+    touch "$root/.bazelproject"
+
+    export WT_METADATA_PATTERNS=".ijwb .idea .bazelproject"
+    run wt_find_metadata_dirs "$root"
+    assert_success
+    assert_line "$root/.bazelproject"
+    assert_line "$root/.ijwb"
+    assert_line "$root/sub/.idea"
+    refute_line "$root/.ijwb/.idea"
+}
+
+@test "wt_find_metadata_dirs caps scanning at depth 5" {
+    local root="$BATS_TEST_TMPDIR/depthroot"
+    mkdir -p "$root/a/b/c/d/.idea"
+    mkdir -p "$root/a/b/c/d/e/.idea"
+
+    export WT_METADATA_PATTERNS=".idea"
+    run wt_find_metadata_dirs "$root"
+    assert_success
+    assert_line "$root/a/b/c/d/.idea"
+    refute_line "$root/a/b/c/d/e/.idea"
+}
+
+@test "wt_find_metadata_dirs --follow finds vault symlinks to dirs and files" {
+    local src="$BATS_TEST_TMPDIR/linksrc" vault="$BATS_TEST_TMPDIR/linkvault"
+    mkdir -p "$src/.idea" "$vault"
+    touch "$src/.bazelproject"
+    ln -s "$src/.idea" "$vault/.idea"
+    ln -s "$src/.bazelproject" "$vault/.bazelproject"
+
+    export WT_METADATA_PATTERNS=".idea .bazelproject"
+    run wt_find_metadata_dirs --follow "$vault"
+    assert_success
+    assert_line "$vault/.idea"
+    assert_line "$vault/.bazelproject"
+}
+
+@test "wt_find_metadata_dirs is silent for empty patterns or missing root" {
+    export WT_METADATA_PATTERNS=""
+    run wt_find_metadata_dirs "$BATS_TEST_TMPDIR"
+    assert_success
+    assert_output ""
+
+    export WT_METADATA_PATTERNS=".idea"
+    run wt_find_metadata_dirs "$BATS_TEST_TMPDIR/does-not-exist"
+    assert_success
+    assert_output ""
+}
+
+# =============================================================================
+# Tests for wt_find_bin()
+# =============================================================================
+
+@test "wt_find_bin searches SCRIPT_DIR, BIN_DIR, ~/.wt/bin in order" {
+    local name="wt-fakebin-test"
+    mkdir -p "$BATS_TEST_TMPDIR/sdir" "$BATS_TEST_TMPDIR/bdir"
+    printf '#!/bin/sh\n' > "$BATS_TEST_TMPDIR/sdir/$name"
+    printf '#!/bin/sh\n' > "$BATS_TEST_TMPDIR/bdir/$name"
+    printf '#!/bin/sh\n' > "$TEST_HOME/.wt/bin/$name"
+    chmod +x "$BATS_TEST_TMPDIR/sdir/$name" "$BATS_TEST_TMPDIR/bdir/$name" "$TEST_HOME/.wt/bin/$name"
+
+    export SCRIPT_DIR="$BATS_TEST_TMPDIR/sdir"
+    export BIN_DIR="$BATS_TEST_TMPDIR/bdir"
+
+    run wt_find_bin "$name"
+    assert_success
+    assert_output "$BATS_TEST_TMPDIR/sdir/$name"
+
+    rm "$BATS_TEST_TMPDIR/sdir/$name"
+    run wt_find_bin "$name"
+    assert_success
+    assert_output "$BATS_TEST_TMPDIR/bdir/$name"
+
+    rm "$BATS_TEST_TMPDIR/bdir/$name"
+    run wt_find_bin "$name"
+    assert_success
+    assert_output "$TEST_HOME/.wt/bin/$name"
+
+    rm "$TEST_HOME/.wt/bin/$name"
+    run wt_find_bin "$name"
+    assert_failure
+}
+
+@test "wt_find_bin falls back to PATH lookup" {
+    local name="wt-fakepath-test"
+    mkdir -p "$BATS_TEST_TMPDIR/pbin"
+    printf '#!/bin/sh\n' > "$BATS_TEST_TMPDIR/pbin/$name"
+    chmod +x "$BATS_TEST_TMPDIR/pbin/$name"
+    export PATH="$BATS_TEST_TMPDIR/pbin:$PATH"
+    unset SCRIPT_DIR BIN_DIR
+
+    run wt_find_bin "$name"
+    assert_success
+    assert_output "$name"
+}
+
+# =============================================================================
+# Context helpers live in wt-common (usable without lib/wt-context)
+# =============================================================================
+
+@test "context helpers are available from wt-common alone" {
+    # This file's setup sources only wt-common, not lib/wt-context
+    declare -f wt_list_contexts >/dev/null
+    declare -f wt_get_repos_dir >/dev/null
+    declare -f wt_get_current_context >/dev/null
+
+    echo 'WT_MAIN_REPO_ROOT="/x"' > "$TEST_HOME/.wt/repos/aaa.conf"
+    echo 'WT_MAIN_REPO_ROOT="/y"' > "$TEST_HOME/.wt/repos/bbb.conf"
+
+    run wt_list_contexts
+    assert_success
+    assert_line --index 0 "aaa"
+    assert_line --index 1 "bbb"
+}

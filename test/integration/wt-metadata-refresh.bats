@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 
-# Integration tests for lib/wt-metadata-refresh
+# Integration tests for bin/wt-metadata-refresh
 
 setup() {
     load '../test_helper/common'
@@ -46,7 +46,7 @@ directories:
 EOF
     export MOCK_BAZEL_STDOUT="//src/main:lib"
 
-    run "$TEST_HOME/.wt/lib/wt-metadata-refresh" --no-export
+    run "$TEST_HOME/.wt/bin/wt-metadata-refresh" --no-export
     assert_success
 
     run cat "$MOCK_BAZEL_ARGS"
@@ -61,7 +61,7 @@ directories:
 EOF
     export MOCK_BAZEL_STDOUT="//pkg:target"
 
-    run "$TEST_HOME/.wt/lib/wt-metadata-refresh" --no-export
+    run "$TEST_HOME/.wt/bin/wt-metadata-refresh" --no-export
     assert_success
 
     run cat "$MOCK_BAZEL_ARGS"
@@ -73,7 +73,7 @@ EOF
     export MOCK_BAZEL_STDERR="ERROR: Skipping '//bad/...': no such package"
     export MOCK_BAZEL_EXIT=3
 
-    run "$TEST_HOME/.wt/lib/wt-metadata-refresh" --no-export
+    run "$TEST_HOME/.wt/bin/wt-metadata-refresh" --no-export
     assert_failure
 
     assert_output --partial "Bazel query returned empty results"

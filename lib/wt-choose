@@ -47,16 +47,9 @@ set -euo pipefail
 
 # Resolve lib directory (where this script lives)
 LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-# Bootstrap: source wt-common from same directory
-if [[ -f "$LIB_DIR/wt-common" ]]; then
-  . "$LIB_DIR/wt-common"
-elif [[ -f "$HOME/.wt/lib/wt-common" ]]; then
-  . "$HOME/.wt/lib/wt-common"
-else
-  echo "Error: Cannot find wt-common" >&2
-  exit 1
-fi
+[[ -f "$LIB_DIR/wt-common" ]] || LIB_DIR="$HOME/.wt/lib"
+[[ -f "$LIB_DIR/wt-common" ]] || { echo "Error: Cannot find wt-common" >&2; exit 1; }
+. "$LIB_DIR/wt-common"
 
 # Interactively pick a worktree from WT_MAIN_REPO_ROOT
 # Runs in a subshell to avoid changing the caller's working directory

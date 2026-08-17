@@ -267,16 +267,7 @@ _wt_list_complete() {
 
 # --- Helper: get context list ---
 _wt_context_list() {
-  local repos_dir="$HOME/.wt/repos"
-
-  [[ ! -d "$repos_dir" ]] && return 0
-
-  for conf in "$repos_dir"/*.conf; do
-    [[ -f "$conf" ]] || continue
-    local name="${conf##*/}"
-    name="${name%.conf}"
-    printf '%s\n' "$name"
-  done
+  wt_list_contexts
 }
 
 # --- Completion for wt-context ---
