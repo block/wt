@@ -114,6 +114,12 @@ When creating with `-b`, the script:
 
 Each worktree gets its own Bazel output base (Bazel derives it from the worktree path), so builds in different worktrees never clobber each other. `wt remove` reclaims that disk space automatically.
 
+Set `WT_SKIP_PULL=1` to skip the `git pull` step (useful offline or in scripts):
+
+```bash
+WT_SKIP_PULL=1 wt add -b feature/foo
+```
+
 ### Switching Worktrees
 
 ```bash
@@ -140,14 +146,36 @@ wt cd ~/Development/java-worktrees/feature/foo
 
 ```bash
 wt list
+wt list -v            # Adds dirty/ahead/behind indicators (slower)
+wt list --porcelain   # Machine-readable output (for scripts and agents)
 ```
 
 Shows all worktrees with status indicators:
 - `*` = Currently linked worktree
 - `[main]` = Main repository root
 - `[linked]` = Active symlink target
-- `[dirty]` = Has uncommitted changes
-- `[↑N]` / `[↓N]` = Commits ahead/behind upstream
+- `[unadopted]` = Worktree not adopted by wt (fix with `wt adopt`)
+- `[dirty]` = Has uncommitted changes (with `-v`)
+- `[↑N]` / `[↓N]` = Commits ahead/behind upstream (with `-v`)
+
+`--porcelain` prints `git worktree list --porcelain` output augmented with extra
+lines per worktree: `wt.active`, `wt.adopted`, and (with `-v`) `wt.dirty`,
+`wt.ahead N`, `wt.behind N`.
+
+### Adopting Existing Worktrees
+
+Worktrees created outside `wt` (e.g. with plain `git worktree add`) show as
+`[unadopted]` in `wt list`. Adoption imports project metadata from the vault and
+marks the worktree as managed by wt:
+
+```bash
+wt adopt                          # Adopt the worktree at the current directory
+wt adopt <worktree-path|branch>   # Adopt a specific worktree
+wt adopt --redo                   # Re-run adoption on an adopted worktree
+wt adopt --force                  # Skip conflict checks, overwrite without prompting
+```
+
+The main repository cannot be adopted (only worktrees).
 
 ### Removing Worktrees
 
@@ -161,20 +189,44 @@ wt remove ~/Development/java-worktrees/feature/foo
 # Skip confirmation (unless uncommitted changes exist)
 wt remove -y ~/Development/java-worktrees/feature/foo
 
+# Also delete the git branch
+wt remove -b feature/foo
+
 # Remove all worktrees with branches merged into base branch
 wt remove --merged
 
-# Auto-remove merged without prompts (skips worktrees with uncommitted changes)
-wt remove --merged -y
+# Remove merged without prompts, skipping worktrees with uncommitted changes
+wt remove --merged -y --on-dirty=skip
 ```
+
+Flags:
+- `-y`/`--yes` = Skip confirmation prompts (dirty worktrees still prompt unless `--on-dirty` says otherwise)
+- `-b`/`--branch` = Also delete the git branch after removing the worktree
+- `--merged` = Remove all worktrees whose branches are merged (regular + squash)
+- `--on-dirty=MODE` = What to do with uncommitted changes: `warn` (default, prompts), `skip`, or `remove`
 
 Safety features:
 - Warns if the worktree is currently linked (symlink will be switched to main repo)
 - Warns if there are uncommitted changes (shows summary)
-- Always prompts for confirmation if uncommitted changes exist, even with `-y`
+- Always prompts for confirmation if uncommitted changes exist, even with `-y` (use `--on-dirty=skip` or `--on-dirty=remove` to override)
 - `--merged` mode: automatically finds and removes all worktrees whose branches are merged
 
 After a successful removal, `wt remove` also reaps the worktree's dedicated Bazel output base (best-effort): it locates the output base named after the md5 hash of the worktree path under the known Bazel output user roots (`~/Library/Caches/bazel/_bazel_$USER`, `/private/var/tmp/_bazel_$USER`, `~/.cache/bazel/_bazel_$USER`), verifies it contains `execroot/`, deletes it, and reports the disk space freed. If no matching output base exists, nothing is printed; cleanup failures only warn and never fail the removal.
+
+### Multi-Repo Contexts
+
+`wt` can manage worktrees for multiple repositories. Each repository is a named
+context whose configuration lives in `~/.wt/repos/<name>.conf`:
+
+```bash
+wt context                       # Interactive: pick context to switch to
+wt context <name>                # Switch to named context
+wt context --list                # List all available contexts
+wt context add                   # Add a new repository context (interactive)
+wt context add <path>            # Add context for repository at path
+wt context add <name> <path>     # Add context with specific name and path
+wt context remove [name]         # Remove a context and clean up all wt config
+```
 
 ### Managing Project Metadata
 
@@ -241,22 +293,25 @@ The refresh script:
 The scripts rely on a few environment variables to know where your
 main repository, worktrees, and IntelliJ metadata live.
 
-These environment variables are set in `wt-common` with built-in defaults.
+These variables are normally read from the per-context config file
+(`~/.wt/repos/<name>.conf`, written by `wt context add`). When no context is
+configured, `wt-common` falls back to the built-in defaults below.
 If set in your shell configuration, they take precedence over the built-in defaults.
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `WT_MAIN_REPO_ROOT` | `~/Development/java-master` | Main repository root |
-| `WT_WORKTREES_BASE` | `~/Development/java-worktrees` | Where worktrees are created |
-| `WT_IDEA_FILES_BASE` | `~/Development/idea-project-files` | IntelliJ metadata vault |
+| `WT_MAIN_REPO_ROOT` | `~/.wt/repos/repo/base` | Main repository root |
+| `WT_WORKTREES_BASE` | `~/.wt/repos/repo/worktrees` | Where worktrees are created |
+| `WT_IDEA_FILES_BASE` | `~/.wt/repos/repo/idea-files` | IntelliJ metadata vault |
 | `WT_ACTIVE_WORKTREE` | `~/Development/java` | Symlink to active worktree |
 | `WT_BASE_BRANCH` | `master` | Default branch for new worktrees |
 | `WT_SEED_FILES` | (empty) | Root files copied from main repo into new worktrees |
+| `WT_METADATA_PATTERNS` | (empty) | Space-separated metadata patterns to preserve |
 
 ### WT_MAIN_REPO_ROOT
 Path to your primary git repository clone.
 
-**Default:** `~/Development/java-master`
+**Default:** `~/.wt/repos/repo/base`
 
 ```bash
 export WT_MAIN_REPO_ROOT="$HOME/Development/java-master"
@@ -272,7 +327,7 @@ Used by:
 ### WT_WORKTREES_BASE
 Directory where new worktrees are created by default.
 
-**Default:** `~/Development/java-worktrees`
+**Default:** `~/.wt/repos/repo/worktrees`
 
 ```bash
 export WT_WORKTREES_BASE="$HOME/Development/java-worktrees"
@@ -282,7 +337,7 @@ export WT_WORKTREES_BASE="$HOME/Development/java-worktrees"
 ### WT_IDEA_FILES_BASE
 Canonical metadata vault storing project metadata (IDE configs, etc.).
 
-**Default:** `~/Development/idea-project-files`
+**Default:** `~/.wt/repos/repo/idea-files`
 
 ```bash
 export WT_IDEA_FILES_BASE="$HOME/Development/idea-project-files"
@@ -333,6 +388,20 @@ Used by:
 - wt-add (via adoption treatment)
 - wt-adopt
 
+### WT_METADATA_PATTERNS
+Space-separated list of project metadata patterns to preserve across worktrees.
+
+**Default:** empty (context setup typically sets `.ijwb`)
+
+```bash
+export WT_METADATA_PATTERNS=".ijwb .idea .vscode"
+```
+
+Used by:
+- wt-metadata-import / wt-metadata-export
+- wt-metadata-refresh
+- wt-add and wt-adopt (when installing metadata)
+
 ## Presentation
 
 A 10-minute overview presentation is available in the `presentation/` directory:
@@ -354,7 +423,9 @@ wt/
 ├── presentation/            # Overview slides
 ├── bin/                     # Executable commands
 │   ├── wt-add
+│   ├── wt-adopt
 │   ├── wt-cd
+│   ├── wt-context
 │   ├── wt-list
 │   ├── wt-remove
 │   ├── wt-switch
@@ -362,9 +433,11 @@ wt/
 │   └── wt-metadata-export
 ├── lib/                     # Shared libraries
 │   ├── wt-common            # Configuration and helpers
+│   ├── wt-adopt             # Worktree adoption helpers
 │   ├── wt-choose            # Interactive worktree selection
+│   ├── wt-context           # Multi-repo context management
+│   ├── wt-context-setup     # Context creation (wt context add)
 │   ├── wt-help              # Help text for wt command
-│   ├── wt-completion        # Shell completion for wt command
 │   └── wt-metadata-refresh  # Cron script to refresh Bazel IDE metadata
 ├── completion/              # Shell completions for wt-* scripts
 │   ├── wt.zsh
@@ -378,7 +451,7 @@ wt/
 You can also run the underlying scripts directly:
 
 ```bash
-wt-add, wt-switch, wt-remove, wt-list, wt-cd, wt-metadata-export, wt-metadata-import
+wt-add, wt-adopt, wt-switch, wt-remove, wt-list, wt-cd, wt-context, wt-metadata-export, wt-metadata-import
 ```
 
 These are located in `bin/` and work identically to the `wt` subcommands.

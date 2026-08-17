@@ -21,7 +21,8 @@ wt — Unified Worktree Toolkit
 Usage: wt <command> [args]
 
 Worktree Commands:
-  add <branch>              Create a new worktree for a branch
+  add <branch>              Create a new worktree for an existing branch
+  add -b <branch>           Create a new branch (from base branch) + worktree
   switch [worktree]         Switch the active worktree symlink
                             - interactive worktree selection if omitted
   remove [-y] [-b] [worktree ...] Remove worktree(s) (optionally delete branch)
@@ -34,8 +35,13 @@ Worktree Commands:
   list [-v] [--porcelain]   List all worktrees with status
                             - use -v for dirty/ahead/behind indicators
                             - use --porcelain for machine-readable output
+                            - [unadopted] marks worktrees not adopted by wt
   cd [worktree]             Change directory to a worktree
                             - interactive worktree selection if omitted
+  adopt [worktree|branch]   Adopt an existing worktree into wt management
+                            - adopts the current worktree if omitted
+                            - use --redo to re-run adoption treatment
+                            - use --force to overwrite without prompting
 
 Context Commands (multi-repo support):
   context                   Interactive: pick repository context to switch to
@@ -61,7 +67,8 @@ Other:
   help                      Show this help message
 
 Examples:
-  wt add feature/my-feature       # Create worktree for new branch
+  wt add feature/my-feature       # Create worktree for existing branch
+  wt add -b feature/my-feature    # Create new branch + worktree
   wt switch                       # Interactive: pick worktree to link
   wt cd                           # Interactive: cd to selected worktree
   wt list                         # Show all worktrees (fast)
@@ -71,6 +78,7 @@ Examples:
   wt remove --merged              # Remove all worktrees with merged branches
   wt remove branch1 branch2        # Remove multiple worktrees at once
   wt remove --merged --on-dirty=skip  # Remove merged, skip dirty ones
+  wt adopt                        # Adopt current worktree into wt management
 
   wt context                      # Switch to a different repository
   wt context java                 # Switch to 'java' context
