@@ -46,6 +46,10 @@ setup_test_env() {
     export _WT_ROOT="$TEST_HOME/.wt"
     export LIB_DIR="$TEST_HOME/.wt/lib"
     export _WT_SKIP_GIT_CONFIG=1
+
+    # Completion files fall back to $HOME/.wt only when __WT_ROOT is unset;
+    # a leaked dev value would source the real install instead of TEST_HOME
+    unset __WT_ROOT
 }
 
 # Teardown test environment
