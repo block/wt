@@ -741,12 +741,15 @@ wt_is_worktree_root() {
   local candidate
   candidate="$(cd "$1" 2>/dev/null && pwd -P)" || return 1
 
-  local wt_abs
+  # Capture before looping: returning early from a < <(...) loop EPIPEs the
+  # producer's printf when SIGPIPE is ignored (as on GitHub CI runners).
+  local entries wt_abs
+  entries="$(wt_worktree_entries)"
   while IFS=$'\t' read -r wt_abs _ _; do
     if [[ "$wt_abs" == "$candidate" ]]; then
       return 0
     fi
-  done < <(wt_worktree_entries)
+  done <<< "$entries"
 
   return 1
 }
@@ -769,13 +772,14 @@ wt_resolve_worktree() {
   fi
 
   # 2) Try as exact branch name
-  local wt_abs kind branch
+  local entries wt_abs kind branch
+  entries="$(wt_worktree_entries)"
   while IFS=$'\t' read -r wt_abs kind branch; do
     if [[ "$kind" == "branch" && "$branch" == "$identifier" && -d "$wt_abs" ]]; then
       printf '%s\n' "$wt_abs"
       return 0
     fi
-  done < <(wt_worktree_entries)
+  done <<< "$entries"
 
   return 1
 }

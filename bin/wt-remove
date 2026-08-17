@@ -422,14 +422,17 @@ fi
 # Returns: 0 if found, 1 otherwise
 _find_stale_worktree() {
   local identifier="$1"
-  local wt_path kind branch
+  # Capture before looping: returning early from a < <(...) loop EPIPEs the
+  # producer's printf when SIGPIPE is ignored (as on GitHub CI runners).
+  local entries wt_path kind branch
+  entries="$(wt_worktree_entries --raw)"
   while IFS=$'\t' read -r wt_path kind branch; do
     [[ -d "$wt_path" ]] && continue
     if [[ "$identifier" == "$wt_path" || ( -n "$branch" && "$identifier" == "$branch" ) ]]; then
       printf '%s\n' "$wt_path"
       return 0
     fi
-  done < <(wt_worktree_entries --raw)
+  done <<< "$entries"
   return 1
 }
 
