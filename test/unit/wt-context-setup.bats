@@ -536,3 +536,142 @@ teardown() {
     expected=$(printf '%s\n' wt.activeworktree wt.basebranch wt.contextname wt.enabled wt.ideafilesbase wt.metadatapatterns wt.worktreesbase | sort)
     assert_equal "$keys" "$expected"
 }
+
+# =============================================================================
+# Tests for _wt_prompt_path_config()
+# =============================================================================
+
+@test "_wt_prompt_path_config expands ~ in input" {
+    _wt_prompt_path_config "Test path" "/default/dir" <<< "~/custom/path"
+    assert_equal "$_WT_PROMPT_PATH_RESULT" "$HOME/custom/path"
+}
+
+@test "_wt_prompt_path_config keeps default on empty input" {
+    _wt_prompt_path_config "Test path" "/default/dir" <<< ""
+    assert_equal "$_WT_PROMPT_PATH_RESULT" "/default/dir"
+}
+
+@test "_wt_prompt_path_config re-prompts on relative path" {
+    _wt_prompt_path_config "Test path" "/default/dir" <<< $'relative/path\n/abs/ok'
+    assert_equal "$_WT_PROMPT_PATH_RESULT" "/abs/ok"
+}
+
+@test "_wt_prompt_path_config re-prompts on glob characters" {
+    _wt_prompt_path_config "Test path" "/default/dir" <<< $'/glob/*/path\n/abs/ok'
+    assert_equal "$_WT_PROMPT_PATH_RESULT" "/abs/ok"
+}
+
+@test "_wt_prompt_path_config returns failure on EOF" {
+    run _wt_prompt_path_config "Test path" "/default/dir" < /dev/null
+    assert_failure
+}
+
+@test "wt_setup_context customization expands ~ and writes absolute paths to config" {
+    local repo
+    repo=$(create_mock_repo "$BATS_TEST_TMPDIR/customize-repo")
+
+    local workdir="$BATS_TEST_TMPDIR/workdir"
+    mkdir -p "$workdir"
+    cd "$workdir"
+
+    run wt_setup_context "$repo" "ctxcustom" <<'EOF'
+n
+~/wt-custom/active
+~/wt-custom/base
+~/wt-custom/worktrees
+~/wt-custom/idea-files
+
+EOF
+    assert_success
+
+    local conf="$TEST_HOME/.wt/repos/ctxcustom.conf"
+    assert [ -f "$conf" ]
+    run grep '^WT_ACTIVE_WORKTREE=' "$conf"
+    assert_output "WT_ACTIVE_WORKTREE=\"$TEST_HOME/wt-custom/active\""
+    run grep '^WT_MAIN_REPO_ROOT=' "$conf"
+    assert_output "WT_MAIN_REPO_ROOT=\"$TEST_HOME/wt-custom/base\""
+    run grep '^WT_WORKTREES_BASE=' "$conf"
+    assert_output "WT_WORKTREES_BASE=\"$TEST_HOME/wt-custom/worktrees\""
+    run grep '^WT_IDEA_FILES_BASE=' "$conf"
+    assert_output "WT_IDEA_FILES_BASE=\"$TEST_HOME/wt-custom/idea-files\""
+
+    # No literal '~' directory created in the working directory
+    assert [ ! -e "$workdir/~" ]
+}
+
+# =============================================================================
+# Tests for _wt_migrate_warn_cross_device()
+# =============================================================================
+
+@test "_wt_migrate_warn_cross_device warns when filesystems differ" {
+    run _wt_migrate_warn_cross_device "$BATS_TEST_TMPDIR" "/dev/wt-nonexistent/base"
+    assert_success
+    assert_output --partial "different filesystems"
+}
+
+@test "_wt_migrate_warn_cross_device is silent on the same filesystem" {
+    run _wt_migrate_warn_cross_device "$BATS_TEST_TMPDIR" "$BATS_TEST_TMPDIR/nonexistent/base"
+    assert_success
+    assert_output ""
+}
+
+# =============================================================================
+# Tests for _wt_migrate_repo rollback
+# =============================================================================
+
+@test "_wt_migrate_repo restores repo when destination move fails" {
+    local repo
+    repo=$(create_mock_repo "$BATS_TEST_TMPDIR/migrate-src")
+
+    local dest_parent="$BATS_TEST_TMPDIR/readonly-dest"
+    mkdir -p "$dest_parent"
+    chmod 555 "$dest_parent"
+
+    export WT_ACTIVE_WORKTREE="$repo"
+    export WT_MAIN_REPO_ROOT="$dest_parent/base"
+
+    run _wt_migrate_repo "failctx" <<< "y"
+    chmod 755 "$dest_parent"
+
+    assert_failure
+    assert [ -d "$repo/.git" ]
+    assert [ -f "$repo/file.txt" ]
+    assert [ ! -L "$repo" ]
+    run bash -c "ls -d \"$repo\".wt-migrate-* 2>/dev/null"
+    assert_failure
+}
+
+@test "_wt_migrate_repo restores repo when interrupted during destination move" {
+    local repo
+    repo=$(create_mock_repo "$BATS_TEST_TMPDIR/int-src")
+    local dest="$BATS_TEST_TMPDIR/int-dest/base"
+
+    local shim_dir="$BATS_TEST_TMPDIR/shim"
+    mkdir -p "$shim_dir"
+    cat > "$shim_dir/mv" <<EOF
+#!/usr/bin/env bash
+if [[ "\${2:-}" == "$dest" ]]; then
+  kill -INT \$PPID
+  sleep 2
+  exit 130
+fi
+exec /bin/mv "\$@"
+EOF
+    chmod +x "$shim_dir/mv"
+
+    run env PATH="$shim_dir:$PATH" bash -c "
+      set -euo pipefail
+      source \"\$LIB_DIR/wt-common\"
+      source \"\$LIB_DIR/wt-adopt\"
+      source \"\$LIB_DIR/wt-context-setup\"
+      export WT_ACTIVE_WORKTREE=\"$repo\"
+      export WT_MAIN_REPO_ROOT=\"$dest\"
+      _wt_migrate_repo intctx <<< 'y'
+    "
+
+    assert_failure
+    assert [ -d "$repo/.git" ]
+    assert [ -f "$repo/file.txt" ]
+    run bash -c "ls -d \"$repo\".wt-migrate-* 2>/dev/null"
+    assert_failure
+}
