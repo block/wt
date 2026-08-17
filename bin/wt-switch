@@ -84,10 +84,7 @@ fi
 wt_show_context_banner
 
 # Resolve link path from config
-LINK_PATH="$WT_ACTIVE_WORKTREE"
-if [[ -d "$(dirname "$LINK_PATH")" ]]; then
-  LINK_PATH="$(cd "$(dirname "$LINK_PATH")" && pwd)/$(basename "$LINK_PATH")"
-fi
+LINK_PATH="$(_wt_resolve_parent "$WT_ACTIVE_WORKTREE")" || LINK_PATH="$WT_ACTIVE_WORKTREE"
 
 #
 # Display current linked worktree if it exists

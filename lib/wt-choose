@@ -58,9 +58,6 @@ else
   exit 1
 fi
 
-# Source wt-adopt for adoption status checks
-wt_source wt-adopt
-
 # Interactively pick a worktree from WT_MAIN_REPO_ROOT
 # Runs in a subshell to avoid changing the caller's working directory
 # Args: $1 = "exclude_main" to exclude the main repository from selection
@@ -91,21 +88,19 @@ select_git_worktree() {
     local linked_worktree
     linked_worktree="$(wt_get_linked_worktree)"
 
-    local WORKTREES=()
-    local line wt wt_abs
+    local WORKTREES=() BRANCHES=()
+    local wt wt_abs kind branch
 
-    while IFS= read -r line; do
-      case "$line" in
-        worktree\ *)
-          wt="${line#worktree }"
-          wt_abs="$(cd "$wt" 2>/dev/null && pwd -P)" || continue
-          # Skip main repo if exclude_main is set
-          if [[ "$exclude_main" != "exclude_main" || "$wt_abs" != "$main_repo_abs" ]]; then
-            WORKTREES[${#WORKTREES[@]}]="$wt_abs"
-          fi
-          ;;
-      esac
-    done < <(git worktree list --porcelain)
+    while IFS=$'\t' read -r wt_abs kind branch; do
+      [[ -d "$wt_abs" ]] || continue
+      # Skip main repo if exclude_main is set
+      if [[ "$exclude_main" == "exclude_main" && "$wt_abs" == "$main_repo_abs" ]]; then
+        continue
+      fi
+      [[ "$kind" == "detached" ]] && branch="HEAD"
+      WORKTREES[${#WORKTREES[@]}]="$wt_abs"
+      BRANCHES[${#BRANCHES[@]}]="$branch"
+    done < <(wt_worktree_entries)
 
     if [[ ${#WORKTREES[@]} -eq 0 ]]; then
       if [[ "$exclude_main" == "exclude_main" ]]; then
@@ -118,34 +113,17 @@ select_git_worktree() {
 
     echoerr ""
 
+    local adopted_set
+    adopted_set="$(wt_adopted_worktree_paths)"
+
     local i=1
     for wt in "${WORKTREES[@]}"; do
-      local is_linked=false is_unadopted=false
-      if [[ -n "$linked_worktree" && "$wt" == "$linked_worktree" ]]; then
-        is_linked=true
-      fi
-      if [[ "$wt" != "$main_repo_abs" ]] && ! wt_is_adopted "$wt" 2>/dev/null; then
-        is_unadopted=true
-      fi
-
-      # Determine prefix: * for linked, space otherwise
-      local prefix="  "
-      if [[ "$is_linked" == true ]]; then
-        prefix="${GREEN}*${NC} "
-      fi
-
-      # Build unadopted badge (red if also linked, yellow otherwise)
-      local unadopted_badge=""
-      if [[ "$is_unadopted" == true ]]; then
-        if [[ "$is_linked" == true ]]; then
-          unadopted_badge="${RED}[unadopted]${NC} "
-        else
-          unadopted_badge="${YELLOW}[unadopted]${NC} "
-        fi
-      fi
+      wt_worktree_prefix_and_badge "$wt" "$main_repo_abs" "$linked_worktree" "$adopted_set"
 
       # Use shared formatting with number prefix (fast mode - no status checks)
-      printf "%s%2d) %s%s\n" "$prefix" "$i" "$(wt_format_worktree "$wt" "$main_repo_abs" "$linked_worktree" "false")" "$unadopted_badge" >&2
+      printf "%s%2d) %s%s\n" "$WT_ROW_PREFIX" "$i" \
+        "$(wt_format_worktree "$wt" "$main_repo_abs" "$linked_worktree" "false" "${BRANCHES[$((i - 1))]}")" \
+        "$WT_ROW_BADGE" >&2
       i=$((i + 1))
     done
 

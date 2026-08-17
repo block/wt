@@ -1359,3 +1359,204 @@ setup_resolver_fixture() {
     assert_success
     assert_output --partial "5d41402abc4b2a76b9719d911017c592"
 }
+
+# =============================================================================
+# Tests for wt_worktree_entries()
+# =============================================================================
+
+setup_entries_fixture() {
+    REPO=$(create_mock_repo "$BATS_TEST_TMPDIR/repo")
+    export WT_MAIN_REPO_ROOT="$REPO"
+    create_branch "$REPO" "feature-a"
+    WT_A="$BATS_TEST_TMPDIR/worktrees/feature-a"
+    create_worktree "$REPO" "$WT_A" "feature-a"
+    WT_A="$(cd "$WT_A" && pwd -P)"
+}
+
+@test "wt_worktree_entries emits path, kind, and branch per worktree" {
+    setup_entries_fixture
+
+    run wt_worktree_entries
+    assert_success
+    assert_line "$(printf '%s\t%s\t%s' "$REPO" "branch" "main")"
+    assert_line "$(printf '%s\t%s\t%s' "$WT_A" "branch" "feature-a")"
+}
+
+@test "wt_worktree_entries marks detached worktrees with empty branch" {
+    setup_entries_fixture
+    local det="$BATS_TEST_TMPDIR/worktrees/det"
+    (cd "$REPO" && git worktree add --detach "$det") >/dev/null 2>&1
+    det="$(cd "$det" && pwd -P)"
+
+    run wt_worktree_entries
+    assert_success
+    assert_line "$(printf '%s\t%s\t' "$det" "detached")"
+
+    # The empty branch field must survive an IFS=tab read: tab is IFS
+    # whitespace, so an empty field anywhere but last would be swallowed
+    local wt_path kind branch found=false
+    while IFS=$'\t' read -r wt_path kind branch; do
+        if [[ "$wt_path" == "$det" ]]; then
+            found=true
+            assert_equal "$kind" "detached"
+            assert_equal "$branch" ""
+        fi
+    done < <(wt_worktree_entries)
+    [[ "$found" == true ]] || fail "detached worktree $det not enumerated"
+}
+
+@test "wt_worktree_entries passes through the registered path for missing worktrees" {
+    setup_entries_fixture
+    rm -rf "$WT_A"
+
+    run wt_worktree_entries
+    assert_success
+    assert_line "$(printf '%s\t%s\t%s' "$WT_A" "branch" "feature-a")"
+}
+
+@test "wt_worktree_entries accepts an explicit repo root argument" {
+    setup_entries_fixture
+    local other
+    other=$(create_mock_repo "$BATS_TEST_TMPDIR/other_repo")
+
+    run wt_worktree_entries --raw "$other"
+    assert_success
+    assert_line "$(printf '%s\t%s\t%s' "$other" "branch" "main")"
+    refute_output --partial "feature-a"
+}
+
+# =============================================================================
+# Tests for _wt_readlink_abs()
+# =============================================================================
+
+@test "_wt_readlink_abs resolves absolute symlink targets" {
+    mkdir -p "$BATS_TEST_TMPDIR/target-dir"
+    local physical
+    physical="$(cd "$BATS_TEST_TMPDIR/target-dir" && pwd -P)"
+    ln -s "$physical" "$BATS_TEST_TMPDIR/abs-link"
+
+    run _wt_readlink_abs "$BATS_TEST_TMPDIR/abs-link"
+    assert_success
+    assert_output "$physical"
+}
+
+@test "_wt_readlink_abs anchors relative targets at the symlink parent" {
+    mkdir -p "$BATS_TEST_TMPDIR/parent/target-dir"
+    ln -s "target-dir" "$BATS_TEST_TMPDIR/parent/rel-link"
+
+    run _wt_readlink_abs "$BATS_TEST_TMPDIR/parent/rel-link"
+    assert_success
+    assert_output "$(cd "$BATS_TEST_TMPDIR/parent" && pwd -P)/target-dir"
+}
+
+@test "_wt_readlink_abs fails on non-symlinks" {
+    mkdir -p "$BATS_TEST_TMPDIR/plain-dir"
+
+    run _wt_readlink_abs "$BATS_TEST_TMPDIR/plain-dir"
+    assert_failure
+}
+
+# =============================================================================
+# Tests for wt_adopted_worktree_paths()
+# =============================================================================
+
+@test "wt_adopted_worktree_paths lists only adopted worktrees" {
+    setup_entries_fixture
+    create_branch "$REPO" "feature-b"
+    local wt_b="$BATS_TEST_TMPDIR/worktrees/feature-b"
+    create_worktree "$REPO" "$wt_b" "feature-b"
+    wt_b="$(cd "$wt_b" && pwd -P)"
+
+    # Adopt only feature-a (marker beside the gitdir file in .git/worktrees)
+    local git_dir
+    git_dir="$(git -C "$WT_A" rev-parse --git-dir)"
+    [[ "$git_dir" == /* ]] || git_dir="$(cd "$WT_A" && cd "$git_dir" && pwd -P)"
+    mkdir -p "$git_dir/wt"
+    echo "test" > "$git_dir/wt/adopted"
+
+    run wt_adopted_worktree_paths
+    assert_success
+    assert_line "$WT_A"
+    refute_line "$wt_b"
+    refute_line "$REPO"
+}
+
+@test "wt_adopted_worktree_paths returns nothing when no worktrees exist" {
+    REPO=$(create_mock_repo "$BATS_TEST_TMPDIR/solo_repo")
+    export WT_MAIN_REPO_ROOT="$REPO"
+
+    run wt_adopted_worktree_paths
+    assert_success
+    assert_output ""
+}
+
+# =============================================================================
+# Tests for wt_worktree_prefix_and_badge()
+# =============================================================================
+
+@test "wt_worktree_prefix_and_badge marks linked adopted worktree with * and no badge" {
+    wt_worktree_prefix_and_badge "/wt/a" "/main" "/wt/a" "/wt/a"
+    assert_equal "$WT_ROW_PREFIX" "* "
+    assert_equal "$WT_ROW_BADGE" ""
+}
+
+@test "wt_worktree_prefix_and_badge adds unadopted badge for unadopted worktrees" {
+    wt_worktree_prefix_and_badge "/wt/a" "/main" "" ""
+    assert_equal "$WT_ROW_PREFIX" "  "
+    assert_equal "$WT_ROW_BADGE" "[unadopted] "
+
+    wt_worktree_prefix_and_badge "/wt/a" "/main" "/wt/a" ""
+    assert_equal "$WT_ROW_PREFIX" "* "
+    assert_equal "$WT_ROW_BADGE" "[unadopted] "
+}
+
+@test "wt_worktree_prefix_and_badge never badges the main repo" {
+    wt_worktree_prefix_and_badge "/main" "/main" "" ""
+    assert_equal "$WT_ROW_PREFIX" "  "
+    assert_equal "$WT_ROW_BADGE" ""
+}
+
+@test "wt_format_worktree uses the supplied branch instead of rev-parse" {
+    local repo
+    repo=$(create_mock_repo)
+
+    # Actual branch is "main" — a passed branch must win (no git spawn needed)
+    run wt_format_worktree "$repo" "" "" "false" "passed-branch"
+    assert_success
+    assert_output --partial "(passed-branch)"
+}
+
+# =============================================================================
+# Tests for wt_worktree_branch_list()
+# =============================================================================
+
+@test "wt_worktree_branch_list lists branches of all worktrees" {
+    setup_entries_fixture
+
+    run wt_worktree_branch_list
+    assert_success
+    assert_line "main"
+    assert_line "feature-a"
+}
+
+@test "wt_worktree_branch_list exclude_main omits the main repo branch" {
+    setup_entries_fixture
+
+    run wt_worktree_branch_list exclude_main
+    assert_success
+    refute_line "main"
+    assert_line "feature-a"
+}
+
+@test "wt_worktree_branch_list skips detached and missing worktrees" {
+    setup_entries_fixture
+    (cd "$REPO" && git worktree add --detach "$BATS_TEST_TMPDIR/worktrees/det") >/dev/null 2>&1
+    create_branch "$REPO" "feature-gone"
+    create_worktree "$REPO" "$BATS_TEST_TMPDIR/worktrees/feature-gone" "feature-gone"
+    rm -rf "$BATS_TEST_TMPDIR/worktrees/feature-gone"
+
+    run wt_worktree_branch_list
+    assert_success
+    assert_line "feature-a"
+    refute_line "feature-gone"
+}

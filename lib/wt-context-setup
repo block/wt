@@ -494,10 +494,7 @@ _wt_migrate_repo() {
 
   elif [[ -L "$WT_ACTIVE_WORKTREE" ]]; then
     local symlink_target
-    symlink_target="$(readlink "$WT_ACTIVE_WORKTREE")"
-    if [[ "$symlink_target" != /* ]]; then
-      symlink_target="$(cd "$(dirname "$WT_ACTIVE_WORKTREE")" && cd "$(dirname "$symlink_target")" && pwd)/$(basename "$symlink_target")"
-    fi
+    symlink_target="$(_wt_readlink_abs "$WT_ACTIVE_WORKTREE")" || symlink_target="$(readlink "$WT_ACTIVE_WORKTREE")"
 
     echo "Active worktree symlink: $WT_ACTIVE_WORKTREE -> $symlink_target"
 
@@ -674,10 +671,7 @@ wt_setup_context() {
   if [[ -L "$repo_path" ]]; then
     active_symlink="$repo_path"
     local symlink_target
-    symlink_target="$(readlink "$repo_path")"
-    if [[ "$symlink_target" != /* ]]; then
-      symlink_target="$(cd "$(dirname "$repo_path")" && cd "$(dirname "$symlink_target")" && pwd)/$(basename "$symlink_target")"
-    fi
+    symlink_target="$(_wt_readlink_abs "$repo_path")" || symlink_target="$(readlink "$repo_path")"
 
     # Detect default branch to suggest base path
     local base_branch
