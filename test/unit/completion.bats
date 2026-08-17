@@ -289,6 +289,137 @@ EOF
 }
 
 # =============================================================================
+# wt-common re-source guard (skip when loaded, honor __WT_ROOT)
+# =============================================================================
+
+@test "bash completion skips wt-common re-source when already loaded" {
+    run bash -c "
+        wt_read_config() { :; }
+        source '$PROJECT_ROOT/completion/wt.bash'
+        if declare -F wt_worktree_branch_list >/dev/null; then echo resourced; else echo skipped; fi
+    "
+    assert_success
+    assert_output --partial "skipped"
+}
+
+@test "zsh completion skips wt-common re-source when already loaded" {
+    skip_if_no_zsh
+
+    cat > "$BATS_TEST_TMPDIR/t.zsh" <<EOF
+wt_read_config() { : }
+source "$PROJECT_ROOT/completion/wt.zsh" 2>/dev/null
+print resourced: \$+functions[wt_worktree_branch_list]
+EOF
+    run zsh -f "$BATS_TEST_TMPDIR/t.zsh"
+    assert_success
+    assert_output --partial "resourced: 0"
+}
+
+@test "bash completion sources wt-common from __WT_ROOT when set" {
+    mkdir -p "$BATS_TEST_TMPDIR/devroot/lib"
+    echo 'WT_DEV_MARKER=devroot' > "$BATS_TEST_TMPDIR/devroot/lib/wt-common"
+
+    run bash -c "
+        __WT_ROOT='$BATS_TEST_TMPDIR/devroot'
+        source '$PROJECT_ROOT/completion/wt.bash'
+        echo \"marker: \${WT_DEV_MARKER:-none}\"
+    "
+    assert_success
+    assert_output --partial "marker: devroot"
+}
+
+@test "zsh completion sources wt-common from __WT_ROOT when set" {
+    skip_if_no_zsh
+    mkdir -p "$BATS_TEST_TMPDIR/devroot/lib"
+    echo 'WT_DEV_MARKER=devroot' > "$BATS_TEST_TMPDIR/devroot/lib/wt-common"
+
+    cat > "$BATS_TEST_TMPDIR/t.zsh" <<EOF
+__WT_ROOT="$BATS_TEST_TMPDIR/devroot"
+source "$PROJECT_ROOT/completion/wt.zsh" 2>/dev/null
+print marker: \${WT_DEV_MARKER:-none}
+EOF
+    run zsh -f "$BATS_TEST_TMPDIR/t.zsh"
+    assert_success
+    assert_output --partial "marker: devroot"
+}
+
+# =============================================================================
+# Unified `wt add` completion: one git spawn in the resolved repo,
+# remote branches kept with origin/ stripped, deduped
+# =============================================================================
+
+# Create refs/remotes/origin/* without a real remote; sets $repo
+setup_repo_with_remote_refs() {
+    repo=$(create_mock_repo)
+    create_branch "$repo" "feature-x"
+    local head_sha
+    head_sha=$(git -C "$repo" rev-parse HEAD)
+    git -C "$repo" update-ref refs/remotes/origin/remote-only "$head_sha"
+    git -C "$repo" update-ref refs/remotes/origin/main "$head_sha"
+    git -C "$repo" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
+}
+
+@test "bash unified wt add completion lists local and remote branches from resolved repo" {
+    local repo
+    setup_repo_with_remote_refs
+    create_test_context "ctx" "$repo"
+    mkdir -p "$BATS_TEST_TMPDIR/emptydir"
+
+    run bash -c "
+        cd '$BATS_TEST_TMPDIR/emptydir'
+        source '$PROJECT_ROOT/completion/wt.bash'
+        COMP_WORDS=('wt' 'add' '')
+        COMP_CWORD=2
+        _wt_completion_bash
+        printf '%s\n' \"\${COMPREPLY[@]}\"
+    "
+    assert_success
+    assert_line "feature-x"
+    assert_line "remote-only"
+    assert_line "main"
+    refute_line "origin/remote-only"
+    refute_line "HEAD"
+    refute_line "origin"
+
+    local main_count
+    main_count=$(printf '%s\n' "$output" | grep -c -x 'main') || true
+    assert_equal "$main_count" "1"
+}
+
+@test "zsh _wt_branch_list include_remotes lists remote branches with origin/ stripped" {
+    skip_if_no_zsh
+    local repo
+    setup_repo_with_remote_refs
+
+    cat > "$BATS_TEST_TMPDIR/t.zsh" <<EOF
+source "$PROJECT_ROOT/completion/wt.zsh" 2>/dev/null
+export WT_MAIN_REPO_ROOT="$repo"
+_wt_branch_list include_remotes
+EOF
+    run zsh -f "$BATS_TEST_TMPDIR/t.zsh"
+    assert_success
+    assert_line "feature-x"
+    assert_line "remote-only"
+    assert_line "main"
+    refute_line "origin/remote-only"
+    refute_line "HEAD"
+    refute_line "origin"
+}
+
+@test "zsh unified wt add completion uses _wt_branch_list instead of git branch -a" {
+    skip_if_no_zsh
+
+    cat > "$BATS_TEST_TMPDIR/t.zsh" <<EOF
+source "$PROJECT_ROOT/completion/wt.zsh" 2>/dev/null
+whence -f _wt_completion
+EOF
+    run zsh -f "$BATS_TEST_TMPDIR/t.zsh"
+    assert_success
+    assert_output --partial "_wt_branch_list include_remotes"
+    refute_output --partial "git branch -a"
+}
+
+# =============================================================================
 # Completion reload uses ordered mode (git local config keeps priority)
 # =============================================================================
 

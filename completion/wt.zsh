@@ -4,7 +4,8 @@
 #
 # Behavior:
 #   - Always:
-#       * Source wt-common (if present) to get WT_MAIN_REPO_ROOT, etc.
+#       * Source wt-common (unless already loaded, e.g. by wt.sh) to get
+#         WT_MAIN_REPO_ROOT, etc.
 #       * Provide completion for wt-* commands and the unified `wt` command.
 #
 #   - If `fzf` is available:
@@ -18,9 +19,11 @@
 #
 # This file is designed for personal use.
 
-# --- Load shared config (wt-common) if available ---
-if [[ -r "$HOME/.wt/lib/wt-common" ]]; then
-  source "$HOME/.wt/lib/wt-common"
+# --- Load shared config (wt-common) if not already loaded ---
+# wt.sh sources wt-common (from __WT_ROOT) before this file; re-sourcing here
+# would double the config load and clobber a dev install's shared functions.
+if (( ! $+functions[wt_read_config] )) && [[ -r "${__WT_ROOT:-$HOME/.wt}/lib/wt-common" ]]; then
+  source "${__WT_ROOT:-$HOME/.wt}/lib/wt-common"
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -49,11 +52,20 @@ _wt_resolve_repo() {
 }
 
 # --- Helper: get branch names from resolved repo ---
+# include_remotes also lists origin/* with the prefix stripped: `git worktree
+# add` DWIMs a unique remote-only branch into a local tracking branch.
 _wt_branch_list() {
   local repo
   repo=$(_wt_resolve_repo) || return
 
-  git -C "$repo" branch --format='%(refname:short)' 2>/dev/null
+  if [[ "${1:-}" == "include_remotes" ]]; then
+    # Full refnames, not :short — the origin/HEAD symref shortens to "origin",
+    # which would slip past the HEAD filter and be offered as a branch.
+    git -C "$repo" for-each-ref --format='%(refname)' refs/heads 'refs/remotes/origin' 2>/dev/null \
+      | sed -e 's|^refs/heads/||' -e 's|^refs/remotes/origin/||' -e '/^HEAD$/d' | sort -u
+  else
+    git -C "$repo" branch --format='%(refname:short)' 2>/dev/null
+  fi
 }
 
 # --- Helper: list wt subcommands, one `name` or `name:description` per line ---
@@ -339,9 +351,8 @@ _wt_completion() {
     args)
       case "${words[1]}" in
         add)
-          # Simple branch completion for `wt add`
           local -a branches
-          branches=("${(f)$(git branch -a 2>/dev/null | sed 's/^[* ]*//' | sed 's|remotes/origin/||')}")
+          branches=("${(f)$(_wt_branch_list include_remotes)}")
           (( ${#branches[@]} > 0 )) && _describe 'branch' branches
           ;;
         adopt)                  _wt_adopt ;;

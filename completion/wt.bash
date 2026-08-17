@@ -6,7 +6,8 @@
 #
 # Behavior:
 #   - Always:
-#       * Source wt-common (if present) to read WT_MAIN_REPO_ROOT, etc.
+#       * Source wt-common (unless already loaded, e.g. by wt.sh) to read
+#         WT_MAIN_REPO_ROOT, etc.
 #       * Provide completions for `wt` and `wt-*` commands.
 #
 #   - If `fzf` is available:
@@ -26,9 +27,11 @@
 #   - For other wt-* commands:
 #       * File/dir completion.
 
-# --- Load shared config (wt-common) if available ---
-if [[ -f "$HOME/.wt/lib/wt-common" ]]; then
-  . "$HOME/.wt/lib/wt-common"
+# --- Load shared config (wt-common) if not already loaded ---
+# wt.sh sources wt-common (from __WT_ROOT) before this file; re-sourcing here
+# would double the config load and clobber a dev install's shared functions.
+if ! declare -F wt_read_config >/dev/null && [[ -f "${__WT_ROOT:-$HOME/.wt}/lib/wt-common" ]]; then
+  . "${__WT_ROOT:-$HOME/.wt}/lib/wt-common"
 fi
 
 # --- Helper: resolve which repo to use for branch completion ---
@@ -53,13 +56,22 @@ _wt_resolve_repo() {
 }
 
 # --- Helper: get branch list from resolved repo ---
+# include_remotes also lists origin/* with the prefix stripped: `git worktree
+# add` DWIMs a unique remote-only branch into a local tracking branch.
 _wt_branch_list() {
   local repo
   repo="$(_wt_resolve_repo)"
 
   [[ -z "$repo" ]] && return 0
 
-  git -C "$repo" branch --format='%(refname:short)' 2>/dev/null
+  if [[ "${1:-}" == "include_remotes" ]]; then
+    # Full refnames, not :short — the origin/HEAD symref shortens to "origin",
+    # which would slip past the HEAD filter and be offered as a branch.
+    git -C "$repo" for-each-ref --format='%(refname)' refs/heads 'refs/remotes/origin' 2>/dev/null \
+      | sed -e 's|^refs/heads/||' -e 's|^refs/remotes/origin/||' -e '/^HEAD$/d' | sort -u
+  else
+    git -C "$repo" branch --format='%(refname:short)' 2>/dev/null
+  fi
 }
 
 # --- Helper: list wt subcommands (one per line) ---
@@ -382,8 +394,11 @@ _wt_completion_bash() {
     case "${COMP_WORDS[1]}" in
       add)
         local branches
-        branches=$(git branch -a 2>/dev/null | sed 's/^[* ]*//' | sed 's|remotes/origin/||')
-        COMPREPLY=($(compgen -W "$branches" -- "$cur"))
+        branches="$(_wt_branch_list include_remotes)"
+        if [[ -n "$branches" ]]; then
+          local IFS=$'\n'
+          COMPREPLY=($(compgen -W "$branches" -- "$cur"))
+        fi
         ;;
       adopt)
         if [[ "$cur" == -* ]]; then
