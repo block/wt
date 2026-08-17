@@ -385,3 +385,55 @@ teardown() {
     assert_success
     assert_output --partial "feature-spaces"
 }
+
+@test "wt-list shows (HEAD) for detached worktrees" {
+    (cd "$REPO" && git worktree add --detach "$WT_WORKTREES_BASE/det") >/dev/null 2>&1
+
+    run "$TEST_HOME/.wt/bin/wt-list"
+    assert_success
+    assert_output --partial "$WT_WORKTREES_BASE/det (HEAD)"
+}
+
+# =============================================================================
+# Process-spawn guard
+# =============================================================================
+
+# Count git invocations during a fast `wt list` via a PATH shim.
+# Guards the single-pass enumeration: the count must not grow with the
+# number of worktrees.
+_count_wt_list_git_spawns() {
+    : > "$GIT_COUNT_FILE"
+    PATH="$GIT_SHIM_DIR:$PATH" "$TEST_HOME/.wt/bin/wt-list" >/dev/null 2>&1 || return 1
+    wc -l < "$GIT_COUNT_FILE" | tr -d ' '
+}
+
+@test "wt-list fast mode spawns O(1) git processes regardless of worktree count" {
+    GIT_SHIM_DIR="$BATS_TEST_TMPDIR/git-shim"
+    GIT_COUNT_FILE="$BATS_TEST_TMPDIR/git-count"
+    mkdir -p "$GIT_SHIM_DIR"
+    local real_git
+    real_git="$(command -v git)"
+    cat > "$GIT_SHIM_DIR/git" <<EOF
+#!/usr/bin/env bash
+echo x >> "$GIT_COUNT_FILE"
+exec "$real_git" "\$@"
+EOF
+    chmod +x "$GIT_SHIM_DIR/git"
+
+    create_branch "$REPO" "spawn-a"
+    create_worktree "$REPO" "$WT_WORKTREES_BASE/spawn-a" "spawn-a"
+
+    local count_two
+    count_two="$(_count_wt_list_git_spawns)"
+
+    local b
+    for b in spawn-b spawn-c spawn-d; do
+        create_branch "$REPO" "$b"
+        create_worktree "$REPO" "$WT_WORKTREES_BASE/$b" "$b"
+    done
+
+    local count_five
+    count_five="$(_count_wt_list_git_spawns)"
+
+    assert_equal "$count_five" "$count_two"
+}

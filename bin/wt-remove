@@ -131,21 +131,13 @@ done
 # Show context banner if contexts are configured
 wt_show_context_banner
 
-# Safety check: get absolute path of main repo
-MAIN_REPO_ABS="$(cd "$WT_MAIN_REPO_ROOT" && pwd)"
+# Safety check: get absolute path of main repo (physical, matching
+# wt_worktree_entries and wt_get_linked_worktree output)
+MAIN_REPO_ABS="$(cd "$WT_MAIN_REPO_ROOT" && pwd -P)"
 
 # Resolve active symlink path once for all removals
-LINK_PATH="$WT_ACTIVE_WORKTREE"
-if [[ -d "$(dirname "$LINK_PATH")" ]]; then
-  LINK_PATH="$(cd "$(dirname "$LINK_PATH")" && pwd)/$(basename "$LINK_PATH")"
-fi
-CURRENT_LINKED=""
-if [[ -L "$LINK_PATH" ]]; then
-  CURRENT_LINKED="$(readlink "$LINK_PATH")"
-  if [[ "$CURRENT_LINKED" != /* ]]; then
-    CURRENT_LINKED="$(cd "$(dirname "$LINK_PATH")" && cd "$(dirname "$CURRENT_LINKED")" && pwd)/$(basename "$CURRENT_LINKED")"
-  fi
-fi
+LINK_PATH="$(_wt_resolve_parent "$WT_ACTIVE_WORKTREE")" || LINK_PATH="$WT_ACTIVE_WORKTREE"
+CURRENT_LINKED="$(wt_get_linked_worktree)"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Dirty worktree handler — shared by --merged and explicit removal paths
@@ -352,23 +344,17 @@ if [[ "$REMOVE_MERGED" == "true" ]]; then
 
   # Find worktrees with merged branches
   MERGED_WORKTREES=()
-  while IFS= read -r line; do
-    case "$line" in
-      worktree\ *)
-        wt="${line#worktree }"
-        wt_abs="$(cd "$wt" 2>/dev/null && pwd)" || continue
-        # Skip main repo
-        [[ "$wt_abs" == "$MAIN_REPO_ABS" ]] && continue
-        # Get branch name
-        wt_branch="$(git -C "$wt_abs" rev-parse --abbrev-ref HEAD 2>/dev/null)" || continue
-        [[ "$wt_branch" == "HEAD" ]] && continue  # skip detached HEAD
-        # Check if branch is merged (regular or squash)
-        if _is_branch_merged "$wt_branch" "$WT_BASE_BRANCH"; then
-          MERGED_WORKTREES+=("$wt_abs")
-        fi
-        ;;
-    esac
-  done < <(git worktree list --porcelain)
+  while IFS=$'\t' read -r wt_abs kind wt_branch; do
+    [[ -d "$wt_abs" ]] || continue
+    # Skip main repo
+    [[ "$wt_abs" == "$MAIN_REPO_ABS" ]] && continue
+    # Skip detached HEAD (no branch to check)
+    [[ "$kind" == "branch" && -n "$wt_branch" ]] || continue
+    # Check if branch is merged (regular or squash)
+    if _is_branch_merged "$wt_branch" "$WT_BASE_BRANCH"; then
+      MERGED_WORKTREES+=("$wt_abs")
+    fi
+  done < <(wt_worktree_entries)
 
   if [[ ${#MERGED_WORKTREES[@]} -eq 0 ]]; then
     info "No worktrees found with branches merged into $WT_BASE_BRANCH."
@@ -436,27 +422,17 @@ fi
 # Returns: 0 if found, 1 otherwise
 _find_stale_worktree() {
   local identifier="$1"
-  local wt_path="" branch=""
-  while IFS= read -r line; do
-    case "$line" in
-      worktree\ *)
-        wt_path="${line#worktree }"
-        branch=""
-        ;;
-      branch\ *)
-        branch="${line#branch refs/heads/}"
-        ;;
-      "")
-        if [[ -n "$wt_path" && ! -d "$wt_path" ]]; then
-          if [[ "$identifier" == "$wt_path" || ( -n "$branch" && "$identifier" == "$branch" ) ]]; then
-            printf '%s\n' "$wt_path"
-            return 0
-          fi
-        fi
-        wt_path=""
-        ;;
-    esac
-  done < <(git -C "$WT_MAIN_REPO_ROOT" worktree list --porcelain 2>/dev/null; echo)
+  # Capture before looping: returning early from a < <(...) loop EPIPEs the
+  # producer's printf when SIGPIPE is ignored (as on GitHub CI runners).
+  local entries wt_path kind branch
+  entries="$(wt_worktree_entries --raw)"
+  while IFS=$'\t' read -r wt_path kind branch; do
+    [[ -d "$wt_path" ]] && continue
+    if [[ "$identifier" == "$wt_path" || ( -n "$branch" && "$identifier" == "$branch" ) ]]; then
+      printf '%s\n' "$wt_path"
+      return 0
+    fi
+  done <<< "$entries"
   return 1
 }
 

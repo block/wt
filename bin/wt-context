@@ -187,11 +187,7 @@ remove_context() {
   wt_source wt-adopt
   if [[ -L "$active_worktree" ]]; then
     local link_target
-    link_target="$(readlink "$active_worktree")"
-    # Make link_target absolute if relative
-    if [[ "$link_target" != /* ]]; then
-      link_target="$(cd "$(dirname "$active_worktree")" && _wt_realpath "$link_target")"
-    fi
+    link_target="$(_wt_readlink_abs "$active_worktree")" || link_target="$(readlink "$active_worktree")"
 
     if [[ "$link_target" == "$repo_root" || "$(_wt_realpath "$link_target" 2>/dev/null)" == "$(_wt_realpath "$repo_root" 2>/dev/null)" ]]; then
       info "Restoring repository to original location..."
@@ -215,23 +211,17 @@ remove_context() {
 
   # 4. Remove adoption markers from worktrees (after repo migration so pointers are updated first)
   info "Removing adoption markers from worktrees..."
-  local wt_path=""
-  while IFS= read -r line; do
-    if [[ "$line" == "worktree "* ]]; then
-      wt_path="${line#worktree }"
-    elif [[ -z "$line" && -n "$wt_path" ]]; then
-      # End of worktree block — check and remove marker
-      if wt_is_adopted "$wt_path" 2>/dev/null; then
-        local marker_ctx
-        marker_ctx="$(wt_read_adopted_context "$wt_path" 2>/dev/null)" || true
-        # Remove if context matches, or if it's an old empty marker
-        if [[ -z "$marker_ctx" || "$marker_ctx" == "$context_name" ]]; then
-          wt_unmark_adopted "$wt_path" 2>/dev/null || true
-        fi
+  local wt_path
+  while IFS=$'\t' read -r wt_path _ _; do
+    if wt_is_adopted "$wt_path" 2>/dev/null; then
+      local marker_ctx
+      marker_ctx="$(wt_read_adopted_context "$wt_path" 2>/dev/null)" || true
+      # Remove if context matches, or if it's an old empty marker
+      if [[ -z "$marker_ctx" || "$marker_ctx" == "$context_name" ]]; then
+        wt_unmark_adopted "$wt_path" 2>/dev/null || true
       fi
-      wt_path=""
     fi
-  done < <(git -C "$repo_root" worktree list --porcelain 2>/dev/null; echo)
+  done < <(wt_worktree_entries --raw "$repo_root")
 
   # 5. Update ~/.wt/current
   local current_context

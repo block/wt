@@ -46,9 +46,6 @@ else
 fi
 wt_require_valid_config || exit 1
 
-# Source wt-adopt for adoption status checks
-wt_source wt-adopt
-
 usage() {
   cat <<EOF
 Usage: $(basename "$0") [-v|--verbose] [--porcelain]
@@ -116,66 +113,25 @@ _print_missing_worktree() {
   printf "  ${BOLD}%s${NC} ${BLUE}(%s)${NC} ${RED}[missing]${NC}\n" "$1" "$2"
 }
 
+ADOPTED_SET="$(wt_adopted_worktree_paths)"
+
 # List worktrees
-(
-  cd "$WT_MAIN_REPO_ROOT" || exit 1
+echo
 
-  echo
+while IFS=$'\t' read -r wt_abs kind branch; do
+  if [[ ! -d "$wt_abs" ]]; then
+    [[ -z "$branch" ]] && branch="detached"
+    _print_missing_worktree "$wt_abs" "$branch"
+    continue
+  fi
 
-  missing_path=""
-  while IFS= read -r line; do
-    case "$line" in
-      worktree\ *)
-        wt="${line#worktree }"
-        if ! wt_abs="$(_wt_realpath "$wt")"; then
-          missing_path="$wt"
-          continue
-        fi
+  [[ "$kind" == "detached" ]] && branch="HEAD"
 
-        # Check adoption status (skip for main repo — adoption doesn't apply)
-        is_linked=false
-        is_unadopted=false
-        if [[ -n "$LINKED_WORKTREE" && "$wt_abs" == "$LINKED_WORKTREE" ]]; then
-          is_linked=true
-        fi
-        if [[ "$wt_abs" != "$MAIN_REPO_ABS" ]] && ! wt_is_adopted "$wt_abs" 2>/dev/null; then
-          is_unadopted=true
-        fi
+  wt_worktree_prefix_and_badge "$wt_abs" "$MAIN_REPO_ABS" "$LINKED_WORKTREE" "$ADOPTED_SET"
+  printf "%s%s%s\n" "$WT_ROW_PREFIX" \
+    "$(wt_format_worktree "$wt_abs" "$MAIN_REPO_ABS" "$LINKED_WORKTREE" "$VERBOSE" "$branch")" \
+    "$WT_ROW_BADGE"
+done < <(wt_worktree_entries)
 
-        # Determine prefix: * for linked, space otherwise
-        prefix="  "
-        if [[ "$is_linked" == true ]]; then
-          prefix="${GREEN}*${NC} "
-        fi
-
-        # Build unadopted badge (red if also linked, yellow otherwise)
-        unadopted_badge=""
-        if [[ "$is_unadopted" == true ]]; then
-          if [[ "$is_linked" == true ]]; then
-            unadopted_badge="${RED}[unadopted]${NC} "
-          else
-            unadopted_badge="${YELLOW}[unadopted]${NC} "
-          fi
-        fi
-
-        # Print with shared formatting + unadopted badge
-        printf "%s%s%s\n" "$prefix" "$(wt_format_worktree "$wt_abs" "$MAIN_REPO_ABS" "$LINKED_WORKTREE" "$VERBOSE")" "$unadopted_badge"
-        ;;
-      branch\ *)
-        if [[ -n "$missing_path" ]]; then
-          _print_missing_worktree "$missing_path" "${line#branch refs/heads/}"
-          missing_path=""
-        fi
-        ;;
-      "")
-        if [[ -n "$missing_path" ]]; then
-          _print_missing_worktree "$missing_path" "detached"
-          missing_path=""
-        fi
-        ;;
-    esac
-  done < <(git worktree list --porcelain; echo)
-
-  echo
-)
+echo
 

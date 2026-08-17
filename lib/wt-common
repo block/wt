@@ -69,6 +69,21 @@ _wt_resolve_parent() {
   printf '%s/%s\n' "$dir" "$base"
 }
 
+# Resolve a symlink's target to an absolute path: readlink once, anchor a
+# relative target at the symlink's parent directory, then canonicalize the
+# parent via _wt_resolve_parent (basename preserved, not followed).
+# Usage: _wt_readlink_abs <symlink>
+# Outputs: absolute path to stdout
+# Returns: 1 if the argument is not a symlink or resolution fails
+_wt_readlink_abs() {
+  local link="$1" target
+  target="$(readlink "$link")" || return 1
+  if [[ "$target" != /* ]]; then
+    target="$(dirname "$link")/$target"
+  fi
+  _wt_resolve_parent "$target"
+}
+
 # Check whether a variable carries the export attribute (bash and zsh)
 _wt_var_is_exported() {
   local decl flags
@@ -668,6 +683,55 @@ wt_source() {
 # Git helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Enumerate all registered worktrees in a single `git worktree list --porcelain`
+# pass. Emits one tab-separated line per worktree:
+#   <path>\t<kind>\t<branch>
+#     path   — physical absolute path (pwd -P); the raw registered path is
+#              passed through when the directory is missing or with --raw
+#     kind   — "branch" or "detached"
+#     branch — short branch name (refs/heads/ stripped), empty when detached
+# branch must stay the LAST field: tab is IFS whitespace, so `IFS=$'\t' read`
+# would silently swallow an empty field anywhere but the end of the line.
+# Usage: wt_worktree_entries [--raw] [repo_root]
+#   --raw     skip physical path resolution (no per-entry subshell forks)
+#   repo_root repository to enumerate (default: WT_MAIN_REPO_ROOT)
+wt_worktree_entries() {
+  local resolve=true repo="${WT_MAIN_REPO_ROOT:-.}"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --raw) resolve=false ;;
+      *) repo="$1" ;;
+    esac
+    shift
+  done
+
+  local line wt_path="" branch="" kind="" out_path
+  while IFS= read -r line; do
+    case "$line" in
+      worktree\ *)
+        wt_path="${line#worktree }"
+        branch=""
+        kind="branch"
+        ;;
+      branch\ *)
+        branch="${line#branch refs/heads/}"
+        ;;
+      detached)
+        kind="detached"
+        ;;
+      "")
+        [[ -n "$wt_path" ]] || continue
+        out_path="$wt_path"
+        if [[ "$resolve" == true && -d "$wt_path" ]]; then
+          out_path="$(cd "$wt_path" 2>/dev/null && pwd -P)" || out_path="$wt_path"
+        fi
+        printf '%s\t%s\t%s\n' "$out_path" "$kind" "$branch"
+        wt_path=""
+        ;;
+    esac
+  done < <(git -C "$repo" worktree list --porcelain 2>/dev/null; echo)
+}
+
 # Check whether a directory is the root of a worktree registered with the main
 # repo (the main repo itself counts). Compares physical paths (pwd -P) so
 # symlinked spellings like macOS /var -> /private/var still match.
@@ -677,18 +741,15 @@ wt_is_worktree_root() {
   local candidate
   candidate="$(cd "$1" 2>/dev/null && pwd -P)" || return 1
 
-  local line wt_path wt_abs
-  while IFS= read -r line; do
-    case "$line" in
-      worktree\ *)
-        wt_path="${line#worktree }"
-        wt_abs="$(cd "$wt_path" 2>/dev/null && pwd -P)" || continue
-        if [[ "$wt_abs" == "$candidate" ]]; then
-          return 0
-        fi
-        ;;
-    esac
-  done < <(git -C "$WT_MAIN_REPO_ROOT" worktree list --porcelain 2>/dev/null)
+  # Capture before looping: returning early from a < <(...) loop EPIPEs the
+  # producer's printf when SIGPIPE is ignored (as on GitHub CI runners).
+  local entries wt_abs
+  entries="$(wt_worktree_entries)"
+  while IFS=$'\t' read -r wt_abs _ _; do
+    if [[ "$wt_abs" == "$candidate" ]]; then
+      return 0
+    fi
+  done <<< "$entries"
 
   return 1
 }
@@ -711,20 +772,14 @@ wt_resolve_worktree() {
   fi
 
   # 2) Try as exact branch name
-  local wt_path="" branch=""
-  while IFS= read -r line; do
-    case "$line" in
-      worktree\ *)
-        wt_path="${line#worktree }"
-        ;;
-      branch\ *)
-        branch="${line#branch refs/heads/}"
-        if [[ "$branch" == "$identifier" ]]; then
-          (cd "$wt_path" 2>/dev/null && pwd) && return 0
-        fi
-        ;;
-    esac
-  done < <(git -C "$WT_MAIN_REPO_ROOT" worktree list --porcelain 2>/dev/null)
+  local entries wt_abs kind branch
+  entries="$(wt_worktree_entries)"
+  while IFS=$'\t' read -r wt_abs kind branch; do
+    if [[ "$kind" == "branch" && "$branch" == "$identifier" && -d "$wt_abs" ]]; then
+      printf '%s\n' "$wt_abs"
+      return 0
+    fi
+  done <<< "$entries"
 
   return 1
 }
@@ -759,34 +814,32 @@ wt_resolve_and_validate() {
 # Note: Detached HEAD worktrees are excluded (no branch name to emit).
 wt_worktree_branch_list() {
   local exclude_main="${1:-}"
-  local main_repo_abs=""
+  local main_repo_abs="" mode="--raw"
 
+  # Physical paths are only needed to compare against the main repo; the
+  # completion hot path (no exclude_main) stays fork-free via --raw.
   if [[ "$exclude_main" == "exclude_main" && -n "${WT_MAIN_REPO_ROOT:-}" ]]; then
-    main_repo_abs="$(cd "$WT_MAIN_REPO_ROOT" 2>/dev/null && pwd)"
+    main_repo_abs="$(cd "$WT_MAIN_REPO_ROOT" 2>/dev/null && pwd -P)" || main_repo_abs=""
+    [[ -n "$main_repo_abs" ]] && mode=""
   fi
 
-  local wt_path="" wt_abs="" branch=""
-  while IFS= read -r line; do
-    case "$line" in
-      worktree\ *)
-        wt_path="${line#worktree }"
-        ;;
-      branch\ *)
-        wt_abs="$(cd "$wt_path" 2>/dev/null && pwd)" || continue
-        if [[ -z "$main_repo_abs" || "$wt_abs" != "$main_repo_abs" ]]; then
-          branch="${line#branch refs/heads/}"
-          printf '%s\n' "$branch"
-        fi
-        ;;
-    esac
-  done < <(git -C "$WT_MAIN_REPO_ROOT" worktree list --porcelain 2>/dev/null)
+  local wt_abs kind branch
+  while IFS=$'\t' read -r wt_abs kind branch; do
+    [[ "$kind" == "branch" && -n "$branch" ]] || continue
+    [[ -d "$wt_abs" ]] || continue
+    [[ -n "$main_repo_abs" && "$wt_abs" == "$main_repo_abs" ]] && continue
+    printf '%s\n' "$branch"
+  done < <(wt_worktree_entries ${mode:+"$mode"})
 }
 
 # List absolute paths of all registered worktrees (including the main repo).
 # Usage: _wt_worktree_list
 # Outputs: one worktree path per line to stdout
 _wt_worktree_list() {
-  git -C "${WT_MAIN_REPO_ROOT:-.}" worktree list --porcelain 2>/dev/null | sed -n 's/^worktree //p'
+  local wt_path
+  while IFS=$'\t' read -r wt_path _ _; do
+    printf '%s\n' "$wt_path"
+  done < <(wt_worktree_entries --raw)
 }
 
 # Get the currently linked worktree path (resolves symlink)
@@ -805,31 +858,92 @@ wt_get_linked_worktree() {
   fi
 
   if [[ -L "$link_path" ]]; then
-    local target
-    target="$(readlink "$link_path")"
-    # Resolve to physical path whether target is relative or absolute
-    if [[ "$target" != /* ]]; then
-      target="$(_wt_resolve_parent "$(dirname "$link_path")/$target")"
+    _wt_readlink_abs "$link_path" || true
+  fi
+}
+
+# Build the wt-list/picker adopted-set in one pass over the main repo's
+# .git/worktrees metadata — zero git spawns. Each entry's gitdir file holds
+# the path of the worktree's .git file; its dirname is the worktree root.
+# Adopted marker: wt/adopted alongside the gitdir file.
+# Usage: wt_adopted_worktree_paths
+# Outputs: one physical absolute worktree path per line
+wt_adopted_worktree_paths() {
+  local worktrees_dir="${WT_MAIN_REPO_ROOT:-.}/.git/worktrees"
+  [[ -d "$worktrees_dir" ]] || return 0
+
+  local meta_dir wt_dot_git wt_root
+  for meta_dir in "$worktrees_dir"/*/; do
+    [[ -f "$meta_dir/wt/adopted" ]] || continue
+    [[ -f "$meta_dir/gitdir" ]] || continue
+    wt_dot_git=""
+    IFS= read -r wt_dot_git < "$meta_dir/gitdir" || true
+    [[ -n "$wt_dot_git" ]] || continue
+    wt_root="$(dirname "$wt_dot_git")"
+    [[ -d "$wt_root" ]] || continue
+    (cd "$wt_root" 2>/dev/null && pwd -P) || continue
+  done
+  return 0
+}
+
+# Check whether <path> appears as an exact line in newline-delimited <lines>.
+# Usage: _wt_path_in_lines <path> <lines>
+_wt_path_in_lines() {
+  case $'\n'"$2"$'\n' in
+    *$'\n'"$1"$'\n'*) return 0 ;;
+  esac
+  return 1
+}
+
+# Compute the linked-* prefix and [unadopted] badge for a worktree row
+# (shared by wt-list and the interactive picker).
+# Usage: wt_worktree_prefix_and_badge <wt_abs> <main_repo_abs> <linked_worktree> <adopted_set>
+#   adopted_set — newline-delimited physical paths from wt_adopted_worktree_paths
+# Sets: WT_ROW_PREFIX — "* " (green) when linked, "  " otherwise
+#       WT_ROW_BADGE  — "[unadopted] " (red when linked, yellow otherwise) or ""
+# shellcheck disable=SC2034  # WT_ROW_* are read by callers in other files
+wt_worktree_prefix_and_badge() {
+  local wt_abs="$1"
+  local main_repo_abs="$2"
+  local linked_worktree="$3"
+  local adopted_set="${4:-}"
+
+  local is_linked=false
+  WT_ROW_PREFIX="  "
+  WT_ROW_BADGE=""
+
+  if [[ -n "$linked_worktree" && "$wt_abs" == "$linked_worktree" ]]; then
+    is_linked=true
+    WT_ROW_PREFIX="${GREEN}*${NC} "
+  fi
+
+  # Adoption doesn't apply to the main repo
+  if [[ "$wt_abs" != "$main_repo_abs" ]] && ! _wt_path_in_lines "$wt_abs" "$adopted_set"; then
+    if [[ "$is_linked" == true ]]; then
+      WT_ROW_BADGE="${RED}[unadopted]${NC} "
     else
-      target="$(_wt_resolve_parent "$target")"
+      WT_ROW_BADGE="${YELLOW}[unadopted]${NC} "
     fi
-    echo "$target"
   fi
 }
 
 # Format a worktree entry for display
-# Usage: wt_format_worktree <worktree_path> [main_repo_abs] [linked_worktree] [verbose]
+# Usage: wt_format_worktree <worktree_path> [main_repo_abs] [linked_worktree] [verbose] [branch]
 # Outputs: formatted string like "~/path (branch) [main] [linked] [dirty] [↑N] [↓N]"
 # When verbose is "true", includes slow status checks (dirty, ahead/behind)
+# When branch is given (e.g. from wt_worktree_entries), no git process is
+# spawned to derive it; pass "HEAD" for detached HEAD worktrees to match
+# what `git rev-parse --abbrev-ref HEAD` would print.
 wt_format_worktree() {
   local wt_abs="$1"
   local main_repo_abs="${2:-}"
   local linked_worktree="${3:-}"
   local verbose="${4:-false}"
+  local branch="${5:-}"
 
-  # Get branch name
-  local branch
-  branch="$(git -C "$wt_abs" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "detached")"
+  if [[ -z "$branch" ]]; then
+    branch="$(git -C "$wt_abs" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "detached")"
+  fi
 
   # Build indicator string
   local indicators=""
@@ -907,15 +1021,10 @@ wt_list_porcelain() {
   local active_worktree
   active_worktree="$(wt_get_linked_worktree)"
 
-  # Ensure wt_is_adopted is available
-  if ! declare -f wt_is_adopted >/dev/null 2>&1; then
-    local lib_dir="${LIB_DIR:-}"
-    if [[ -n "$lib_dir" && -f "$lib_dir/wt-adopt" ]]; then
-      . "$lib_dir/wt-adopt"
-    elif [[ -f "$HOME/.wt/lib/wt-adopt" ]]; then
-      . "$HOME/.wt/lib/wt-adopt"
-    fi
-  fi
+  # The main repo's adoption marker lives at .git/wt/adopted, not under
+  # .git/worktrees, so it is checked separately below.
+  local adopted_set
+  adopted_set="$(wt_adopted_worktree_paths)"
 
   local wt_path="" branch="" is_detached=false
   local in_entry=false
@@ -933,7 +1042,9 @@ wt_list_porcelain() {
         fi
 
         # wt.adopted
-        if declare -f wt_is_adopted >/dev/null 2>&1 && wt_is_adopted "$wt_abs" 2>/dev/null; then
+        if [[ "$wt_abs" == "$main_repo_abs" ]]; then
+          [[ -f "$WT_MAIN_REPO_ROOT/.git/wt/adopted" ]] && echo "wt.adopted"
+        elif _wt_path_in_lines "$wt_abs" "$adopted_set"; then
           echo "wt.adopted"
         fi
 
