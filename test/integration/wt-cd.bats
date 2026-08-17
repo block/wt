@@ -166,3 +166,28 @@ teardown() {
     assert_success
     assert_output "$wt_spaces"
 }
+
+# =============================================================================
+# Branch-vs-directory collision tests
+# =============================================================================
+
+@test "wt-cd resolves branch name shadowed by a same-named repo subdirectory" {
+    create_branch "$REPO" "tools"
+    local tools_wt="$WT_WORKTREES_BASE/tools"
+    create_worktree "$REPO" "$tools_wt" "tools"
+
+    mkdir -p "$REPO/tools"
+    cd "$REPO"
+
+    run --separate-stderr "$TEST_HOME/.wt/bin/wt-cd" "tools"
+    assert_success
+    assert_output "$tools_wt"
+}
+
+@test "wt-cd rejects subdirectory of a registered worktree" {
+    mkdir -p "$REPO/subdir"
+
+    run "$TEST_HOME/.wt/bin/wt-cd" "$REPO/subdir"
+    assert_failure
+    assert_output --partial "not a git repository or worktree"
+}

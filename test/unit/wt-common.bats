@@ -958,3 +958,106 @@ teardown() {
     assert_equal "$leftover" ""
 }
 
+
+# =============================================================================
+# Tests for wt_is_worktree_root(), wt_resolve_worktree(), wt_resolve_and_validate()
+# =============================================================================
+
+setup_resolver_fixture() {
+    REPO=$(create_mock_repo "$BATS_TEST_TMPDIR/repo")
+    export WT_MAIN_REPO_ROOT="$REPO"
+    create_branch "$REPO" "docs"
+    DOCS_WT="$BATS_TEST_TMPDIR/worktrees/docs"
+    create_worktree "$REPO" "$DOCS_WT" "docs"
+    DOCS_WT="$(cd "$DOCS_WT" && pwd -P)"
+}
+
+@test "wt_is_worktree_root accepts main repo and registered worktree roots" {
+    setup_resolver_fixture
+
+    run wt_is_worktree_root "$REPO"
+    assert_success
+
+    run wt_is_worktree_root "$DOCS_WT"
+    assert_success
+}
+
+@test "wt_is_worktree_root rejects subdirectories and unrelated directories" {
+    setup_resolver_fixture
+    mkdir -p "$REPO/docs" "$BATS_TEST_TMPDIR/unrelated"
+
+    run wt_is_worktree_root "$REPO/docs"
+    assert_failure
+
+    run wt_is_worktree_root "$BATS_TEST_TMPDIR/unrelated"
+    assert_failure
+
+    run wt_is_worktree_root "$BATS_TEST_TMPDIR/does-not-exist"
+    assert_failure
+}
+
+@test "wt_resolve_worktree prefers branch over same-named non-worktree directory" {
+    setup_resolver_fixture
+    mkdir -p "$REPO/docs"
+    cd "$REPO"
+
+    run wt_resolve_worktree "docs"
+    assert_success
+    assert_output "$DOCS_WT"
+}
+
+@test "wt_resolve_worktree resolves slashed branch names shadowed by a directory" {
+    setup_resolver_fixture
+    git -C "$REPO" branch "user/feature"
+    local slashed_wt="$BATS_TEST_TMPDIR/worktrees/user-feature"
+    create_worktree "$REPO" "$slashed_wt" "user/feature"
+    slashed_wt="$(cd "$slashed_wt" && pwd -P)"
+
+    mkdir -p "$REPO/user/feature"
+    cd "$REPO"
+
+    run wt_resolve_worktree "user/feature"
+    assert_success
+    assert_output "$slashed_wt"
+}
+
+@test "wt_resolve_worktree still resolves registered worktree paths" {
+    setup_resolver_fixture
+
+    run wt_resolve_worktree "$DOCS_WT"
+    assert_success
+    assert_output "$DOCS_WT"
+
+    run wt_resolve_worktree "$REPO"
+    assert_success
+    assert_output "$REPO"
+}
+
+@test "wt_resolve_and_validate rejects repo subdirectory that is not a worktree root" {
+    setup_resolver_fixture
+    mkdir -p "$REPO/subdir"
+
+    run wt_resolve_and_validate "$REPO/subdir"
+    assert_failure
+    assert_output --partial "not a git repository or worktree"
+}
+
+@test "wt_resolve_and_validate rejects unrelated git repo" {
+    setup_resolver_fixture
+    local other_repo
+    other_repo=$(create_mock_repo "$BATS_TEST_TMPDIR/other_repo")
+
+    run wt_resolve_and_validate "$other_repo"
+    assert_failure
+    assert_output --partial "not a git repository or worktree"
+}
+
+@test "wt_resolve_and_validate falls through directory collision to branch" {
+    setup_resolver_fixture
+    mkdir -p "$REPO/docs"
+    cd "$REPO"
+
+    run wt_resolve_and_validate "docs"
+    assert_success
+    assert_output "$DOCS_WT"
+}

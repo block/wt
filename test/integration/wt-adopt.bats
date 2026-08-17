@@ -418,3 +418,20 @@ STUB
     # Should NOT be adopted
     refute_is_adopted "$wt"
 }
+
+# =============================================================================
+# Branch-vs-directory collision
+# =============================================================================
+
+@test "adopt by branch name when repo has same-named subdirectory" {
+    create_branch "$REPO" "feature-shadow"
+    local wt="$WT_WORKTREES_BASE/feature-shadow"
+    create_worktree "$REPO" "$wt" "feature-shadow"
+
+    mkdir -p "$REPO/feature-shadow"
+    cd "$REPO"
+
+    run "$TEST_HOME/.wt/bin/wt-adopt" "feature-shadow"
+    assert_success
+    assert_is_adopted "$wt"
+}

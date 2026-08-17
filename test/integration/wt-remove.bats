@@ -435,3 +435,21 @@ create_removable_worktree() {
         assert_equal "$target" "$REPO"
     fi
 }
+
+# =============================================================================
+# Branch-vs-directory collision tests
+# =============================================================================
+
+@test "wt-remove resolves branch name shadowed by a same-named directory" {
+    local wt_path
+    wt_path=$(create_removable_worktree "shadowed")
+
+    mkdir -p "$REPO/shadowed"
+    cd "$REPO"
+
+    run "$TEST_HOME/.wt/bin/wt-remove" -y "shadowed"
+    assert_success
+    assert [ ! -d "$wt_path" ]
+    # The colliding directory must be untouched
+    assert [ -d "$REPO/shadowed" ]
+}

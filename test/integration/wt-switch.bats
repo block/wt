@@ -187,3 +187,40 @@ teardown() {
     branch=$(cd "$WT_ACTIVE_WORKTREE" && git branch --show-current)
     assert_equal "$branch" "feature-1"
 }
+
+# =============================================================================
+# Branch-vs-directory collision tests
+# =============================================================================
+
+@test "wt-switch resolves branch name shadowed by a same-named repo subdirectory" {
+    rm -f "$WT_ACTIVE_WORKTREE" 2>/dev/null || true
+
+    create_branch "$REPO" "docs"
+    local docs_wt="$WT_WORKTREES_BASE/docs"
+    create_worktree "$REPO" "$docs_wt" "docs"
+
+    # A directory named after the branch, relative to CWD
+    mkdir -p "$REPO/docs"
+    cd "$REPO"
+
+    run "$TEST_HOME/.wt/bin/wt-switch" "docs"
+    assert_success
+
+    local target
+    target=$(readlink "$WT_ACTIVE_WORKTREE")
+    assert_equal "$target" "$docs_wt"
+}
+
+@test "wt-switch rejects repo subdirectory that is not a worktree root" {
+    ln -s "$REPO" "$WT_ACTIVE_WORKTREE"
+    mkdir -p "$REPO/subdir"
+
+    run "$TEST_HOME/.wt/bin/wt-switch" "$REPO/subdir"
+    assert_failure
+    assert_output --partial "not a git repository or worktree"
+
+    # Symlink must not have been redirected to the subdirectory
+    local target
+    target=$(readlink "$WT_ACTIVE_WORKTREE")
+    assert_equal "$target" "$REPO"
+}

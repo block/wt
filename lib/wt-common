@@ -557,9 +557,34 @@ wt_source() {
 # Git helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Check whether a directory is the root of a worktree registered with the main
+# repo (the main repo itself counts). Compares physical paths (pwd -P) so
+# symlinked spellings like macOS /var -> /private/var still match.
+# Usage: wt_is_worktree_root <path>
+# Returns: 0 if the path is a registered worktree root, 1 otherwise
+wt_is_worktree_root() {
+  local candidate
+  candidate="$(cd "$1" 2>/dev/null && pwd -P)" || return 1
+
+  local line wt_path wt_abs
+  while IFS= read -r line; do
+    case "$line" in
+      worktree\ *)
+        wt_path="${line#worktree }"
+        wt_abs="$(cd "$wt_path" 2>/dev/null && pwd -P)" || continue
+        if [[ "$wt_abs" == "$candidate" ]]; then
+          return 0
+        fi
+        ;;
+    esac
+  done < <(git -C "$WT_MAIN_REPO_ROOT" worktree list --porcelain 2>/dev/null)
+
+  return 1
+}
+
 # Resolve a worktree identifier (path or branch name) to an absolute worktree path.
 # Tries:
-#   1. Filesystem path (directory must exist) — preserves existing behavior
+#   1. Filesystem path — accepted only if the directory is a registered worktree root
 #   2. Exact branch name match via `git worktree list --porcelain`
 # Note: Detached HEAD worktrees cannot be resolved by branch name; use the path instead.
 # Usage: wt_resolve_worktree <identifier>
@@ -569,7 +594,7 @@ wt_resolve_worktree() {
   local identifier="$1"
 
   # 1) Try as filesystem path
-  if [[ -d "$identifier" ]]; then
+  if [[ -d "$identifier" ]] && wt_is_worktree_root "$identifier"; then
     (cd "$identifier" && pwd)
     return 0
   fi
@@ -602,7 +627,12 @@ wt_resolve_and_validate() {
   local identifier="$1"
   local resolved
   if ! resolved="$(wt_resolve_worktree "$identifier")"; then
-    error "Worktree not found (not a valid path or branch name): $identifier"
+    if [[ -d "$identifier" ]]; then
+      resolved="$(cd "$identifier" 2>/dev/null && pwd)" || resolved="$identifier"
+      error "$resolved is not a git repository or worktree registered in $WT_MAIN_REPO_ROOT"
+    else
+      error "Worktree not found (not a valid path or branch name): $identifier"
+    fi
     return 1
   fi
   if ! git -C "$resolved" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
