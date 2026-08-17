@@ -21,6 +21,19 @@ wt add feature/existing-branch          # Creates worktree for existing branch
 
 After creation, `cd` into the worktree path printed by the command.
 
+## wt adopt
+
+Adopt an existing worktree (e.g. created with plain `git worktree add`) into wt management: imports project metadata from the vault and marks the worktree as wt-managed. Unadopted worktrees show `[unadopted]` in `wt list`.
+
+```
+wt adopt                            # Adopt the worktree at the current directory
+wt adopt <worktree|branch>          # Adopt a specific worktree
+wt adopt --redo                     # Re-run adoption on an already-adopted worktree
+wt adopt --force                    # Skip conflict checks, overwrite without prompting
+```
+
+The main repository cannot be adopted. If the target has conflicting metadata, interactive sessions prompt (overwrite/keep/abort); non-interactive sessions abort unless `--force` is given.
+
 ## wt list
 
 List all worktrees with status indicators.
@@ -28,9 +41,20 @@ List all worktrees with status indicators.
 ```
 wt list                             # Quick list
 wt list -v                          # Verbose: show dirty/ahead/behind
+wt list --porcelain                 # Machine-readable (best for agents/scripts)
+wt list -v --porcelain              # Machine-readable incl. dirty/ahead/behind
 ```
 
-Output shows the context name, each worktree path, branch, and markers like `[main]` (main repo) and the pin icon for the current context.
+Output shows the context name, each worktree path, branch, and markers like `[main]` (main repo), `[unadopted]` (not adopted by wt — fix with `wt adopt`), and the pin icon for the current context.
+
+`--porcelain` emits `git worktree list --porcelain` entries augmented with extra lines per worktree:
+
+| Line | Meaning |
+|------|---------|
+| `wt.active` | Worktree is the active symlink target |
+| `wt.adopted` | Worktree is adopted by wt |
+| `wt.dirty` | Has uncommitted changes (requires `-v`) |
+| `wt.ahead N` / `wt.behind N` | Commits ahead/behind upstream (requires `-v`) |
 
 ## wt remove
 
