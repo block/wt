@@ -62,6 +62,22 @@ _wt_branch_list() {
   git -C "$repo" branch --format='%(refname:short)' 2>/dev/null
 }
 
+# --- Helper: list wt subcommands (one per line) ---
+# Derived from the bin/ registry (executables named wt-*), plus the
+# shell-integrated aliases and help that have no bin/ script of their own.
+_wt_command_list() {
+  local bin_dir="${__WT_ROOT:-$HOME/.wt}/bin" f name
+
+  if [[ -d "$bin_dir" ]]; then
+    for f in "$bin_dir"/wt-*; do
+      [[ -f "$f" && -x "$f" ]] || continue
+      name="${f##*/}"
+      printf '%s\n' "${name#wt-}"
+    done
+  fi
+  printf '%s\n' ijwb-export ijwb-import help
+}
+
 
 # ====================================================================================
 #  PATH 1: FZF is available → FZF-powered completion for wt-add first argument
@@ -368,7 +384,8 @@ _wt_completion_bash() {
   cur="${COMP_WORDS[COMP_CWORD]}"
 
   if [[ ${COMP_CWORD} -eq 1 ]]; then
-    local commands="add adopt switch remove list cd context metadata-export metadata-import ijwb-export ijwb-import help"
+    local commands
+    commands="$(_wt_command_list)"
     COMPREPLY=($(compgen -W "$commands" -- "$cur"))
   else
     case "${COMP_WORDS[1]}" in

@@ -56,6 +56,27 @@ _wt_branch_list() {
   git -C "$repo" branch --format='%(refname:short)' 2>/dev/null
 }
 
+# --- Helper: list wt subcommands, one `name` or `name:description` per line ---
+# Derived from the bin/ registry (executables named wt-*), plus the
+# shell-integrated aliases and help that have no bin/ script of their own.
+_wt_command_list() {
+  local bin_dir="${__WT_ROOT:-$HOME/.wt}/bin" f
+  local -a names
+
+  if [[ -d "$bin_dir" ]]; then
+    for f in "$bin_dir"/wt-*(N); do
+      [[ -f "$f" && -x "$f" ]] || continue
+      names+=("${${f:t}#wt-}")
+    done
+  fi
+  names+=(
+    'ijwb-export:Export project metadata to vault (legacy alias)'
+    'ijwb-import:Import project metadata into worktree (legacy alias)'
+    'help:Show help message'
+  )
+  print -rl -- "${names[@]}"
+}
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Shared completion functions (used by both `wt-*` and `wt` subcommands)
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -316,20 +337,7 @@ _wt_completion() {
   wt_read_config --force || true
 
   local -a commands
-  commands=(
-    'add:Create a new worktree for a branch'
-    'adopt:Adopt an existing worktree into wt management'
-    'switch:Switch the active worktree symlink'
-    'remove:Remove a worktree'
-    'list:List all worktrees with status'
-    'cd:Change directory to a worktree'
-    'context:Switch repository context'
-    'metadata-export:Export project metadata to vault'
-    'metadata-import:Import project metadata into worktree'
-    'ijwb-export:Export .ijwb metadata to vault (legacy alias)'
-    'ijwb-import:Import .ijwb metadata into worktree (legacy alias)'
-    'help:Show help message'
-  )
+  commands=("${(f)$(_wt_command_list)}")
 
   local context state
   typeset -A opt_args

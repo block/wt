@@ -42,14 +42,12 @@ __wt_ensure_sourced() {
 }
 
 # helper for sourcing a library file from lib/ directory
-# Args: $1 = library name, $2 = "optional" to skip error if not found
 __wt_source_lib() {
   local lib="$1"
-  local required="${2:-required}"
-  
+
   if [[ -f "$__WT_ROOT/lib/$lib" ]]; then
     . "$__WT_ROOT/lib/$lib"
-  elif [[ "$required" != "optional" ]]; then
+  else
     echo "wt: cannot find required library: $lib" >&2
     return 1
   fi
@@ -106,30 +104,34 @@ __wt_do_remove() {
 }
 
 # main wt command
+#
+# Dedicated branches exist only for subcommands needing in-shell behavior
+# (cd, remove, context) and the legacy aliases; everything else dispatches
+# to bin/wt-<cmd>, so adding a new executable there requires no change here.
 wt() {
   local cmd="${1:-}"
+  local root="${__WT_ROOT:-$HOME/.wt}"
   shift 2>/dev/null || true
 
   case "$cmd" in
-    add)             __wt_run wt-add "$@" ;;
-    adopt)           __wt_run wt-adopt "$@" ;;
-    switch)          __wt_run wt-switch "$@" ;;
-    remove)          __wt_do_remove "$@" ;;
-    list)            __wt_run wt-list "$@" ;;
+    cd)      __wt_do_cd "$@" ;;
+    remove)  __wt_do_remove "$@" ;;
     context) __wt_run wt-context "$@" && wt_read_config --force ;;
-    metadata-export) __wt_run wt-metadata-export "$@" ;;
-    metadata-import) __wt_run wt-metadata-import "$@" ;;
     # Legacy aliases (kept for backward compatibility)
     ijwb-export)     __wt_run wt-metadata-export "$@" ;;
     ijwb-import)     __wt_run wt-metadata-import "$@" ;;
-    cd)              __wt_do_cd "$@" ;;
     help|--help|-h|"")
       wt_show_help          # helper for showing help, defined in wt-help library
       ;;
     *)
-      echo "wt: unknown command '$cmd'" >&2
-      echo "Run 'wt help' for usage information." >&2
-      return 1
+      # Reject '/' in cmd so the lookup can never escape bin/
+      if [[ "$cmd" != */* && -x "$root/bin/wt-$cmd" ]]; then
+        __wt_run "wt-$cmd" "$@"
+      else
+        echo "wt: unknown command '$cmd'" >&2
+        echo "Run 'wt help' for usage information." >&2
+        return 1
+      fi
       ;;
   esac
 }
