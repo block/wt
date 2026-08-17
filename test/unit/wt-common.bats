@@ -350,6 +350,21 @@ teardown() {
     assert_equal "$WT_BASE_BRANCH" "develop"
 }
 
+@test "wt_read_git_config applies wt.seedFiles when present" {
+    local repo
+    repo=$(create_mock_repo)
+
+    set_wt_git_config_required "$repo" "/worktrees" "/idea" "develop"
+    git -C "$repo" config --local wt.seedFiles "user.bazelrc .bazelversion"
+
+    unset WT_MAIN_REPO_ROOT WT_WORKTREES_BASE WT_IDEA_FILES_BASE WT_BASE_BRANCH WT_SEED_FILES
+
+    cd "$repo"
+    wt_read_git_config
+
+    assert_equal "$WT_SEED_FILES" "user.bazelrc .bazelversion"
+}
+
 @test "wt_read_git_config returns failure outside a git repo" {
     local non_git_dir="$BATS_TEST_TMPDIR/not-a-repo"
     mkdir -p "$non_git_dir"

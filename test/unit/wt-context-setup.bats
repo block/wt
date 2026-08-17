@@ -426,6 +426,7 @@ teardown() {
     export WT_BASE_BRANCH="main"
     export WT_ACTIVE_WORKTREE="$TEST_HOME/active"
     export WT_METADATA_PATTERNS=".idea .vscode"
+    export WT_SEED_FILES="user.bazelrc"
 
     _wt_write_git_config "$repo" "myctx"
 
@@ -436,6 +437,7 @@ teardown() {
     assert_equal "$(git -C "$repo" config --local wt.baseBranch)" "main"
     assert_equal "$(git -C "$repo" config --local wt.activeWorktree)" "$WT_ACTIVE_WORKTREE"
     assert_equal "$(git -C "$repo" config --local wt.metadataPatterns)" ".idea .vscode"
+    assert_equal "$(git -C "$repo" config --local wt.seedFiles)" "user.bazelrc"
 }
 
 @test "_wt_write_git_config values match what the .conf file would contain" {
@@ -467,12 +469,13 @@ teardown() {
     export WT_BASE_BRANCH="main"
     export WT_ACTIVE_WORKTREE="$TEST_HOME/active"
     export WT_METADATA_PATTERNS=".idea .ijwb"
+    export WT_SEED_FILES="user.bazelrc"
 
     _wt_write_git_config "$repo" "roundtrip"
 
     # Clear the variables so wt_read_git_config has to populate them
     unset WT_MAIN_REPO_ROOT WT_WORKTREES_BASE WT_IDEA_FILES_BASE WT_BASE_BRANCH
-    unset WT_ACTIVE_WORKTREE WT_METADATA_PATTERNS WT_CONTEXT_NAME
+    unset WT_ACTIVE_WORKTREE WT_METADATA_PATTERNS WT_SEED_FILES WT_CONTEXT_NAME
     unset _WT_SKIP_GIT_CONFIG
 
     cd "$repo"
@@ -484,6 +487,7 @@ teardown() {
     assert_equal "$WT_BASE_BRANCH" "main"
     assert_equal "$WT_ACTIVE_WORKTREE" "$TEST_HOME/active"
     assert_equal "$WT_METADATA_PATTERNS" ".idea .ijwb"
+    assert_equal "$WT_SEED_FILES" "user.bazelrc"
     assert_equal "$WT_CONTEXT_NAME" "roundtrip"
 }
 
@@ -516,6 +520,24 @@ teardown() {
     export WT_METADATA_PATTERNS=""
     _wt_write_git_config "$repo" "ctx"
     run git -C "$repo" config --local wt.metadataPatterns
+    assert_failure
+}
+
+@test "_wt_write_git_config unsets seedFiles when empty" {
+    local repo
+    repo=$(create_mock_repo)
+
+    export WT_WORKTREES_BASE="/tmp/wt" WT_IDEA_FILES_BASE="/tmp/idea"
+    export WT_BASE_BRANCH="main" WT_ACTIVE_WORKTREE="/tmp/active"
+    export WT_METADATA_PATTERNS=""
+
+    export WT_SEED_FILES="user.bazelrc"
+    _wt_write_git_config "$repo" "ctx"
+    assert_equal "$(git -C "$repo" config --local wt.seedFiles)" "user.bazelrc"
+
+    export WT_SEED_FILES=""
+    _wt_write_git_config "$repo" "ctx"
+    run git -C "$repo" config --local wt.seedFiles
     assert_failure
 }
 
@@ -566,6 +588,46 @@ teardown() {
     assert_failure
 }
 
+# =============================================================================
+# Tests for _wt_select_seed_files()
+# =============================================================================
+
+@test "_wt_select_seed_files sets WT_SEED_FILES from input" {
+    _wt_select_seed_files "$BATS_TEST_TMPDIR/no-such.conf" <<< "user.bazelrc .bazelversion"
+    assert_equal "$WT_SEED_FILES" "user.bazelrc .bazelversion"
+}
+
+@test "_wt_select_seed_files keeps prior conf value on empty input" {
+    local conf="$BATS_TEST_TMPDIR/prior.conf"
+    echo 'WT_SEED_FILES="user.bazelrc"' > "$conf"
+
+    _wt_select_seed_files "$conf" <<< ""
+    assert_equal "$WT_SEED_FILES" "user.bazelrc"
+}
+
+@test "_wt_select_seed_files keeps prior conf value on EOF" {
+    local conf="$BATS_TEST_TMPDIR/prior.conf"
+    echo 'WT_SEED_FILES="user.bazelrc"' > "$conf"
+
+    _wt_select_seed_files "$conf" < /dev/null
+    assert_equal "$WT_SEED_FILES" "user.bazelrc"
+}
+
+@test "_wt_select_seed_files clears the value on '-'" {
+    local conf="$BATS_TEST_TMPDIR/prior.conf"
+    echo 'WT_SEED_FILES="user.bazelrc"' > "$conf"
+
+    _wt_select_seed_files "$conf" <<< "-"
+    assert_equal "$WT_SEED_FILES" ""
+}
+
+@test "_wt_select_seed_files ignores env value inherited from another context" {
+    export WT_SEED_FILES="user.bazelrc"
+
+    _wt_select_seed_files "$BATS_TEST_TMPDIR/no-such.conf" <<< ""
+    assert_equal "$WT_SEED_FILES" ""
+}
+
 @test "wt_setup_context customization expands ~ and writes absolute paths to config" {
     local repo
     repo=$(create_mock_repo "$BATS_TEST_TMPDIR/customize-repo")
@@ -594,6 +656,10 @@ EOF
     assert_output "WT_WORKTREES_BASE=\"$TEST_HOME/wt-custom/worktrees\""
     run grep '^WT_IDEA_FILES_BASE=' "$conf"
     assert_output "WT_IDEA_FILES_BASE=\"$TEST_HOME/wt-custom/idea-files\""
+
+    # Seed-files prompt hit EOF — key is still emitted, empty
+    run grep '^WT_SEED_FILES=' "$conf"
+    assert_output 'WT_SEED_FILES=""'
 
     # No literal '~' directory created in the working directory
     assert [ ! -e "$workdir/~" ]
