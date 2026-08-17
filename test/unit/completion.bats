@@ -82,6 +82,91 @@ EOF
 }
 
 # =============================================================================
+# Dynamic top-level command list (_wt_command_list) from the bin/ registry
+# =============================================================================
+
+@test "bash _wt_command_list derives commands from bin/ plus aliases and help" {
+    printf '#!/bin/sh\nexit 0\n' > "$TEST_HOME/.wt/bin/wt-frobnicate"
+    chmod +x "$TEST_HOME/.wt/bin/wt-frobnicate"
+    echo "not a command" > "$TEST_HOME/.wt/bin/wt-notexec"
+
+    source "$PROJECT_ROOT/completion/wt.bash"
+
+    run _wt_command_list
+    assert_success
+    assert_line "add"
+    assert_line "adopt"
+    assert_line "list"
+    assert_line "frobnicate"
+    assert_line "ijwb-export"
+    assert_line "ijwb-import"
+    assert_line "help"
+    refute_line "notexec"
+}
+
+@test "bash _wt_command_list tolerates a missing bin dir" {
+    source "$PROJECT_ROOT/completion/wt.bash"
+    __WT_ROOT="$BATS_TEST_TMPDIR/no-such-root"
+
+    run _wt_command_list
+    assert_success
+    assert_line "help"
+    assert_line "ijwb-export"
+    refute_line "add"
+}
+
+@test "bash unified wt completion offers commands from the bin/ registry" {
+    printf '#!/bin/sh\nexit 0\n' > "$TEST_HOME/.wt/bin/wt-frobnicate"
+    chmod +x "$TEST_HOME/.wt/bin/wt-frobnicate"
+
+    source "$PROJECT_ROOT/completion/wt.bash"
+
+    COMP_WORDS=("wt" "")
+    COMP_CWORD=1
+    _wt_completion_bash
+    [[ " ${COMPREPLY[*]} " == *" add "* ]] || fail "missing add in: ${COMPREPLY[*]}"
+    [[ " ${COMPREPLY[*]} " == *" frobnicate "* ]] || fail "missing frobnicate in: ${COMPREPLY[*]}"
+    [[ " ${COMPREPLY[*]} " == *" help "* ]] || fail "missing help in: ${COMPREPLY[*]}"
+    [[ " ${COMPREPLY[*]} " == *" ijwb-export "* ]] || fail "missing ijwb-export in: ${COMPREPLY[*]}"
+}
+
+@test "zsh _wt_command_list derives commands from bin/ plus aliases and help" {
+    skip_if_no_zsh
+
+    printf '#!/bin/sh\nexit 0\n' > "$TEST_HOME/.wt/bin/wt-frobnicate"
+    chmod +x "$TEST_HOME/.wt/bin/wt-frobnicate"
+    echo "not a command" > "$TEST_HOME/.wt/bin/wt-notexec"
+
+    cat > "$BATS_TEST_TMPDIR/t.zsh" <<EOF
+source "$PROJECT_ROOT/completion/wt.zsh" 2>/dev/null
+_wt_command_list
+EOF
+    run zsh -f "$BATS_TEST_TMPDIR/t.zsh"
+    assert_success
+    assert_line "add"
+    assert_line "adopt"
+    assert_line "frobnicate"
+    assert_line "help:Show help message"
+    assert_output --partial "ijwb-export:"
+    assert_output --partial "ijwb-import:"
+    refute_line "notexec"
+}
+
+@test "zsh _wt_command_list tolerates a missing bin dir" {
+    skip_if_no_zsh
+
+    cat > "$BATS_TEST_TMPDIR/t.zsh" <<EOF
+source "$PROJECT_ROOT/completion/wt.zsh" 2>/dev/null
+__WT_ROOT="$BATS_TEST_TMPDIR/no-such-root"
+_wt_command_list
+EOF
+    run zsh -f "$BATS_TEST_TMPDIR/t.zsh"
+    assert_success
+    assert_line "help:Show help message"
+    refute_line "add"
+}
+
+# =============================================================================
 # No global TAB hijack in zsh when fzf is present
 # =============================================================================
 

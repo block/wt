@@ -454,6 +454,8 @@ wt-add, wt-adopt, wt-switch, wt-remove, wt-list, wt-cd, wt-context, wt-metadata-
 
 These are located in `bin/` and work identically to the `wt` subcommands.
 
+The `bin/` directory is the subcommand registry: `wt <name>` dispatches to any executable `bin/wt-<name>`, and shell completion derives the top-level command list from the same directory. Only `cd`, `remove`, and `context` have dedicated dispatch branches (they need in-shell behavior), so adding a new subcommand is just dropping an executable `bin/wt-<name>` script.
+
 The `lib/wt-metadata-refresh` script is designed for cron jobs and can be run directly from its location.
 
 ## Project Resources
