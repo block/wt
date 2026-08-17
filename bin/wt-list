@@ -115,23 +115,52 @@ _print_missing_worktree() {
 
 ADOPTED_SET="$(wt_adopted_worktree_paths)"
 
+ENTRIES="$(wt_worktree_entries)"
+
+# Probe results are keyed by entry index: this loop and the print loop below
+# must count ENTRIES lines identically.
+PROBE_DIR=""
+if [[ "$VERBOSE" == true && -n "$ENTRIES" ]]; then
+  PROBE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/wt-list.XXXXXX")"
+  trap 'rm -rf "$PROBE_DIR"' EXIT
+  PROBE_INPUT=""
+  idx=0
+  while IFS=$'\t' read -r wt_abs kind branch; do
+    if [[ -n "$wt_abs" && -d "$wt_abs" ]]; then
+      [[ "$kind" == "detached" ]] && branch=""
+      PROBE_INPUT="${PROBE_INPUT}${idx}"$'\t'"${wt_abs}"$'\t'"${branch}"$'\n'
+    fi
+    idx=$((idx + 1))
+  done <<< "$ENTRIES"
+  wt_run_status_probes "$PROBE_DIR" <<< "$PROBE_INPUT"
+fi
+
 # List worktrees
 echo
 
+idx=0
 while IFS=$'\t' read -r wt_abs kind branch; do
+  [[ -n "$wt_abs" ]] || continue
   if [[ ! -d "$wt_abs" ]]; then
     [[ -z "$branch" ]] && branch="detached"
     _print_missing_worktree "$wt_abs" "$branch"
+    idx=$((idx + 1))
     continue
   fi
 
   [[ "$kind" == "detached" ]] && branch="HEAD"
 
   wt_worktree_prefix_and_badge "$wt_abs" "$MAIN_REPO_ABS" "$LINKED_WORKTREE" "$ADOPTED_SET"
-  printf "%s%s%s\n" "$WT_ROW_PREFIX" \
-    "$(wt_format_worktree "$wt_abs" "$MAIN_REPO_ABS" "$LINKED_WORKTREE" "$VERBOSE" "$branch")" \
-    "$WT_ROW_BADGE"
-done < <(wt_worktree_entries)
+  if [[ "$VERBOSE" == true ]]; then
+    PROBE=""
+    [[ -f "$PROBE_DIR/$idx" ]] && PROBE="$(cat "$PROBE_DIR/$idx")"
+    FORMATTED="$(wt_format_worktree "$wt_abs" "$MAIN_REPO_ABS" "$LINKED_WORKTREE" "$VERBOSE" "$branch" "$PROBE")"
+  else
+    FORMATTED="$(wt_format_worktree "$wt_abs" "$MAIN_REPO_ABS" "$LINKED_WORKTREE" "$VERBOSE" "$branch")"
+  fi
+  printf "%s%s%s\n" "$WT_ROW_PREFIX" "$FORMATTED" "$WT_ROW_BADGE"
+  idx=$((idx + 1))
+done <<< "$ENTRIES"
 
 echo
 

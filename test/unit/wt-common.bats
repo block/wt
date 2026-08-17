@@ -121,6 +121,71 @@ teardown() {
 }
 
 # =============================================================================
+# Tests for wt_status_probe() and wt_run_status_probes()
+# =============================================================================
+
+@test "wt_status_probe emits dirty for a dirty repo and nothing for a clean one" {
+    local clean dirty
+    clean=$(create_mock_repo "$BATS_TEST_TMPDIR/clean_repo")
+    dirty=$(create_mock_repo "$BATS_TEST_TMPDIR/dirty_repo")
+    make_repo_dirty "$dirty"
+
+    run wt_status_probe "$dirty" "main"
+    assert_success
+    assert_output "dirty"
+
+    run wt_status_probe "$clean" "main"
+    assert_success
+    assert_output ""
+}
+
+@test "wt_status_probe skips ahead/behind when branch is empty" {
+    local repo
+    repo=$(create_mock_repo_with_remote "$BATS_TEST_TMPDIR/remote_repo")
+    (cd "$repo" && echo "new" >> file.txt && git add file.txt && git commit -m "ahead") >/dev/null 2>&1
+
+    run wt_status_probe "$repo" "main"
+    assert_success
+    assert_output "ahead 1"
+
+    run wt_status_probe "$repo" ""
+    assert_success
+    assert_output ""
+}
+
+@test "wt_run_status_probes writes probe results keyed by index" {
+    local clean dirty dir
+    clean=$(create_mock_repo "$BATS_TEST_TMPDIR/clean_repo")
+    dirty=$(create_mock_repo "$BATS_TEST_TMPDIR/dirty_repo")
+    make_repo_dirty "$dirty"
+    dir="$BATS_TEST_TMPDIR/probes"
+    mkdir -p "$dir"
+
+    printf '0\t%s\t\n1\t%s\t\n' "$clean" "$dirty" | wt_run_status_probes "$dir"
+
+    [[ -f "$dir/0" && -f "$dir/1" ]] || fail "Expected probe files 0 and 1 in $dir"
+    [[ ! -s "$dir/0" ]] || fail "Clean repo probe should be empty: $(cat "$dir/0")"
+    assert_equal "$(cat "$dir/1")" "dirty"
+}
+
+@test "wt_run_status_probes completes all probes with more input than the pool size" {
+    local repo dir i input=""
+    repo=$(create_mock_repo "$BATS_TEST_TMPDIR/pool_repo")
+    dir="$BATS_TEST_TMPDIR/probes-pool"
+    mkdir -p "$dir"
+    make_repo_dirty "$repo"
+
+    for i in 0 1 2 3 4 5 6 7; do
+        input="${input}${i}"$'\t'"${repo}"$'\t'$'\n'
+    done
+    WT_STATUS_PROBE_JOBS=2 wt_run_status_probes "$dir" <<< "$input"
+
+    for i in 0 1 2 3 4 5 6 7; do
+        assert_equal "$(cat "$dir/$i")" "dirty"
+    done
+}
+
+# =============================================================================
 # Tests for wt_uncommitted_summary()
 # =============================================================================
 

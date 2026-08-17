@@ -115,6 +115,86 @@ teardown() {
     refute_output --partial "[dirty]"
 }
 
+@test "wt-list -v with multiple worktrees shows per-worktree indicators in original order" {
+    create_branch "$REPO" "feature-clean"
+    create_branch "$REPO" "feature-dirty"
+    create_worktree "$REPO" "$WT_WORKTREES_BASE/feature-clean" "feature-clean"
+    create_worktree "$REPO" "$WT_WORKTREES_BASE/feature-dirty" "feature-dirty"
+    make_repo_dirty "$WT_WORKTREES_BASE/feature-dirty"
+
+    run "$TEST_HOME/.wt/bin/wt-list" -v
+    assert_success
+
+    local dirty_line clean_line
+    dirty_line=$(echo "$output" | grep "feature-dirty")
+    clean_line=$(echo "$output" | grep "feature-clean")
+    [[ "$dirty_line" == *"[dirty]"* ]] || fail "Expected [dirty] on feature-dirty line, got: $dirty_line"
+    [[ "$clean_line" != *"[dirty]"* ]] || fail "Did not expect [dirty] on feature-clean line, got: $clean_line"
+
+    # Rows must stay in git worktree list order (main first, then creation order)
+    local branches
+    branches=$(echo "$output" | grep -E "\((main|feature-clean|feature-dirty)\)" | sed 's/.*(\([^)]*\)).*/\1/')
+    assert_equal "$branches" "$(printf 'main\nfeature-clean\nfeature-dirty')"
+}
+
+@test "wt-list -v passes --no-optional-locks to status probes" {
+    create_branch "$REPO" "feature-locks"
+    create_worktree "$REPO" "$WT_WORKTREES_BASE/feature-locks" "feature-locks"
+
+    local real_git shim_dir log
+    real_git="$(command -v git)"
+    shim_dir="$BATS_TEST_TMPDIR/shim"
+    log="$BATS_TEST_TMPDIR/git-calls.log"
+    mkdir -p "$shim_dir"
+    cat > "$shim_dir/git" <<EOF
+#!/usr/bin/env bash
+echo "\$*" >> "$log"
+exec "$real_git" "\$@"
+EOF
+    chmod +x "$shim_dir/git"
+
+    run env PATH="$shim_dir:$PATH" "$TEST_HOME/.wt/bin/wt-list" -v
+    assert_success
+
+    grep -q "status --porcelain" "$log" || fail "Expected at least one status probe in: $(cat "$log")"
+    if grep "status --porcelain" "$log" | grep -qv -- "--no-optional-locks"; then
+        fail "status probe without --no-optional-locks: $(grep "status --porcelain" "$log")"
+    fi
+}
+
+@test "wt-list -v runs status probes concurrently (wall time below sequential sum)" {
+    local i
+    for i in 1 2 3 4 5; do
+        create_branch "$REPO" "feature-t$i"
+        create_worktree "$REPO" "$WT_WORKTREES_BASE/feature-t$i" "feature-t$i"
+    done
+
+    # Shim adds a 1s penalty per `git status` call: 6 worktrees probed
+    # sequentially would take >= 6s; the bounded pool runs them concurrently.
+    local real_git shim_dir
+    real_git="$(command -v git)"
+    shim_dir="$BATS_TEST_TMPDIR/shim"
+    mkdir -p "$shim_dir"
+    cat > "$shim_dir/git" <<EOF
+#!/usr/bin/env bash
+for arg in "\$@"; do
+    [[ "\$arg" == "status" ]] && { sleep 1; break; }
+done
+exec "$real_git" "\$@"
+EOF
+    chmod +x "$shim_dir/git"
+
+    local start_ts end_ts elapsed
+    start_ts=$(date +%s)
+    run env PATH="$shim_dir:$PATH" "$TEST_HOME/.wt/bin/wt-list" -v
+    end_ts=$(date +%s)
+    assert_success
+    assert_output --partial "feature-t5"
+
+    elapsed=$((end_ts - start_ts))
+    [[ "$elapsed" -lt 5 ]] || fail "Expected concurrent probes to finish in <5s (sequential would be >=6s), took ${elapsed}s"
+}
+
 # =============================================================================
 # Error handling tests
 # =============================================================================
