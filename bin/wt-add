@@ -22,18 +22,16 @@
 #                install project metadata into "$path".
 #
 # 3. If creating a new branch (using -b/--branch):
-#       a. If there are uncommitted changes in the base repo:
-#            - Stash them using a uniquely named stash entry.
-#       b. If not currently on the base branch ($WT_BASE_BRANCH):
-#            - Switch to that base branch.
-#       c. Ensure the base branch is up to date by running `git pull`.
-#       d. Run `git worktree add <args>` to create the new worktree.
-#       e. Run wt-metadata-import to import project metadata into the new worktree.
-#       f. Copy configured seed files (WT_SEED_FILES) from the main repo into
+#       a. Refresh the base ref with `git fetch origin $WT_BASE_BRANCH`
+#            (skipped with WT_SKIP_PULL=1 or when there is no origin remote;
+#            a failed fetch warns and falls back to the last-known base ref).
+#       b. Run `git worktree add --no-track -b <branch> <path> <start-point>`,
+#            where <start-point> is origin/$WT_BASE_BRANCH when a remote-tracking
+#            ref exists, or the local $WT_BASE_BRANCH otherwise. A start point
+#            passed on the command line is respected verbatim (no --no-track).
+#       c. Run wt-metadata-import to import project metadata into the new worktree.
+#       d. Copy configured seed files (WT_SEED_FILES) from the main repo into
 #            the new worktree (best-effort, never overwrites).
-#       g. After completion:
-#            - Switch back to the original branch or detached HEAD commit.
-#            - Pop the specific stash created earlier (if any).
 #
 # 4. Default worktree location (when using -b/--branch and no path is given):
 #       - If no explicit worktree path is provided, the worktree will be created under:
@@ -43,20 +41,21 @@
 #
 # Guarantees:
 # -----------
-# - Uncommitted changes are safely stashed and restored without
-#   interfering with unrelated stash entries.
-# - `git pull` only happens when the script is truly on the base branch.
-# - Detached HEAD states are restored correctly.
+# - The main repo checkout is never touched: no stash, no branch switch,
+#   uncommitted changes are left exactly as they were.
+# - New branches are created from an explicit base ref, never from whatever
+#   happens to be checked out in the main repo.
 # - Worktree creation behaves like `git worktree add`, but with safety
 #   guardrails and automatic project metadata installation.
 #
 # Usage examples:
 # ---------------
 #   wt-add -b feature/foo
-#       → Creates a worktree at $WT_WORKTREES_BASE/feature/foo and installs metadata
+#       → Creates a worktree at $WT_WORKTREES_BASE/feature/foo from
+#         origin/$WT_BASE_BRANCH and installs metadata
 #
 #   wt-add -b feature/foo /custom/path origin/master
-#       → Uses the explicit path and extra arguments as-is, then installs metadata
+#       → Uses the explicit path and start point as-is, then installs metadata
 #
 #   wt-add ../path/to/worktree existing-branch
 #       → No branch creation; simply runs git worktree add and installs metadata.
@@ -257,152 +256,40 @@ if [[ -z "$branch_name" ]]; then
   exit 1
 fi
 
-echo "Creating a new branch '$branch_name'; preparing repo state..."
+echo "Creating a new branch '$branch_name'..."
 
-# Track original state so we can restore it
-orig_branch="$(git rev-parse --abbrev-ref HEAD || echo "")"   # e.g. master, feature/foo, or HEAD
-orig_rev="$(git rev-parse HEAD || echo "")"                   # concrete SHA
-branch_switched=0
-stash_made=0
-stash_name=""
-stash_ref=""
-restore_ran=0
-
-# shellcheck disable=SC2329  # invoked via trap
-restore_state() {
-  # avoid running twice (EXIT + INT/TERM)
-  if [[ $restore_ran -eq 1 ]]; then
-    return 0
-  fi
-  restore_ran=1
-
-  # Best-effort cleanup; don't let set -e kill us here
-  set +e
-
-  echo "Restoring original repo state..."
-
-  # Switch back to original branch / detached HEAD
-  if [[ $branch_switched -eq 1 ]]; then
-    if [[ "$orig_branch" != "HEAD" && -n "$orig_branch" ]]; then
-      echo "Switching back to original branch: $orig_branch"
-      git checkout "$orig_branch"
-    elif [[ -n "$orig_rev" ]]; then
-      echo "Restoring original detached HEAD at: $orig_rev"
-      git checkout "$orig_rev"
-    fi
-  fi
-
-  # Pop the specific stash we created, if any
-  if [[ $stash_made -eq 1 && -n "$stash_name" ]]; then
-    echo "Looking up stash named: $stash_name"
-    stash_ref="$(git stash list | grep -F "$stash_name" | head -n1 | cut -d: -f1 || true)"
-    if [[ -n "$stash_ref" ]]; then
-      echo "Popping stash: $stash_ref"
-      if ! git stash pop "$stash_ref"; then
-        warn "git stash pop had conflicts or failed; please resolve manually."
-      fi
-    else
-      warn "could not find stash with name '$stash_name' to pop."
-    fi
-  fi
-}
-
-# Ensure we restore on normal exit and most error signals
-trap restore_state EXIT
-trap 'restore_state; exit 130' INT
-trap 'restore_state; exit 143' TERM
-
-# 2. If directory has uncommitted changes, stash them with a unique name
-if [[ -n "$(git status --porcelain)" ]]; then
-  stash_name="wta-$(date +%s)-$$"
-  echo "Uncommitted changes detected; stashing as: $stash_name"
-  git stash push -u -m "$stash_name"
-  stash_made=1
-else
-  echo "No uncommitted changes; no stash needed."
-fi
-
-# 3. Ensure we are on WT_BASE_BRANCH before pulling
-current_branch="$(git rev-parse --abbrev-ref HEAD || echo "")"
-if [[ "$current_branch" != "$WT_BASE_BRANCH" ]]; then
-  echo "Currently on '$current_branch'; switching to '$WT_BASE_BRANCH'..."
-  git checkout "$WT_BASE_BRANCH"
-  branch_switched=1
-else
-  echo "Already on $WT_BASE_BRANCH; no branch switch needed."
-fi
-
-# 4. Pull latest changes (can be skipped with WT_SKIP_PULL=1)
-if [[ "${WT_SKIP_PULL:-0}" != "1" ]]; then
-  info "Running 'git pull --ff-only' on $WT_BASE_BRANCH..."
-  # Note: `timeout` is from GNU coreutils, not available by default on macOS.
-  # On macOS with Homebrew coreutils, it's available as `gtimeout`.
-  # If neither is available, we fall back to running without a timeout.
-  timeout_cmd=""
-  if command -v timeout >/dev/null 2>&1; then
-    timeout_cmd="timeout"
-  elif command -v gtimeout >/dev/null 2>&1; then
-    timeout_cmd="gtimeout"
-  fi
-  
-  pull_status=0
-  if [[ -n "$timeout_cmd" ]]; then
-    "$timeout_cmd" 30 git pull --ff-only || pull_status=$?
-    pull_fail_msg="Pull failed or timed out. Continuing with current state."
-  else
-    git pull --ff-only || pull_status=$?
-    pull_fail_msg="Could not fast-forward $WT_BASE_BRANCH. Continuing with current state."
-  fi
-  # SIGINT delivered to the foreground git child does not fire this script's INT
-  # trap, so a Ctrl-C'd pull surfaces only as exit 130 here; abort instead of
-  # creating the worktree from a possibly stale base.
-  if [[ $pull_status -eq 130 ]]; then
-    error "git pull was interrupted; aborting."
-    exit 130
-  elif [[ $pull_status -ne 0 ]]; then
-    warn "$pull_fail_msg"
-  fi
-else
-  info "Skipping git pull (WT_SKIP_PULL=1)"
-fi
-
-echo
-
-# 5. Possibly inject a default worktree path under WT_WORKTREES_BASE
-# We need to find positional arguments that are NOT the branch name after -b/--branch
-has_positional=0
+# 2. Find positional arguments that are NOT the branch name after -b:
+#    the first is the worktree path, the second (if any) is a user-supplied
+#    start point that must be passed through verbatim.
+positional_count=0
 worktree_path=""
 skip_next=0
 for arg in "${ARGS[@]}"; do
   if [[ $skip_next -eq 1 ]]; then
-    # This argument is the branch name after -b/--branch, skip it
+    # This argument is the branch name after -b, skip it
     skip_next=0
     continue
   fi
   case "$arg" in
-    -b|--branch)
+    -b)
       # Next argument is the branch name, not a positional
       skip_next=1
-      ;;
-    -b=*|--branch=*)
-      # Branch name is embedded, nothing to skip
       ;;
     -*)
       # Other options
       ;;
     *)
-      # This is a real positional argument (worktree path)
-      if [[ $has_positional -eq 0 ]]; then
+      if [[ $positional_count -eq 0 ]]; then
         worktree_path="$arg"
       fi
-      has_positional=1
+      positional_count=$((positional_count + 1))
       ;;
   esac
 done
 
 FINAL_ARGS=("${ARGS[@]}")
 
-if [[ $has_positional -eq 0 ]]; then
+if [[ $positional_count -eq 0 ]]; then
   # Validate branch name doesn't contain path traversal
   if [[ "$branch_name" == *".."* ]]; then
     error "Branch name cannot contain '..': $branch_name"
@@ -431,13 +318,56 @@ if git show-ref --verify --quiet "refs/heads/$branch_name"; then
       exit 1
     fi
   fi
-  
-  # Remove -b/--branch from args and just checkout existing branch
+
+  # Ignore -b and just check out the existing branch
   echo "Creating worktree for existing branch '$branch_name'..."
   git worktree add "$worktree_path" "$branch_name"
 else
-  echo "Running: git worktree add ${FINAL_ARGS[*]}"
-  git worktree add "${FINAL_ARGS[@]}"
+  # 3. Refresh the base ref (can be skipped with WT_SKIP_PULL=1)
+  if [[ "${WT_SKIP_PULL:-0}" == "1" ]]; then
+    info "Skipping git fetch (WT_SKIP_PULL=1)"
+  elif git config --get remote.origin.url >/dev/null 2>&1; then
+    info "Running 'git fetch origin $WT_BASE_BRANCH'..."
+    # Note: `timeout` is from GNU coreutils, not available by default on macOS.
+    # On macOS with Homebrew coreutils, it's available as `gtimeout`.
+    # If neither is available, we fall back to running without a timeout.
+    timeout_cmd=""
+    if command -v timeout >/dev/null 2>&1; then
+      timeout_cmd="timeout"
+    elif command -v gtimeout >/dev/null 2>&1; then
+      timeout_cmd="gtimeout"
+    fi
+
+    fetch_status=0
+    if [[ -n "$timeout_cmd" ]]; then
+      "$timeout_cmd" 30 git fetch origin "$WT_BASE_BRANCH" || fetch_status=$?
+    else
+      git fetch origin "$WT_BASE_BRANCH" || fetch_status=$?
+    fi
+    if [[ $fetch_status -ne 0 ]]; then
+      warn "Fetch failed or timed out. Continuing with the last-known base ref."
+    fi
+  fi
+
+  if [[ $positional_count -ge 2 ]]; then
+    # User supplied their own start point; pass everything through verbatim.
+    echo "Running: git worktree add ${FINAL_ARGS[*]}"
+    git worktree add "${FINAL_ARGS[@]}"
+  else
+    # 4. Create from an explicit base ref, never from the main repo's HEAD.
+    #    --no-track: the created branch must stay upstream-free, or `wt list -v`
+    #    would start reporting ahead/behind against origin/<base>.
+    if git rev-parse --verify --quiet "refs/remotes/origin/$WT_BASE_BRANCH" >/dev/null; then
+      start_ref="origin/$WT_BASE_BRANCH"
+    elif git rev-parse --verify --quiet "refs/heads/$WT_BASE_BRANCH" >/dev/null; then
+      start_ref="$WT_BASE_BRANCH"
+    else
+      error "Base branch '$WT_BASE_BRANCH' not found (neither origin/$WT_BASE_BRANCH nor a local branch)."
+      exit 1
+    fi
+    echo "Running: git worktree add --no-track ${FINAL_ARGS[*]} $start_ref"
+    git worktree add --no-track "${FINAL_ARGS[@]}" "$start_ref"
+  fi
 fi
 
 wt_adopt_worktree --force "$(_wt_realpath "$worktree_path")"

@@ -90,19 +90,25 @@ teardown() {
     assert_failure
 }
 
-@test "wt-add -b preserves uncommitted changes in main repo" {
+@test "wt-add -b never touches a dirty main repo (no stash, no checkout)" {
     # Make the main repo dirty
     make_repo_dirty "$REPO"
-    local original_content
+    local original_content original_status original_branch
     original_content=$(cat "$REPO/file.txt")
+    original_status=$(git -C "$REPO" status --porcelain)
+    original_branch=$(git -C "$REPO" branch --show-current)
 
     run "$TEST_HOME/.wt/bin/wt-add" -b preserve-test
     assert_success
+    assert_is_worktree "$WT_WORKTREES_BASE/preserve-test"
 
-    # Original repo should still have the uncommitted change
-    local current_content
-    current_content=$(cat "$REPO/file.txt")
-    assert_equal "$current_content" "$original_content"
+    # Main repo state must be byte-for-byte identical: same file content,
+    # same dirty status, same branch, and no stash entry was ever created
+    assert_equal "$(cat "$REPO/file.txt")" "$original_content"
+    assert_equal "$(git -C "$REPO" status --porcelain)" "$original_status"
+    assert_equal "$(git -C "$REPO" branch --show-current)" "$original_branch"
+    assert_equal "$(git -C "$REPO" stash list)" ""
+    refute_output --partial "stash"
 }
 
 # =============================================================================
@@ -246,10 +252,10 @@ teardown() {
 }
 
 # =============================================================================
-# Cleanup/state restoration tests
+# Main-repo isolation tests
 # =============================================================================
 
-@test "wt-add restores original branch on failure" {
+@test "wt-add leaves main repo branch untouched on failure" {
     # Get original branch
     local original_branch
     original_branch=$(cd "$REPO" && git branch --show-current)
@@ -264,7 +270,7 @@ teardown() {
     assert_equal "$current_branch" "$original_branch"
 }
 
-@test "wt-add -b restores original branch on failure" {
+@test "wt-add -b leaves main repo branch untouched on failure" {
     # Get original branch
     local original_branch
     original_branch=$(cd "$REPO" && git branch --show-current)
@@ -281,26 +287,108 @@ teardown() {
     assert_equal "$current_branch" "$original_branch"
 }
 
-@test "wt-add -b aborts with exit 130 when git pull is interrupted" {
-    # Stub timeout(1) so "timeout 30 git pull" reports the child killed by SIGINT
+# =============================================================================
+# Base-ref / fetch behavior tests
+# =============================================================================
+
+# Advance origin/main from a second clone so the local repo's main and
+# refs/remotes/origin/main both become stale.
+# Usage: advance_origin
+advance_origin() {
+    (
+        git clone "$BATS_TEST_TMPDIR/bare_repo" "$BATS_TEST_TMPDIR/other"
+        cd "$BATS_TEST_TMPDIR/other"
+        git config user.email "test@example.com"
+        git config user.name "Test User"
+        echo "newer" > newer.txt
+        git add newer.txt
+        git commit -m "Advance origin"
+        git push origin main
+    ) >/dev/null 2>&1
+}
+
+@test "wt-add -b creates from origin/base, not a stale local base" {
+    advance_origin
+    local origin_tip stale_local_tip
+    origin_tip=$(git -C "$BATS_TEST_TMPDIR/bare_repo" rev-parse main)
+    stale_local_tip=$(git -C "$REPO" rev-parse main)
+    assert [ "$origin_tip" != "$stale_local_tip" ]
+
+    run "$TEST_HOME/.wt/bin/wt-add" -b fresh-base
+    assert_success
+    assert_equal "$(git -C "$WT_WORKTREES_BASE/fresh-base" rev-parse HEAD)" "$origin_tip"
+
+    # The local base branch itself is not pulled/moved
+    assert_equal "$(git -C "$REPO" rev-parse main)" "$stale_local_tip"
+}
+
+@test "wt-add -b with WT_SKIP_PULL=1 skips the fetch" {
+    advance_origin
+    local stale_tracking_tip
+    stale_tracking_tip=$(git -C "$REPO" rev-parse refs/remotes/origin/main)
+
+    run env WT_SKIP_PULL=1 "$TEST_HOME/.wt/bin/wt-add" -b skip-fetch
+    assert_success
+    assert_output --partial "Skipping git fetch (WT_SKIP_PULL=1)"
+
+    # Created from the last-known origin/main; the tracking ref was not updated
+    assert_equal "$(git -C "$WT_WORKTREES_BASE/skip-fetch" rev-parse HEAD)" "$stale_tracking_tip"
+    assert_equal "$(git -C "$REPO" rev-parse refs/remotes/origin/main)" "$stale_tracking_tip"
+}
+
+@test "wt-add -b warns and falls back when git fetch fails" {
+    # Stub timeout(1) so "timeout 30 git fetch ..." fails without running git
     mkdir -p "$BATS_TEST_TMPDIR/stubs"
     printf '#!/usr/bin/env bash\nexit 130\n' > "$BATS_TEST_TMPDIR/stubs/timeout"
     chmod +x "$BATS_TEST_TMPDIR/stubs/timeout"
 
-    make_repo_dirty "$REPO"
-    local original_content
-    original_content=$(cat "$REPO/file.txt")
+    local last_known_tip
+    last_known_tip=$(git -C "$REPO" rev-parse refs/remotes/origin/main)
 
-    run bash -c 'WT_SKIP_PULL=0 PATH="'"$BATS_TEST_TMPDIR"'/stubs:$PATH" "'"$TEST_HOME/.wt/bin/wt-add"'" -b interrupted-pull'
-    assert_equal "$status" 130
+    run env PATH="$BATS_TEST_TMPDIR/stubs:$PATH" "$TEST_HOME/.wt/bin/wt-add" -b fetch-fails
+    assert_success
+    assert_output --partial "Fetch failed or timed out"
+    assert_is_worktree "$WT_WORKTREES_BASE/fetch-fails"
+    assert_equal "$(git -C "$WT_WORKTREES_BASE/fetch-fails" rev-parse HEAD)" "$last_known_tip"
+}
 
-    # Worktree must NOT have been created from the stale base
-    assert [ ! -d "$WT_WORKTREES_BASE/interrupted-pull" ]
+@test "wt-add -b works without a remote (creates from local base branch)" {
+    local repo2
+    repo2=$(create_mock_repo "$BATS_TEST_TMPDIR/no_remote_repo")
+    create_test_context "noremote" "$repo2"
+    load_test_context "noremote"
 
-    # Stashed uncommitted changes must be restored
-    local current_content
-    current_content=$(cat "$REPO/file.txt")
-    assert_equal "$current_content" "$original_content"
+    local local_tip
+    local_tip=$(git -C "$repo2" rev-parse main)
+
+    run "$TEST_HOME/.wt/bin/wt-add" -b no-remote-feature
+    assert_success
+    assert_is_worktree "$WT_WORKTREES_BASE/no-remote-feature"
+    assert_equal "$(git -C "$WT_WORKTREES_BASE/no-remote-feature" rev-parse HEAD)" "$local_tip"
+}
+
+@test "wt-add -b created branch has no upstream (--no-track)" {
+    run "$TEST_HOME/.wt/bin/wt-add" -b untracked-feature
+    assert_success
+
+    run git -C "$WT_WORKTREES_BASE/untracked-feature" rev-parse --abbrev-ref --symbolic-full-name "@{upstream}"
+    assert_failure
+
+    run git -C "$REPO" config --get "branch.untracked-feature.remote"
+    assert_failure
+}
+
+@test "wt-add -b respects a user-supplied start point verbatim" {
+    create_branch "$REPO" "other-base"
+    local other_tip main_tip
+    other_tip=$(git -C "$REPO" rev-parse other-base)
+    main_tip=$(git -C "$REPO" rev-parse main)
+    assert [ "$other_tip" != "$main_tip" ]
+
+    local wt_path="$WT_WORKTREES_BASE/from-other"
+    run "$TEST_HOME/.wt/bin/wt-add" -b from-other "$wt_path" other-base
+    assert_success
+    assert_equal "$(git -C "$wt_path" rev-parse HEAD)" "$other_tip"
 }
 
 # =============================================================================
