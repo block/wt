@@ -95,8 +95,11 @@ __wt_do_remove() {
   local old_pwd="$PWD"
   __wt_run wt-remove "$@"
   local rc=$?
-  # If the removal succeeded and our cwd no longer exists, cd to main repo
+  # If the removal succeeded and our cwd no longer exists, cd to main repo.
+  # The shell-resident WT_* snapshot may be stale (context switched in another
+  # shell), so reload before trusting WT_MAIN_REPO_ROOT.
   if [[ $rc -eq 0 && ! -d "$old_pwd" ]]; then
+    wt_read_config --force || true
     cd "$WT_MAIN_REPO_ROOT" || return 1
     info "Working directory was removed; changed to $WT_MAIN_REPO_ROOT"
   fi

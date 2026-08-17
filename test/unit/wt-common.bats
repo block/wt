@@ -801,6 +801,110 @@ teardown() {
     assert_equal "$WT_BASE_BRANCH" "pre-existing"
 }
 
+# --- WT_CONFIG_SOURCE recording ---
+
+@test "wt_read_config records WT_CONFIG_SOURCE=git when git config loads" {
+    local repo
+    repo=$(create_mock_repo)
+
+    create_test_context "myctx" "$repo"
+    set_wt_git_config_required "$repo" "/git-wt" "/git-idea" "git-branch"
+
+    cd "$repo"
+    wt_read_config --force
+
+    assert_equal "$WT_CONFIG_SOURCE" "git"
+}
+
+@test "wt_read_config records WT_CONFIG_SOURCE=context when only context loads" {
+    local repo
+    repo=$(create_mock_repo)
+    create_test_context "myctx" "$repo"
+
+    local non_git_dir="$BATS_TEST_TMPDIR/not-a-repo"
+    mkdir -p "$non_git_dir"
+
+    cd "$non_git_dir"
+    wt_read_config --force
+
+    assert_equal "$WT_CONFIG_SOURCE" "context"
+}
+
+@test "wt_read_config leaves WT_CONFIG_SOURCE unset when no source loads" {
+    local non_git_dir="$BATS_TEST_TMPDIR/not-a-repo"
+    mkdir -p "$non_git_dir"
+    cd "$non_git_dir"
+
+    rm -f "$HOME/.wt/current"
+    wt_read_config --force || true
+
+    assert_equal "${WT_CONFIG_SOURCE:-}" ""
+}
+
+@test "wt_read_config leaves WT_CONFIG_SOURCE unset when current names a missing .conf" {
+    mkdir -p "$HOME/.wt/repos"
+    echo "ghost" > "$HOME/.wt/current"
+
+    local non_git_dir="$BATS_TEST_TMPDIR/not-a-repo"
+    mkdir -p "$non_git_dir"
+    cd "$non_git_dir"
+
+    wt_read_config --force || true
+
+    assert_equal "${WT_CONFIG_SOURCE:-}" ""
+    # Context name is still recorded so errors can point at the stale context
+    assert_equal "${WT_CONTEXT_NAME:-}" "ghost"
+}
+
+# --- Cross-context gap-fill scoping ---
+
+@test "ordered mode does not gap-fill optional keys from a different context" {
+    local repo_a repo_b
+    repo_a=$(create_mock_repo "$BATS_TEST_TMPDIR/repoA")
+    repo_b=$(create_mock_repo "$BATS_TEST_TMPDIR/repoB")
+
+    # Current context belongs to repo B; its .conf sets WT_ACTIVE_WORKTREE
+    create_test_context "ctxB" "$repo_b"
+    echo 'WT_SEED_FILES="ctxb.bazelrc"' >> "$HOME/.wt/repos/ctxB.conf"
+
+    # Repo A is wt.enabled with its own context name but no wt.activeWorktree
+    set_wt_git_config_required "$repo_a" "/git-wt" "/git-idea" "git-branch"
+    set_wt_git_config "$repo_a" "wt.contextName" "ctxA"
+
+    cd "$repo_a"
+    wt_read_config --force
+
+    # Required keys come from repo A's git config
+    assert_equal "$WT_WORKTREES_BASE" "/git-wt"
+    assert_equal "$WT_BASE_BRANCH" "git-branch"
+    assert_equal "$WT_CONTEXT_NAME" "ctxA"
+
+    # Optional keys must NOT be borrowed from ctxB's .conf
+    local norm_test_home
+    norm_test_home="$(cd "$TEST_HOME" && pwd -P)"
+    [[ "$WT_ACTIVE_WORKTREE" != "$norm_test_home/active" ]] || \
+        fail "WT_ACTIVE_WORKTREE borrowed from ctxB: $WT_ACTIVE_WORKTREE"
+    assert_equal "$WT_ACTIVE_WORKTREE" "$HOME/Development/java"
+    assert_equal "${WT_SEED_FILES:-}" ""
+}
+
+@test "ordered mode still gap-fills when git contextName matches current context" {
+    local repo
+    repo=$(create_mock_repo)
+
+    create_test_context "myctx" "$repo"
+    set_wt_git_config_required "$repo" "/git-wt" "/git-idea" "git-branch"
+    set_wt_git_config "$repo" "wt.contextName" "myctx"
+
+    cd "$repo"
+    wt_read_config --force
+
+    assert_equal "$WT_WORKTREES_BASE" "/git-wt"
+    local norm_test_home
+    norm_test_home="$(cd "$TEST_HOME" && pwd -P)"
+    assert_equal "$WT_ACTIVE_WORKTREE" "$norm_test_home/active"
+}
+
 # =============================================================================
 # Tests for wt_read_context_config() value parsing
 # =============================================================================
@@ -920,8 +1024,12 @@ teardown() {
 # Tests for wt_require_valid_config()
 # =============================================================================
 
-@test "wt_require_valid_config passes when all paths are absolute" {
-    export WT_MAIN_REPO_ROOT="/home/user/repo"
+@test "wt_require_valid_config passes when a source loaded and repo is a git work tree" {
+    local repo
+    repo=$(create_mock_repo)
+
+    export WT_CONFIG_SOURCE="context"
+    export WT_MAIN_REPO_ROOT="$repo"
     export WT_WORKTREES_BASE="/home/user/worktrees"
     export WT_IDEA_FILES_BASE="/home/user/idea-files"
 
@@ -931,6 +1039,7 @@ teardown() {
 }
 
 @test "wt_require_valid_config fails for relative WT_MAIN_REPO_ROOT" {
+    export WT_CONFIG_SOURCE="context"
     export WT_MAIN_REPO_ROOT="relative/repo"
     export WT_WORKTREES_BASE="/home/user/worktrees"
     export WT_IDEA_FILES_BASE="/home/user/idea-files"
@@ -942,7 +1051,11 @@ teardown() {
 }
 
 @test "wt_require_valid_config fails for glob in WT_WORKTREES_BASE" {
-    export WT_MAIN_REPO_ROOT="/home/user/repo"
+    local repo
+    repo=$(create_mock_repo)
+
+    export WT_CONFIG_SOURCE="context"
+    export WT_MAIN_REPO_ROOT="$repo"
     export WT_WORKTREES_BASE="/home/user/wt-*"
     export WT_IDEA_FILES_BASE="/home/user/idea-files"
 
@@ -952,6 +1065,7 @@ teardown() {
 }
 
 @test "wt_require_valid_config reports all invalid vars" {
+    export WT_CONFIG_SOURCE="context"
     export WT_MAIN_REPO_ROOT="relative/repo"
     export WT_WORKTREES_BASE="../worktrees"
     export WT_IDEA_FILES_BASE="/valid/path"
@@ -963,6 +1077,7 @@ teardown() {
 }
 
 @test "wt_require_valid_config shows config file path when context is set" {
+    export WT_CONFIG_SOURCE="context"
     export WT_MAIN_REPO_ROOT="relative/repo"
     export WT_WORKTREES_BASE="/valid/path"
     export WT_IDEA_FILES_BASE="/valid/path"
@@ -977,13 +1092,66 @@ teardown() {
     [[ "$stderr" == *"mycontext.conf"* ]]
 }
 
-@test "wt_require_valid_config skips empty variables" {
-    unset WT_MAIN_REPO_ROOT
+@test "wt_require_valid_config skips empty path variables when a source loaded" {
+    local repo
+    repo=$(create_mock_repo)
+
+    export WT_CONFIG_SOURCE="context"
+    export WT_MAIN_REPO_ROOT="$repo"
     unset WT_WORKTREES_BASE
     unset WT_IDEA_FILES_BASE
 
     run --separate-stderr wt_require_valid_config
     assert_success
+}
+
+@test "wt_require_valid_config fails when no config source loaded" {
+    unset WT_CONFIG_SOURCE WT_CONTEXT_NAME
+    export WT_MAIN_REPO_ROOT="/home/user/repo"
+    export WT_WORKTREES_BASE="/home/user/worktrees"
+    export WT_IDEA_FILES_BASE="/home/user/idea-files"
+
+    run --separate-stderr wt_require_valid_config
+    assert_failure
+    [[ "$stderr" == *"No wt configuration loaded"* ]]
+    [[ "$stderr" == *"wt context add"* ]]
+}
+
+@test "wt_require_valid_config names the missing .conf for a stale current context" {
+    unset WT_CONFIG_SOURCE
+    export WT_CONTEXT_NAME="ghost"
+
+    run --separate-stderr wt_require_valid_config
+    assert_failure
+    [[ "$stderr" == *"ghost"* ]]
+    [[ "$stderr" == *"ghost.conf"* ]]
+    [[ "$stderr" == *"wt context add"* ]]
+}
+
+@test "wt_require_valid_config fails when WT_MAIN_REPO_ROOT does not exist" {
+    export WT_CONFIG_SOURCE="context"
+    export WT_MAIN_REPO_ROOT="$BATS_TEST_TMPDIR/gone"
+    export WT_WORKTREES_BASE="/home/user/worktrees"
+    export WT_IDEA_FILES_BASE="/home/user/idea-files"
+
+    run --separate-stderr wt_require_valid_config
+    assert_failure
+    [[ "$stderr" == *"does not exist"* ]]
+    [[ "$stderr" == *"$BATS_TEST_TMPDIR/gone"* ]]
+}
+
+@test "wt_require_valid_config fails when WT_MAIN_REPO_ROOT is not a git work tree" {
+    local not_git="$BATS_TEST_TMPDIR/not-a-repo"
+    mkdir -p "$not_git"
+
+    export WT_CONFIG_SOURCE="context"
+    export WT_MAIN_REPO_ROOT="$not_git"
+    export WT_WORKTREES_BASE="/home/user/worktrees"
+    export WT_IDEA_FILES_BASE="/home/user/idea-files"
+
+    run --separate-stderr wt_require_valid_config
+    assert_failure
+    [[ "$stderr" == *"not a git repository or worktree"* ]]
 }
 
 # =============================================================================

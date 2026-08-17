@@ -22,7 +22,7 @@ teardown() {
 _unset_wt_vars() {
     unset WT_MAIN_REPO_ROOT WT_WORKTREES_BASE WT_IDEA_FILES_BASE
     unset WT_ACTIVE_WORKTREE WT_BASE_BRANCH WT_METADATA_PATTERNS
-    unset WT_CONTEXT_NAME
+    unset WT_CONTEXT_NAME WT_CONFIG_SOURCE
 }
 
 # =============================================================================
@@ -86,4 +86,39 @@ _unset_wt_vars() {
 
     run "$TEST_HOME/.wt/bin/wt-list"
     assert_success
+}
+
+# =============================================================================
+# bin scripts abort when no config source loads
+# =============================================================================
+
+@test "wt-list aborts when no config source loads" {
+    rm -f "$TEST_HOME/.wt/current"
+    _unset_wt_vars
+
+    run "$TEST_HOME/.wt/bin/wt-list"
+    assert_failure
+    assert_output --partial "No wt configuration loaded"
+    assert_output --partial "wt context add"
+}
+
+@test "wt-add aborts when the current context .conf is missing" {
+    rm -f "$TEST_HOME/.wt/repos/test.conf"
+    _unset_wt_vars
+
+    run "$TEST_HOME/.wt/bin/wt-add" -b some-branch
+    assert_failure
+    assert_output --partial "test.conf"
+    assert_output --partial "wt context add"
+}
+
+@test "wt-switch aborts when WT_MAIN_REPO_ROOT in .conf does not exist" {
+    local conf="$TEST_HOME/.wt/repos/test.conf"
+    sed -i.bak "s|^WT_MAIN_REPO_ROOT=.*|WT_MAIN_REPO_ROOT=\"$BATS_TEST_TMPDIR/gone\"|" "$conf"
+    _unset_wt_vars
+
+    run "$TEST_HOME/.wt/bin/wt-switch" "$REPO"
+    assert_failure
+    assert_output --partial "does not exist"
+    assert_output --partial "test.conf"
 }

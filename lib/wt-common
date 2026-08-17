@@ -94,7 +94,7 @@ wt_clear_config_vars() {
   local var
   for var in WT_MAIN_REPO_ROOT WT_WORKTREES_BASE WT_IDEA_FILES_BASE \
              WT_ACTIVE_WORKTREE WT_BASE_BRANCH WT_METADATA_PATTERNS \
-             WT_SEED_FILES WT_CONTEXT_NAME; do
+             WT_SEED_FILES WT_CONTEXT_NAME WT_CONFIG_SOURCE; do
     _wt_var_is_exported "$var" || unset "$var"
   done
 }
@@ -123,6 +123,9 @@ _wt_normalize_conf_value() {
 #
 # When reading ~/.wt/current, it contains just the context name.
 # The actual config is then loaded from ~/.wt/repos/<name>.conf
+#
+# On success records WT_CONFIG_SOURCE=context (unless a higher-priority
+# source already recorded itself).
 wt_read_context_config() {
   local config_file="${1:-$HOME/.wt/current}"
 
@@ -154,6 +157,8 @@ wt_read_context_config() {
       eval "$key=\"\$value\""
     fi
   done < <(grep -E '^WT_[A-Z_]+=' "$config_file" 2>/dev/null)
+
+  : "${WT_CONFIG_SOURCE:=context}"
 }
 
 # Read wt.* keys from the repo's local git config.
@@ -170,6 +175,8 @@ wt_read_context_config() {
 # are present.
 #
 # Sets variables unconditionally — git local config has highest priority.
+# On success records WT_CONFIG_SOURCE=git and the parsed wt.contextName
+# (possibly empty) in _WT_GIT_CONTEXT_NAME.
 # Returns: 0 if config was loaded, 1 if not (not in repo, not enabled,
 #          no keys, or incomplete config).
 wt_read_git_config() {
@@ -241,6 +248,9 @@ wt_read_git_config() {
   [[ -n "$gc_metadata_patterns" ]] && WT_METADATA_PATTERNS="$gc_metadata_patterns"
   [[ -n "$gc_context_name" ]]      && WT_CONTEXT_NAME="$gc_context_name"
 
+  _WT_GIT_CONTEXT_NAME="$gc_context_name"
+  WT_CONFIG_SOURCE="git"
+
   return 0
 }
 
@@ -250,7 +260,12 @@ wt_read_git_config() {
 #
 # Modes:
 #   ordered  (default) — git local config first (highest priority),
-#                         then context .conf fills gaps
+#                         then context .conf fills gaps. The .conf is only
+#                         consulted when the git-local wt.contextName does
+#                         not name a different context than ~/.wt/current
+#                         (another repo's context must not gap-fill
+#                         WT_ACTIVE_WORKTREE / WT_METADATA_PATTERNS /
+#                         WT_SEED_FILES here).
 #   git      — git local config only (wt_read_git_config)
 #   context  — context .conf only (wt_read_context_config)
 #
@@ -280,7 +295,17 @@ wt_read_config() {
   case "$mode" in
     ordered)
       wt_read_git_config || rc_git=$?
-      wt_read_context_config 2>/dev/null || rc_ctx=$?
+      local gap_fill=true
+      if [[ $rc_git -eq 0 && -n "${_WT_GIT_CONTEXT_NAME:-}" && -f "$HOME/.wt/current" ]]; then
+        local current_name
+        current_name="$(head -1 "$HOME/.wt/current" | tr -d '[:space:]')"
+        if [[ -n "$current_name" && "$current_name" != "$_WT_GIT_CONTEXT_NAME" ]]; then
+          gap_fill=false
+        fi
+      fi
+      if [[ "$gap_fill" == true ]]; then
+        wt_read_context_config 2>/dev/null || rc_ctx=$?
+      fi
       # Fail only if both sources failed
       if [[ $rc_git -ne 0 && $rc_ctx -ne 0 ]]; then
         rc=1
@@ -479,15 +504,29 @@ _wt_is_valid_path_config() {
   return 0
 }
 
-# Validate that all directory config variables are absolute paths without globs.
+# Validate that a config source actually loaded (WT_CONFIG_SOURCE is set by
+# the loaders), that all directory config variables are absolute paths
+# without globs, and that WT_MAIN_REPO_ROOT exists and is a git work tree.
 # Prints actionable error messages to stderr on failure.
 # Returns: 0 if all valid, 1 if any invalid
 #
 # This is called by bin/wt-* scripts after bootstrap. It is NOT called
-# during shell startup (wt.sh sourcing) to avoid breaking the user's shell.
+# during shell startup (wt.sh sourcing) to avoid breaking the user's shell —
+# the fallback defaults from wt_apply_default_config keep the shell usable,
+# but they never satisfy this check on their own.
 wt_require_valid_config() {
   local rc=0
   local var val
+
+  if [[ -z "${WT_CONFIG_SOURCE:-}" ]]; then
+    if [[ -n "${WT_CONTEXT_NAME:-}" ]]; then
+      error "No wt configuration loaded — context '$WT_CONTEXT_NAME' has no config at $HOME/.wt/repos/${WT_CONTEXT_NAME}.conf"
+    else
+      error "No wt configuration loaded — no context is set and this repo has no wt.* git local config"
+    fi
+    printf "  Run 'wt context add' to configure a repository.\n" >&2
+    return 1
+  fi
 
   for var in WT_MAIN_REPO_ROOT WT_WORKTREES_BASE WT_IDEA_FILES_BASE; do
     eval "val=\"\${$var:-}\""
@@ -500,15 +539,25 @@ wt_require_valid_config() {
     fi
   done
 
+  if [[ $rc -eq 0 ]]; then
+    if [[ ! -d "${WT_MAIN_REPO_ROOT:-}" ]]; then
+      error "WT_MAIN_REPO_ROOT does not exist: ${WT_MAIN_REPO_ROOT:-}"
+      rc=1
+    elif ! git -C "$WT_MAIN_REPO_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+      error "WT_MAIN_REPO_ROOT is not a git repository or worktree: $WT_MAIN_REPO_ROOT"
+      rc=1
+    fi
+  fi
+
   if [[ $rc -ne 0 ]]; then
     local config_file=""
     if [[ -n "${WT_CONTEXT_NAME:-}" ]]; then
       config_file="$HOME/.wt/repos/${WT_CONTEXT_NAME}.conf"
     fi
     if [[ -n "$config_file" && -f "$config_file" ]]; then
-      printf "  Fix the value(s) in: %s\n" "$config_file" >&2
+      printf "  Fix the value(s) in: %s (or run 'wt context add')\n" "$config_file" >&2
     else
-      printf "  Check your context config or git local config (wt.* keys)\n" >&2
+      printf "  Check your context config or git local config (wt.* keys), or run 'wt context add'\n" >&2
     fi
   fi
 
