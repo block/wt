@@ -299,6 +299,59 @@ _wt_select_metadata_patterns() {
   fi
 }
 
+# Explain and prompt for WT_SEED_FILES. The default is the value already in
+# this context's .conf (never an env value inherited from another context);
+# empty input keeps it, EOF keeps it, '-' clears it.
+# Args: $1 = path to this context's .conf (may not exist yet)
+_wt_select_seed_files() {
+  local conf_path="$1"
+
+  local current=""
+  current="$(wt_conf_get "$conf_path" WT_SEED_FILES)"
+
+  echo "════════════════════════════════════════════════════════════════════════════════"
+  echo "  Seed Files"
+  echo "════════════════════════════════════════════════════════════════════════════════"
+  echo
+  echo "What it does:"
+  echo "  Every worktree created by 'wt add' (or adopted by 'wt adopt') gets a copy"
+  echo "  of the files listed here, taken from the main repository root. Copying is"
+  echo "  best-effort: missing files are skipped and never fail the command."
+  echo
+  echo "Why you might want it:"
+  echo "  Repos often keep machine-local, gitignored config at the repo root that"
+  echo "  every worktree needs its own copy of. Example: a user.bazelrc that points"
+  echo "  all worktrees at one shared Bazel output base, so each worktree does not"
+  echo "  grow its own multi-GB output tree under ~/Library/Caches/bazel."
+  echo
+  echo "Current value: ${current:-(none)}"
+  echo
+  echo "Enter space-separated repo-root-relative filenames (e.g. 'user.bazelrc'),"
+  echo "'-' to clear, or press Enter to keep the current value:"
+
+  local input
+  if ! read -erp "> " input; then
+    echo
+    WT_SEED_FILES="$current"
+    return 0
+  fi
+
+  if [[ -z "$input" ]]; then
+    WT_SEED_FILES="$current"
+  elif [[ "$input" == "-" ]]; then
+    WT_SEED_FILES=""
+  else
+    WT_SEED_FILES="$input"
+  fi
+
+  echo
+  if [[ -n "$WT_SEED_FILES" ]]; then
+    echo "Seed files: $WT_SEED_FILES"
+  else
+    echo "No seed files configured."
+  fi
+}
+
 # Write wt.* keys to git local config for plugin compatibility
 # Args: $1 = repo root, $2 = context name
 # Keys match the JetBrains plugin's writeConfig() for bidirectional parity
@@ -319,6 +372,11 @@ _wt_write_git_config() {
     git -C "$repo_root" config --local wt.metadataPatterns "$WT_METADATA_PATTERNS"
   else
     git -C "$repo_root" config --local --unset wt.metadataPatterns 2>/dev/null || true
+  fi
+  if [[ -n "${WT_SEED_FILES:-}" ]]; then
+    git -C "$repo_root" config --local wt.seedFiles "$WT_SEED_FILES"
+  else
+    git -C "$repo_root" config --local --unset wt.seedFiles 2>/dev/null || true
   fi
 }
 
@@ -910,6 +968,12 @@ wt_setup_context() {
   _wt_select_metadata_patterns "$repo_path"
 
   # ─────────────────────────────────────────────────────────────────────────────
+  # Step 5b: Seed files
+  # ─────────────────────────────────────────────────────────────────────────────
+  echo
+  _wt_select_seed_files "$repos_dir/$context_name.conf"
+
+  # ─────────────────────────────────────────────────────────────────────────────
   # Step 6: Create context config file
   # ─────────────────────────────────────────────────────────────────────────────
   echo
@@ -928,6 +992,7 @@ WT_ACTIVE_WORKTREE="$WT_ACTIVE_WORKTREE"
 WT_IDEA_FILES_BASE="$WT_IDEA_FILES_BASE"
 WT_BASE_BRANCH="$WT_BASE_BRANCH"
 WT_METADATA_PATTERNS="$WT_METADATA_PATTERNS"
+WT_SEED_FILES="$WT_SEED_FILES"
 EOF
 
   echo "  ✓ Created context config: $config_path"

@@ -269,6 +269,7 @@ wt_read_git_config() {
   # Read all wt.* keys into local variables
   local gc_worktrees_base="" gc_idea_files_base=""
   local gc_active_worktree="" gc_base_branch="" gc_metadata_patterns="" gc_context_name=""
+  local gc_seed_files=""
   local has_any=false
 
   local key value line
@@ -286,6 +287,7 @@ wt_read_git_config() {
       wt.activeworktree)    gc_active_worktree="$value" ;;
       wt.basebranch)        gc_base_branch="$value" ;;
       wt.metadatapatterns)  gc_metadata_patterns="$value" ;;
+      wt.seedfiles)         gc_seed_files="$value" ;;
       wt.contextname)       gc_context_name="$value" ;;
     esac
   done < <(git config --local --get-regexp '^wt\.' 2>/dev/null)
@@ -318,6 +320,7 @@ wt_read_git_config() {
   # Optional keys: apply if present
   [[ -n "$gc_active_worktree" ]]   && WT_ACTIVE_WORKTREE="$gc_active_worktree"
   [[ -n "$gc_metadata_patterns" ]] && WT_METADATA_PATTERNS="$gc_metadata_patterns"
+  [[ -n "$gc_seed_files" ]]        && WT_SEED_FILES="$gc_seed_files"
   [[ -n "$gc_context_name" ]]      && WT_CONTEXT_NAME="$gc_context_name"
 
   _WT_GIT_CONTEXT_NAME="$gc_context_name"

@@ -382,6 +382,8 @@ Space-separated, repo-root-relative names of files to copy (`cp -p`) from the ma
 
 Seeding is best-effort: files missing in the main repo are skipped, files already present in the worktree are never overwritten, and copy failures only warn.
 
+The context setup wizard (`wt context add` / `install.sh`) prompts for this and preserves the previously configured value when a context is replaced.
+
 **Default:** (empty)
 
 ```bash

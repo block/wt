@@ -49,6 +49,14 @@ install_toolkit() {
   # Create install directory
   mkdir -p "$INSTALL_DIR"
 
+  # Installer-owned paths are replaced wholesale: files renamed or removed in
+  # newer versions must not linger (a stale bin/wt-* would resurface as a live
+  # subcommand). User data (repos/, logs/, current) is never touched.
+  if [[ "$SOURCE_DIR" != "$INSTALL_DIR" ]]; then
+    rm -rf "${INSTALL_DIR:?}/bin" "${INSTALL_DIR:?}/lib" "${INSTALL_DIR:?}/completion"
+    rm -f "${INSTALL_DIR:?}/wt.sh"
+  fi
+
   # Copy directories and files
   cp "$SOURCE_DIR/wt.sh" "$INSTALL_DIR/"
   cp -r "$SOURCE_DIR/bin" "$INSTALL_DIR/"
@@ -59,6 +67,32 @@ install_toolkit() {
   chmod +x "$INSTALL_DIR"/bin/wt-*
 
   echo "  ✓ Installed to $INSTALL_DIR"
+}
+
+# The canonical crontab entry for the nightly metadata refresh
+cron_entry_line() {
+  echo "0 2 * * * /bin/zsh -lc '$INSTALL_DIR/bin/wt-metadata-refresh' >> $HOME/.wt/logs/metadata-refresh.log 2>&1"
+}
+
+# The installer owns the wt-metadata-refresh cron entry: any existing entry
+# (old script paths, stale format) is replaced with the canonical one.
+# Runs only when an entry already exists — first-time installation stays
+# behind the interactive prompt in setup_cron_job.
+refresh_cron_job() {
+  local existing
+  existing="$(crontab -l 2>/dev/null)" || return 0
+  printf '%s\n' "$existing" | grep -qF "wt-metadata-refresh" || return 0
+
+  local remaining
+  remaining="$(printf '%s\n' "$existing" | grep -vF "wt-metadata-refresh")" || remaining=""
+
+  {
+    if [[ -n "$remaining" ]]; then
+      printf '%s\n' "$remaining"
+    fi
+    cron_entry_line
+  } | crontab -
+  echo "  ✓ Refreshed nightly cron job: $(cron_entry_line)"
 }
 
 # Configure shell rc files to source wt.sh
@@ -106,7 +140,8 @@ setup_cron_job() {
 
   local log_dir="$HOME/.wt/logs"
   local log_file="$log_dir/metadata-refresh.log"
-  local cron_entry="0 2 * * * /bin/zsh -lc '$refresh_script' >> $log_file 2>&1"
+  local cron_entry
+  cron_entry="$(cron_entry_line)"
 
   echo "════════════════════════════════════════════════════════════════════════════════"
   echo "  Nightly Metadata Refresh Cron Job"
@@ -189,6 +224,8 @@ main() {
   install_toolkit
   echo
 
+  refresh_cron_job
+
   configure_shell_rc
   echo
 
@@ -251,4 +288,6 @@ Then run:
 EOF
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi
