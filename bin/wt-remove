@@ -391,9 +391,66 @@ if [[ ${#TARGET_WORKTREES[@]} -eq 0 ]]; then
   TARGET_WORKTREES=("$selected")
 fi
 
+# Find a registered worktree whose directory no longer exists, matched by
+# exact path or branch name (normal resolution cannot reach these).
+# Outputs: registered stale path on stdout
+# Returns: 0 if found, 1 otherwise
+_find_stale_worktree() {
+  local identifier="$1"
+  local wt_path="" branch=""
+  while IFS= read -r line; do
+    case "$line" in
+      worktree\ *)
+        wt_path="${line#worktree }"
+        branch=""
+        ;;
+      branch\ *)
+        branch="${line#branch refs/heads/}"
+        ;;
+      "")
+        if [[ -n "$wt_path" && ! -d "$wt_path" ]]; then
+          if [[ "$identifier" == "$wt_path" || ( -n "$branch" && "$identifier" == "$branch" ) ]]; then
+            printf '%s\n' "$wt_path"
+            return 0
+          fi
+        fi
+        wt_path=""
+        ;;
+    esac
+  done < <(git -C "$WT_MAIN_REPO_ROOT" worktree list --porcelain 2>/dev/null; echo)
+  return 1
+}
+
+# Remove the stale registration so git stops treating its branch as checked out
+_remove_stale_worktree() {
+  local stale_path="$1"
+
+  warn "Worktree directory is missing: $stale_path"
+  echo "   Git still has it registered — its branch stays blocked until the stale entry is removed."
+
+  if [[ "$SKIP_CONFIRM" != "true" ]]; then
+    if ! prompt_confirm "Remove stale worktree registration? [y/N]" "n"; then
+      return 1
+    fi
+  fi
+
+  if ! git -C "$WT_MAIN_REPO_ROOT" worktree remove --force -- "$stale_path"; then
+    error "Failed to remove stale worktree registration: $stale_path"
+    return 1
+  fi
+  success "Stale worktree registration removed: $stale_path"
+}
+
 # Resolve all targets, skipping any that can't be found (like git checkout behavior)
 RESOLVED_WORKTREES=()
+STALE_REMOVED=0
 for target in "${TARGET_WORKTREES[@]}"; do
+  if stale_path="$(_find_stale_worktree "$target")"; then
+    if _remove_stale_worktree "$stale_path"; then
+      STALE_REMOVED=$((STALE_REMOVED + 1))
+    fi
+    continue
+  fi
   if ! resolved="$(wt_resolve_and_validate "$target")"; then
     # wt_resolve_and_validate already printed a specific error message
     continue
@@ -406,6 +463,9 @@ for target in "${TARGET_WORKTREES[@]}"; do
 done
 
 if [[ ${#RESOLVED_WORKTREES[@]} -eq 0 ]]; then
+  if [[ "$STALE_REMOVED" -gt 0 ]]; then
+    exit 0
+  fi
   error "No valid worktrees to remove."
   exit 1
 fi

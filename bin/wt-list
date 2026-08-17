@@ -18,6 +18,7 @@
 # [main]      = The main repository root
 # [linked]    = This worktree is currently linked at WT_ACTIVE_WORKTREE
 # [unadopted] = Worktree not adopted by wt (yellow; red if also linked)
+# [missing]   = Registered with git but directory no longer exists
 # [dirty]     = Has uncommitted changes (only with -v)
 # [↑N]        = N commits ahead of upstream (only with -v)
 # [↓N]        = N commits behind upstream (only with -v)
@@ -118,17 +119,30 @@ MAIN_REPO_ABS="$(_wt_realpath "$WT_MAIN_REPO_ROOT")"
 # Get currently linked worktree (if any)
 LINKED_WORKTREE="$(wt_get_linked_worktree)"
 
+if [[ -L "${WT_ACTIVE_WORKTREE:-}" && ! -e "${WT_ACTIVE_WORKTREE:-}" ]]; then
+  warn "Active worktree symlink is dangling: $WT_ACTIVE_WORKTREE -> $(readlink "$WT_ACTIVE_WORKTREE") (run 'wt switch' to fix)"
+fi
+
+# Print a worktree that is still registered with git but whose directory is gone
+_print_missing_worktree() {
+  printf "  ${BOLD}%s${NC} ${BLUE}(%s)${NC} ${RED}[missing]${NC}\n" "$1" "$2"
+}
+
 # List worktrees
 (
   cd "$WT_MAIN_REPO_ROOT" || exit 1
 
   echo
 
+  missing_path=""
   while IFS= read -r line; do
     case "$line" in
       worktree\ *)
         wt="${line#worktree }"
-        wt_abs="$(_wt_realpath "$wt")" || continue
+        if ! wt_abs="$(_wt_realpath "$wt")"; then
+          missing_path="$wt"
+          continue
+        fi
 
         # Check adoption status (skip for main repo — adoption doesn't apply)
         is_linked=false
@@ -159,8 +173,20 @@ LINKED_WORKTREE="$(wt_get_linked_worktree)"
         # Print with shared formatting + unadopted badge
         printf "%s%s%s\n" "$prefix" "$(wt_format_worktree "$wt_abs" "$MAIN_REPO_ABS" "$LINKED_WORKTREE" "$VERBOSE")" "$unadopted_badge"
         ;;
+      branch\ *)
+        if [[ -n "$missing_path" ]]; then
+          _print_missing_worktree "$missing_path" "${line#branch refs/heads/}"
+          missing_path=""
+        fi
+        ;;
+      "")
+        if [[ -n "$missing_path" ]]; then
+          _print_missing_worktree "$missing_path" "detached"
+          missing_path=""
+        fi
+        ;;
     esac
-  done < <(git worktree list --porcelain)
+  done < <(git worktree list --porcelain; echo)
 
   echo
 )
