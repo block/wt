@@ -205,8 +205,7 @@ teardown() {
     # Normalize worktree path
     wt_path="$(cd "$wt_path" && pwd -P)"
 
-    # Mark the worktree as adopted by this context — remove only updates
-    # worktrees adopted by the context being removed
+    # Mark the worktree as adopted by this context
     source "$TEST_HOME/.wt/lib/wt-adopt"
     WT_CONTEXT_NAME="ptr-test" wt_mark_adopted "$wt_path"
 
@@ -230,6 +229,38 @@ teardown() {
     # The worktree's .git file should now point to the NEW location
     dot_git_content="$(cat "$wt_path/.git")"
     assert_equal "$dot_git_content" "gitdir: ${active_link}/.git/worktrees/wt-ptr"
+
+    # Verify git operations work in the worktree
+    run git -C "$wt_path" status
+    assert_success
+}
+
+@test "remove updates unadopted worktree .git pointers after repo move" {
+    create_test_context "ptr-unadopted" "$REPO1"
+
+    # Create a branch and worktree, but do NOT mark it adopted
+    create_branch "$REPO1" "unadopted-branch"
+    local wt_path="$BATS_TEST_TMPDIR/wt-unadopted"
+    create_worktree "$REPO1" "$wt_path" "unadopted-branch"
+    # Normalize worktree path
+    wt_path="$(cd "$wt_path" && pwd -P)"
+
+    # Verify the worktree's .git file points to the OLD location
+    local dot_git_content
+    dot_git_content="$(cat "$wt_path/.git")"
+    assert_equal "$dot_git_content" "gitdir: ${REPO1}/.git/worktrees/wt-unadopted"
+
+    # Set up the symlink scenario: active_link -> REPO1 (main repo)
+    local active_link="$TEST_HOME/active"
+    rm -f "$active_link"
+    ln -s "$REPO1" "$active_link"
+
+    run "$TEST_HOME/.wt/bin/wt-context" remove -y "ptr-unadopted"
+    assert_success
+
+    # The unadopted worktree's .git file should now point to the NEW location
+    dot_git_content="$(cat "$wt_path/.git")"
+    assert_equal "$dot_git_content" "gitdir: ${active_link}/.git/worktrees/wt-unadopted"
 
     # Verify git operations work in the worktree
     run git -C "$wt_path" status
