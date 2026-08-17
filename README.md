@@ -16,7 +16,7 @@ This toolkit makes IntelliJ context switching **instant** by:
 
 - **Symlink trick**: IntelliJ always opens the same path; switching worktrees looks like a branch checkout → incremental refresh in seconds, not minutes
 - **Metadata vault**: IDE project metadata (`.ijwb`, `.idea`, `.vscode`, etc.) is stored externally and automatically installed into every new worktree—no manual IDE setup needed
-- **Safe worktree management**: Automatic stash/restore, branch creation, and cleanup of merged branches
+- **Safe worktree management**: New branches are created from a freshly fetched base ref without ever touching the main checkout, plus cleanup of merged branches
 - **Parallel development at scale**: Works for humans and AI agents alike
 
 📊 See the [presentation slides](presentation/slides.pdf) for a visual walkthrough.
@@ -73,7 +73,7 @@ The directory structure expected (controlled by environment variables, can be ov
 │   Main Repository                │                     │    Worktrees                       │
 │ ~/Development/java-master        │       wt add        │ ~/Development/java-worktrees/...   │
 │  • master branch                 │ ──────────────────► │  • feature/foo                     │
-│  • safe stash/pull/restore       │(calls metadata-imp) │  • bugfix/bar                      │
+│  • never touched by wt add       │(calls metadata-imp) │  • bugfix/bar                      │
 │  • never removed                 │                     │  • agent-task-123                  │
 └───────────────┬──────────────────┘                     └─────────┬──────────────────────────┘
                 │                                                  │
@@ -105,16 +105,14 @@ wt add -b feature/foo
 ```
 
 When creating with `-b`, the script:
-1. Stashes uncommitted changes
-2. Switches to master, pulls latest
-3. Creates branch + worktree
-4. Imports project metadata from vault
-5. Copies configured seed files (`WT_SEED_FILES`, e.g. `user.bazelrc`) from the main repo
-6. Restores original state
+1. Fetches the latest base branch (`git fetch origin <base>`); a failed fetch warns and falls back to the last-known base ref
+2. Creates branch + worktree from `origin/<base>` (or the local base branch when there is no remote), without ever touching the main repo checkout — no stash, no branch switch
+3. Imports project metadata from vault
+4. Copies configured seed files (`WT_SEED_FILES`, e.g. `user.bazelrc`) from the main repo
 
 Each worktree gets its own Bazel output base (Bazel derives it from the worktree path), so builds in different worktrees never clobber each other. `wt remove` reclaims that disk space automatically.
 
-Set `WT_SKIP_PULL=1` to skip the `git pull` step (useful offline or in scripts):
+Set `WT_SKIP_PULL=1` to skip the `git fetch` step (useful offline or in scripts):
 
 ```bash
 WT_SKIP_PULL=1 wt add -b feature/foo
@@ -318,7 +316,7 @@ export WT_MAIN_REPO_ROOT="$HOME/Development/java-master"
 ```
 
 Used by:
-- wt-add (for stash/restore & base branch operations)
+- wt-add (base branch operations)
 - wt-choose (listing worktrees)
 - wt-switch (default symlink target)
 - wt-remove (safety check to prevent removing main repo)
