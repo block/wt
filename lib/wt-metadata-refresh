@@ -188,7 +188,7 @@ parse_bazelproject_directories() {
   awk '
     /^directories:/ { in_dirs=1; next }
     /^[a-z_]+:/ { in_dirs=0 }
-    in_dirs { gsub(/^[[:space:]]+/, ""); if ($0 != "" && !/^#/) print }
+    in_dirs { gsub(/^[[:space:]]+/, ""); if ($0 != "" && !/^#/ && !/^-/) print }
   ' "$bazelproject_file"
 }
 
@@ -198,16 +198,23 @@ parse_bazelproject_directories() {
 build_query_expression() {
   local first=true
   local query=""
+  local dir expr
 
   while IFS= read -r dir; do
     # Skip empty lines
     [[ -z "$dir" ]] && continue
 
+    if [[ "$dir" == "." ]]; then
+      expr="//..."
+    else
+      expr="//${dir}/..."
+    fi
+
     if [[ "$first" == "true" ]]; then
-      query="//${dir}/..."
+      query="$expr"
       first=false
     else
-      query="$query + //${dir}/..."
+      query="$query + $expr"
     fi
   done
 
@@ -281,13 +288,14 @@ refresh_targets_file() {
   # Run bazel query from the MAIN REPO ROOT (not project root)
   # This is important because .bazelproject directories are relative to repo root
   local query_output
+  local query_stderr_log="$LOG_DIR/bazel-query-stderr.log"
   query_output=$(
     cd "$WT_MAIN_REPO_ROOT" 2>/dev/null && \
-    { bazel query "$full_query" --output=label --keep_going 2>/dev/null || true; } | sort
+    { bazel query "$full_query" --output=label --keep_going 2>>"$query_stderr_log" || true; } | sort
   )
 
   if [[ -z "$query_output" ]]; then
-    warn "  Bazel query returned empty results for $project_name"
+    warn "  Bazel query returned empty results for $project_name (bazel stderr: $query_stderr_log)"
     return 1
   fi
 
