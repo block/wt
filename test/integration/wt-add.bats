@@ -62,6 +62,34 @@ teardown() {
     assert_equal "$branch" "new-feature"
 }
 
+@test "wt-add --branch creates new branch and worktree" {
+    run "$TEST_HOME/.wt/bin/wt-add" --branch long-flag-feature
+    assert_success
+    assert_is_worktree "$WT_WORKTREES_BASE/long-flag-feature"
+    local branch=$(cd "$WT_WORKTREES_BASE/long-flag-feature" && git branch --show-current)
+    assert_equal "$branch" "long-flag-feature"
+}
+
+@test "wt-add --branch=NAME creates new branch and worktree" {
+    run "$TEST_HOME/.wt/bin/wt-add" --branch=eq-long-feature
+    assert_success
+    assert_is_worktree "$WT_WORKTREES_BASE/eq-long-feature"
+    local branch=$(cd "$WT_WORKTREES_BASE/eq-long-feature" && git branch --show-current)
+    assert_equal "$branch" "eq-long-feature"
+}
+
+@test "wt-add -b=NAME creates branch NAME, not =NAME" {
+    run "$TEST_HOME/.wt/bin/wt-add" -b=eq-short-feature
+    assert_success
+    assert_is_worktree "$WT_WORKTREES_BASE/eq-short-feature"
+    local branch=$(cd "$WT_WORKTREES_BASE/eq-short-feature" && git branch --show-current)
+    assert_equal "$branch" "eq-short-feature"
+
+    # The literally-named "=eq-short-feature" branch must NOT exist
+    run git -C "$REPO" show-ref --verify "refs/heads/=eq-short-feature"
+    assert_failure
+}
+
 @test "wt-add -b preserves uncommitted changes in main repo" {
     # Make the main repo dirty
     make_repo_dirty "$REPO"
@@ -160,6 +188,26 @@ teardown() {
     assert_output --partial "Usage:"
 }
 
+@test "wt-add -h/--help shows usage and exits 0" {
+    run "$TEST_HOME/.wt/bin/wt-add" -h
+    assert_success
+    assert_output --partial "Usage:"
+
+    run "$TEST_HOME/.wt/bin/wt-add" --help
+    assert_success
+    assert_output --partial "Usage:"
+}
+
+@test "wt-add -y auto-confirms existing-branch prompt non-interactively" {
+    create_branch "$REPO" "already-there"
+
+    run bash -c '"'"$TEST_HOME/.wt/bin/wt-add"'" -y -b already-there < /dev/null'
+    assert_success
+    assert_is_worktree "$WT_WORKTREES_BASE/already-there"
+    local branch=$(cd "$WT_WORKTREES_BASE/already-there" && git branch --show-current)
+    assert_equal "$branch" "already-there"
+}
+
 @test "wt-add passes git worktree flags through correctly" {
     # Test that wt-add passes recognized git worktree flags through to git
     # Use --lock flag which is a valid git worktree add option
@@ -231,4 +279,26 @@ teardown() {
     local current_branch
     current_branch=$(cd "$REPO" && git branch --show-current)
     assert_equal "$current_branch" "$original_branch"
+}
+
+@test "wt-add -b aborts with exit 130 when git pull is interrupted" {
+    # Stub timeout(1) so "timeout 30 git pull" reports the child killed by SIGINT
+    mkdir -p "$BATS_TEST_TMPDIR/stubs"
+    printf '#!/usr/bin/env bash\nexit 130\n' > "$BATS_TEST_TMPDIR/stubs/timeout"
+    chmod +x "$BATS_TEST_TMPDIR/stubs/timeout"
+
+    make_repo_dirty "$REPO"
+    local original_content
+    original_content=$(cat "$REPO/file.txt")
+
+    run bash -c 'WT_SKIP_PULL=0 PATH="'"$BATS_TEST_TMPDIR"'/stubs:$PATH" "'"$TEST_HOME/.wt/bin/wt-add"'" -b interrupted-pull'
+    assert_equal "$status" 130
+
+    # Worktree must NOT have been created from the stale base
+    assert [ ! -d "$WT_WORKTREES_BASE/interrupted-pull" ]
+
+    # Stashed uncommitted changes must be restored
+    local current_content
+    current_content=$(cat "$REPO/file.txt")
+    assert_equal "$current_content" "$original_content"
 }

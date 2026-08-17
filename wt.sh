@@ -75,6 +75,13 @@ __wt_run() {
 # Note: Named __wt_do_cd to avoid conflict with _wt_cd completion function in completion/wt.zsh
 __wt_do_cd() {
   local target rc
+  case "${1:-}" in
+    -h|--help)
+      # Run outside command substitution so help displays and exit 0 is preserved
+      __wt_run wt-cd "$1"
+      return $?
+      ;;
+  esac
   target="$(__wt_run wt-cd "$@")"
   rc=$?
   if [[ $rc -eq 0 && -n "$target" && -d "$target" ]]; then

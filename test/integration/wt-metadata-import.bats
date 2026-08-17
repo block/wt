@@ -164,6 +164,12 @@ teardown() {
     assert_output --partial "Usage:"
 }
 
+@test "wt-metadata-import -h prints help to stdout" {
+    run --separate-stderr "$TEST_HOME/.wt/bin/wt-metadata-import" -h
+    assert_success
+    assert_output --partial "Usage:"
+}
+
 # =============================================================================
 # Error handling tests
 # =============================================================================
