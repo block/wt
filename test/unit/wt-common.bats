@@ -1145,3 +1145,49 @@ setup_resolver_fixture() {
     assert_success
     assert_output "$DOCS_WT"
 }
+
+# =============================================================================
+# Tests for _wt_md5_string()
+# =============================================================================
+
+@test "_wt_md5_string hashes the string itself, not a file" {
+    run _wt_md5_string "hello"
+    assert_success
+    assert_output "5d41402abc4b2a76b9719d911017c592"
+}
+
+@test "_wt_md5_string produces bazel-style output base names for paths" {
+    # Bazel names output bases md5("/absolute/workspace/path")
+    run _wt_md5_string "/Users/someone/worktrees/feature/foo"
+    assert_success
+    assert_output --regexp '^[0-9a-f]{32}$'
+}
+
+@test "_wt_md5_string handles the empty string" {
+    run _wt_md5_string ""
+    assert_success
+    assert_output "d41d8cd98f00b204e9800998ecf8427e"
+}
+
+@test "_wt_md5_string falls back to md5sum when md5 is unavailable" {
+    if ! command -v md5sum >/dev/null 2>&1; then
+        skip "md5sum not available"
+    fi
+
+    # Hide md5 so the md5sum branch is exercised
+    md5_path="$(command -v md5 || true)"
+    [[ -n "$md5_path" ]] || skip "md5 not on PATH; fallback already default"
+
+    mkdir -p "$BATS_TEST_TMPDIR/restricted-bin"
+    for tool in md5sum printf cut command bash sh; do
+        tool_path="$(command -v "$tool" 2>/dev/null || true)"
+        [[ -n "$tool_path" && -x "$tool_path" ]] && ln -sf "$tool_path" "$BATS_TEST_TMPDIR/restricted-bin/$tool"
+    done
+
+    run env PATH="$BATS_TEST_TMPDIR/restricted-bin" bash -c '
+        source "'"$TEST_HOME/.wt/lib/wt-common"'" 2>/dev/null
+        _wt_md5_string "hello"
+    '
+    assert_success
+    assert_output --partial "5d41402abc4b2a76b9719d911017c592"
+}

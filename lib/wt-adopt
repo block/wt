@@ -4,7 +4,7 @@
 # ====================================================
 #
 # Provides functions for adopting existing worktrees into wt management.
-# "Adopting" means: importing metadata, installing Bazel symlinks, and
+# "Adopting" means: importing metadata, seeding configured root files, and
 # placing a marker file so wt knows this worktree is managed.
 #
 # Marker file location:
@@ -138,8 +138,6 @@ _wt_is_interactive() { [[ -t 0 && -t 2 ]]; }
 #   - The vault (WT_IDEA_FILES_BASE) for metadata matching WT_METADATA_PATTERNS,
 #     then checks if the corresponding target paths exist in the worktree.
 #     This mirrors the same vault-scanning logic used by wt-metadata-import.
-#   - Bazel output directories that are real directories (not symlinks —
-#     symlinks are always safe to replace)
 #
 # Args: $1 = worktree path (absolute)
 # Outputs: conflicting relative paths to stdout (one per line)
@@ -181,15 +179,6 @@ wt_check_adoption_conflicts() {
     done
   fi
 
-  # Check Bazel dirs (only real dirs, not symlinks)
-  local -a bazel_names=("bazel-out" "bazel-bin" "bazel-testlogs" "bazel-genfiles")
-  for name in "${bazel_names[@]}"; do
-    local target="$worktree_path/$name"
-    if [[ -d "$target" && ! -L "$target" ]]; then
-      conflicts+=("$name (real directory)")
-    fi
-  done
-
   if [[ ${#conflicts[@]} -eq 0 ]]; then
     return 1
   fi
@@ -202,46 +191,34 @@ wt_check_adoption_conflicts() {
 # Treatment functions
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Install Bazel output symlinks into a worktree.
-# Copies bazel-out, bazel-bin, etc. from the main repo so the worktree
-# shares the build cache (faster IDE sync, no rebuild needed).
+# Copy configured seed files (WT_SEED_FILES) from the main repo into a worktree.
+# Best-effort: any failure warns and continues — never fails adoption.
+# Never overwrites files that already exist in the worktree.
 # Args: $1 = worktree path (absolute)
-wt_install_bazel_symlinks() {
+wt_seed_files() {
   local worktree_path="$1"
 
-  local bazel_symlinks=("bazel-out" "bazel-bin" "bazel-testlogs" "bazel-genfiles")
+  local name src dst
+  for name in ${WT_SEED_FILES:-}; do
+    src="$WT_MAIN_REPO_ROOT/$name"
+    dst="$worktree_path/$name"
 
-  local main_repo_abs
-  main_repo_abs="$(cd "$WT_MAIN_REPO_ROOT" && pwd)"
+    [[ -f "$src" ]] || continue
+    [[ -e "$dst" || -L "$dst" ]] && continue
 
-  info "Installing Bazel symlinks into worktree: $worktree_path"
-
-  for symlink_name in "${bazel_symlinks[@]}"; do
-    local src_link="$main_repo_abs/$symlink_name"
-    local dst_link="$worktree_path/$symlink_name"
-
-    if [[ -L "$src_link" ]]; then
-      local target
-      target="$(readlink "$src_link")"
-
-      if [[ "$target" != /* ]]; then
-        target="$main_repo_abs/$target"
-      fi
-
-      if [[ -L "$dst_link" || -e "$dst_link" ]]; then
-        rm -rf "$dst_link"
-      fi
-
-      ln -s "$target" "$dst_link"
-      info "  $symlink_name -> $target"
+    if cp -p "$src" "$dst" 2>/dev/null; then
+      info "  seeded $name"
+    else
+      warn "Could not seed $name into $worktree_path"
     fi
   done
+  return 0
 }
 
 # Run the full adoption treatment on a worktree.
 # 1. Check for conflicting files (unless --force)
 # 2. Import metadata from vault (unless keep_existing)
-# 3. Install Bazel symlinks (always)
+# 3. Seed configured root files from the main repo (always)
 # 4. Place adoption marker
 #
 # Args: [--force] <worktree_path>
@@ -274,7 +251,7 @@ wt_adopt_worktree() {
 
       if _wt_is_interactive; then
         echo "  [O]verwrite — replace with vault contents" >&2
-        echo "  [K]eep     — adopt without importing metadata (Bazel symlinks still installed)" >&2
+        echo "  [K]eep     — adopt without importing metadata" >&2
         echo "  [A]bort    — cancel adoption" >&2
         echo >&2
 
@@ -326,8 +303,8 @@ wt_adopt_worktree() {
     info "Keeping existing metadata files"
   fi
 
-  # 3. Install Bazel symlinks (always — even with keep_existing)
-  wt_install_bazel_symlinks "$worktree_path"
+  # 3. Seed root files (always — even with keep_existing; never overwrites)
+  wt_seed_files "$worktree_path"
 
   # 4. Mark as adopted
   wt_mark_adopted "$worktree_path"

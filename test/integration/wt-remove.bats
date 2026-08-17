@@ -541,3 +541,90 @@ create_removable_worktree() {
     # The colliding directory must be untouched
     assert [ -d "$REPO/shadowed" ]
 }
+
+# =============================================================================
+# Bazel output base cleanup tests
+#
+# Bazel names each worktree's output base after the md5 of the worktree's
+# absolute path string. wt-remove reaps that directory (best-effort) after
+# a successful worktree removal.
+# =============================================================================
+
+# Compute the same hash wt-remove derives for a worktree path
+_hash_for_path() {
+    bash -c 'source "$1/.wt/lib/wt-common" 2>/dev/null; _wt_md5_string "$2"' _ "$TEST_HOME" "$1"
+}
+
+@test "wt-remove reaps the worktree's bazel output base" {
+    export USER="wtuser"
+    local wt_path
+    wt_path=$(create_removable_worktree "bazel-reap")
+    wt_path="$(cd "$wt_path" && pwd)"
+
+    local hash other_hash
+    hash="$(_hash_for_path "$wt_path")"
+    other_hash="0123456789abcdef0123456789abcdef"
+
+    local root="$TEST_HOME/Library/Caches/bazel/_bazel_wtuser"
+    mkdir -p "$root/$hash/execroot/wksp"
+    echo "artifact" > "$root/$hash/execroot/wksp/out.bin"
+    mkdir -p "$root/$other_hash/execroot/wksp"
+
+    run "$TEST_HOME/.wt/bin/wt-remove" -y "$wt_path"
+    assert_success
+    assert [ ! -d "$wt_path" ]
+    assert [ ! -d "$root/$hash" ]
+    assert_output --partial "Bazel output base removed"
+    assert_output --partial "freed"
+
+    # Other worktrees' output bases must survive
+    assert [ -d "$root/$other_hash" ]
+}
+
+@test "wt-remove reaps output base from the linux cache root" {
+    export USER="wtuser"
+    local wt_path
+    wt_path=$(create_removable_worktree "bazel-reap-linux")
+    wt_path="$(cd "$wt_path" && pwd)"
+
+    local hash
+    hash="$(_hash_for_path "$wt_path")"
+
+    local root="$TEST_HOME/.cache/bazel/_bazel_wtuser"
+    mkdir -p "$root/$hash/execroot/wksp"
+
+    run "$TEST_HOME/.wt/bin/wt-remove" -y "$wt_path"
+    assert_success
+    assert [ ! -d "$root/$hash" ]
+    assert_output --partial "Bazel output base removed"
+}
+
+@test "wt-remove leaves candidate dirs without execroot alone" {
+    export USER="wtuser"
+    local wt_path
+    wt_path=$(create_removable_worktree "bazel-no-execroot")
+    wt_path="$(cd "$wt_path" && pwd)"
+
+    local hash
+    hash="$(_hash_for_path "$wt_path")"
+
+    local root="$TEST_HOME/Library/Caches/bazel/_bazel_wtuser"
+    mkdir -p "$root/$hash/not-an-output-base"
+
+    run "$TEST_HOME/.wt/bin/wt-remove" -y "$wt_path"
+    assert_success
+    assert [ ! -d "$wt_path" ]
+    assert [ -d "$root/$hash" ]
+    refute_output --partial "Bazel output base"
+}
+
+@test "wt-remove is silent about bazel when no output base exists" {
+    export USER="wtuser"
+    local wt_path
+    wt_path=$(create_removable_worktree "bazel-none")
+
+    run "$TEST_HOME/.wt/bin/wt-remove" -y "$wt_path"
+    assert_success
+    assert [ ! -d "$wt_path" ]
+    refute_output --partial "Bazel output base"
+}

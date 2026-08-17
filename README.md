@@ -109,7 +109,10 @@ When creating with `-b`, the script:
 2. Switches to master, pulls latest
 3. Creates branch + worktree
 4. Imports project metadata from vault
-5. Restores original state
+5. Copies configured seed files (`WT_SEED_FILES`, e.g. `user.bazelrc`) from the main repo
+6. Restores original state
+
+Each worktree gets its own Bazel output base (Bazel derives it from the worktree path), so builds in different worktrees never clobber each other. `wt remove` reclaims that disk space automatically.
 
 ### Switching Worktrees
 
@@ -170,6 +173,8 @@ Safety features:
 - Warns if there are uncommitted changes (shows summary)
 - Always prompts for confirmation if uncommitted changes exist, even with `-y`
 - `--merged` mode: automatically finds and removes all worktrees whose branches are merged
+
+After a successful removal, `wt remove` also reaps the worktree's dedicated Bazel output base (best-effort): it locates the output base named after the md5 hash of the worktree path under the known Bazel output user roots (`~/Library/Caches/bazel/_bazel_$USER`, `/private/var/tmp/_bazel_$USER`, `~/.cache/bazel/_bazel_$USER`), verifies it contains `execroot/`, deletes it, and reports the disk space freed. If no matching output base exists, nothing is printed; cleanup failures only warn and never fail the removal.
 
 ### Managing Project Metadata
 
@@ -246,6 +251,7 @@ If set in your shell configuration, they take precedence over the built-in defau
 | `WT_IDEA_FILES_BASE` | `~/Development/idea-project-files` | IntelliJ metadata vault |
 | `WT_ACTIVE_WORKTREE` | `~/Development/java` | Symlink to active worktree |
 | `WT_BASE_BRANCH` | `master` | Default branch for new worktrees |
+| `WT_SEED_FILES` | (empty) | Root files copied from main repo into new worktrees |
 
 ### WT_MAIN_REPO_ROOT
 Path to your primary git repository clone.
@@ -311,6 +317,21 @@ Name of the mainline branch to branch from.
 ```bash
 export WT_BASE_BRANCH="master"
 ```
+
+### WT_SEED_FILES
+Space-separated, repo-root-relative names of files to copy (`cp -p`) from the main repo into every new/adopted worktree. Useful for gitignored per-machine files like `user.bazelrc` or `.bazelversion` overrides that a fresh checkout would otherwise lack.
+
+Seeding is best-effort: files missing in the main repo are skipped, files already present in the worktree are never overwritten, and copy failures only warn.
+
+**Default:** (empty)
+
+```bash
+export WT_SEED_FILES="user.bazelrc .bazelversion"
+```
+
+Used by:
+- wt-add (via adoption treatment)
+- wt-adopt
 
 ## Presentation
 

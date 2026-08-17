@@ -29,8 +29,8 @@
 #       c. Ensure the base branch is up to date by running `git pull`.
 #       d. Run `git worktree add <args>` to create the new worktree.
 #       e. Run wt-metadata-import to import project metadata into the new worktree.
-#       f. Create symlinks for Bazel outputs (bazel-out, bazel-bin, etc.) pointing
-#            to the same targets as in the main repo, to speed up IntelliJ sync.
+#       f. Copy configured seed files (WT_SEED_FILES) from the main repo into
+#            the new worktree (best-effort, never overwrites).
 #       g. After completion:
 #            - Switch back to the original branch or detached HEAD commit.
 #            - Pop the specific stash created earlier (if any).
