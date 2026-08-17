@@ -292,9 +292,15 @@ The scripts rely on a few environment variables to know where your
 main repository, worktrees, and IntelliJ metadata live.
 
 These variables are normally read from the per-context config file
-(`~/.wt/repos/<name>.conf`, written by `wt context add`). When no context is
-configured, `wt-common` falls back to the built-in defaults below.
-If set in your shell configuration, they take precedence over the built-in defaults.
+(`~/.wt/repos/<name>.conf`, written by `wt context add`). If set in your
+shell configuration, they take precedence over the context config (except in
+`wt.enabled` repos, where git local config has highest priority).
+
+`wt` commands require a config source to actually load: if neither a context
+`.conf` nor a repo's `wt.*` git local config is found, or if
+`WT_MAIN_REPO_ROOT` does not point at an existing git repository, commands
+exit with an error directing you to `wt context add`. The built-in defaults
+below exist only so sourcing `wt.sh` never breaks an unconfigured shell.
 
 | Variable | Default | Purpose |
 |----------|---------|---------|

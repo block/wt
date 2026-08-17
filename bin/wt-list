@@ -87,18 +87,6 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Validate main repo exists (shared by both modes so porcelain doesn't
-# silently return an empty listing when the config points at a non-repo)
-if [[ ! -d "$WT_MAIN_REPO_ROOT" ]]; then
-  error "WT_MAIN_REPO_ROOT does not exist: $WT_MAIN_REPO_ROOT"
-  exit 1
-fi
-
-if ! git -C "$WT_MAIN_REPO_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  error "$WT_MAIN_REPO_ROOT is not a git repository or worktree."
-  exit 1
-fi
-
 # Porcelain mode: output augmented porcelain directly
 if [[ "$PORCELAIN" == true ]]; then
   if [[ "$VERBOSE" == true ]]; then

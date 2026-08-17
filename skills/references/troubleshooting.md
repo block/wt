@@ -53,6 +53,22 @@ wt context add
 ```
 This starts the interactive setup flow. The user will need to provide the path to their repository.
 
+## `No wt configuration loaded` error
+
+**Cause**: No config source loaded — no context is set (or the current context's `.conf` file is missing) and the repo has no `wt.*` git local config. `wt` commands refuse to run on built-in fallback defaults.
+
+**Resolution**:
+```bash
+wt context add
+```
+If the error names a context, its `~/.wt/repos/<name>.conf` is missing — re-create it with `wt context add`.
+
+## `WT_MAIN_REPO_ROOT does not exist` / `is not a git repository` error
+
+**Cause**: The configured main repo path points at a moved, deleted, or non-git directory.
+
+**Resolution**: Fix `WT_MAIN_REPO_ROOT` in the `.conf` file named in the error, or run `wt context add` to reconfigure.
+
 ## `wt add` hangs
 
 **Cause**: Large repository, first-time git operations, or slow network (fetching remote).

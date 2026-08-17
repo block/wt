@@ -139,6 +139,38 @@ EOF
     assert_output --partial "Unified Worktree Toolkit"
 }
 
+# =============================================================================
+# Tests for __wt_do_remove config reload
+# =============================================================================
+
+@test "wt remove reloads config before falling back to main repo cd" {
+    REPO_A=$(create_mock_repo "$BATS_TEST_TMPDIR/repoA")
+    REPO_B=$(create_mock_repo "$BATS_TEST_TMPDIR/repoB")
+    create_test_context "ctxA" "$REPO_A"
+    create_test_context "ctxB" "$REPO_B"
+
+    create_branch "$REPO_B" "feature-x"
+    local wt_path="$TEST_HOME/.wt/repos/ctxB/worktrees/feature-x"
+    create_worktree "$REPO_B" "$wt_path" "feature-x"
+
+    cp "$PROJECT_ROOT/wt.sh" "$TEST_HOME/.wt/wt.sh"
+
+    # Shell sources wt.sh under ctxA; another shell then switches the current
+    # context to ctxB; removing a ctxB worktree from inside it must cd to
+    # ctxB's main repo, not ctxA's stale snapshot.
+    echo "ctxA" > "$TEST_HOME/.wt/current"
+
+    run bash -c '
+        source "$HOME/.wt/wt.sh"
+        echo "ctxB" > "$HOME/.wt/current"
+        cd "'"$wt_path"'" || exit 1
+        wt remove -y feature-x >/dev/null 2>&1 || exit 1
+        pwd -P
+    '
+    assert_success
+    assert_output "$REPO_B"
+}
+
 @test "_WT_ROOT default in wt.sh matches INSTALL_DIR in install.sh" {
     # Extract the default path from wt.sh: _WT_ROOT="${_WT_ROOT:-$HOME/.wt}"
     local wt_line
