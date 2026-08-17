@@ -78,6 +78,32 @@ _wt_detect_default_branch() {
   echo "main"
 }
 
+# Prompt for a directory config value, expanding ~ and re-prompting until the
+# input is an absolute path without glob characters
+# Args: $1 = prompt label, $2 = default value
+# Sets: _WT_PROMPT_PATH_RESULT
+# Returns: 0 on success, 1 on EOF
+_wt_prompt_path_config() {
+  local label="$1"
+  local default="$2"
+  local input
+
+  while true; do
+    if ! read -erp "$label [$default]: " input; then
+      return 1
+    fi
+
+    input=$(_wt_expand_path "${input:-$default}")
+
+    if _wt_is_valid_path_config "$input"; then
+      _WT_PROMPT_PATH_RESULT="$input"
+      return 0
+    fi
+
+    error "Must be an absolute path without glob characters: $input"
+  done
+}
+
 # Derive all paths from the repository location
 # Args: $1 = repo path (base worktree), $2 = context name, $3 = symlink path (optional)
 # Sets: WT_MAIN_REPO_ROOT, WT_WORKTREES_BASE, WT_ACTIVE_WORKTREE, WT_IDEA_FILES_BASE
@@ -332,6 +358,53 @@ _wt_update_context_main_repo() {
   fi
 }
 
+# Warn if source and migration destination live on different filesystems,
+# where mv degrades to a full copy + delete
+# Args: $1 = source path, $2 = destination path (may not exist yet)
+_wt_migrate_warn_cross_device() {
+  local src="$1"
+  local dest_probe="$2"
+
+  while [[ "$dest_probe" != "/" && ! -d "$dest_probe" ]]; do
+    dest_probe="$(dirname "$dest_probe")"
+  done
+
+  local src_dev dest_dev
+  src_dev=$(df -P "$src" 2>/dev/null | awk 'NR==2 {print $1}')
+  dest_dev=$(df -P "$dest_probe" 2>/dev/null | awk 'NR==2 {print $1}')
+
+  if [[ -n "$src_dev" && -n "$dest_dev" && "$src_dev" != "$dest_dev" ]]; then
+    warn "Source and destination are on different filesystems."
+    warn "The move will copy the entire repository; it may take a while and needs enough free space."
+  fi
+}
+
+# Restore the repository to its original path after an interrupted or failed
+# migration. Reads _WT_MIGRATE_ORIGINAL, _WT_MIGRATE_TEMP_DIR, _WT_MIGRATE_DEST.
+_wt_migrate_rollback() {
+  trap - INT TERM
+
+  if [[ -n "${_WT_MIGRATE_TEMP_DIR:-}" && -d "${_WT_MIGRATE_TEMP_DIR:-}" && ! -e "${_WT_MIGRATE_ORIGINAL:-}" ]]; then
+    warn "Migration did not complete; restoring repository to $_WT_MIGRATE_ORIGINAL"
+    if mv "$_WT_MIGRATE_TEMP_DIR" "$_WT_MIGRATE_ORIGINAL"; then
+      warn "Repository restored to $_WT_MIGRATE_ORIGINAL"
+    else
+      error "Automatic restore failed. Your repository is intact at: $_WT_MIGRATE_TEMP_DIR"
+      error "Restore it with: mv \"$_WT_MIGRATE_TEMP_DIR\" \"$_WT_MIGRATE_ORIGINAL\""
+    fi
+    if [[ -e "${_WT_MIGRATE_DEST:-}" ]]; then
+      warn "A partial copy may remain at $_WT_MIGRATE_DEST — remove it before retrying."
+    fi
+  elif [[ -n "${_WT_MIGRATE_DEST:-}" && -d "${_WT_MIGRATE_DEST:-}" && ! -e "${_WT_MIGRATE_ORIGINAL:-}" ]]; then
+    warn "Migration did not complete, but the repository already moved to $_WT_MIGRATE_DEST"
+    warn "Finish manually with: ln -s \"$_WT_MIGRATE_DEST\" \"$_WT_MIGRATE_ORIGINAL\""
+  fi
+
+  _WT_MIGRATE_TEMP_DIR=""
+  _WT_MIGRATE_ORIGINAL=""
+  _WT_MIGRATE_DEST=""
+}
+
 # Migrate repository to worktree structure
 # Args: $1 = context name
 _wt_migrate_repo() {
@@ -366,21 +439,50 @@ _wt_migrate_repo() {
       return 1
     fi
 
+    _wt_migrate_warn_cross_device "$WT_ACTIVE_WORKTREE" "$WT_MAIN_REPO_ROOT"
+
     # Use a temp directory to handle nested structures (e.g., moving ~/java to ~/java/base)
     local temp_dir
     temp_dir="${WT_ACTIVE_WORKTREE}.wt-migrate-$$-$(date +%s)"
 
+    _WT_MIGRATE_ORIGINAL="$WT_ACTIVE_WORKTREE"
+    _WT_MIGRATE_TEMP_DIR="$temp_dir"
+    _WT_MIGRATE_DEST="$WT_MAIN_REPO_ROOT"
+    trap '_wt_migrate_rollback; exit 130' INT
+    trap '_wt_migrate_rollback; exit 143' TERM
+
     echo "Moving $WT_ACTIVE_WORKTREE -> $temp_dir (temporary) ..."
-    mv "$WT_ACTIVE_WORKTREE" "$temp_dir"
+    if ! mv "$WT_ACTIVE_WORKTREE" "$temp_dir"; then
+      _wt_migrate_rollback
+      error "Failed to move repository to temporary location. Aborting migration."
+      return 1
+    fi
 
     # Create parent directory for destination if needed
-    mkdir -p "$(dirname "$WT_MAIN_REPO_ROOT")"
+    if ! mkdir -p "$(dirname "$WT_MAIN_REPO_ROOT")"; then
+      _wt_migrate_rollback
+      error "Failed to create $(dirname "$WT_MAIN_REPO_ROOT"). Aborting migration."
+      return 1
+    fi
 
     echo "Moving $temp_dir -> $WT_MAIN_REPO_ROOT ..."
-    mv "$temp_dir" "$WT_MAIN_REPO_ROOT"
+    if ! mv "$temp_dir" "$WT_MAIN_REPO_ROOT"; then
+      _wt_migrate_rollback
+      error "Failed to move repository to $WT_MAIN_REPO_ROOT. Aborting migration."
+      return 1
+    fi
 
     echo "Creating symlink $WT_ACTIVE_WORKTREE -> $WT_MAIN_REPO_ROOT ..."
-    ln -s "$WT_MAIN_REPO_ROOT" "$WT_ACTIVE_WORKTREE"
+    if ! ln -s "$WT_MAIN_REPO_ROOT" "$WT_ACTIVE_WORKTREE"; then
+      _wt_migrate_rollback
+      error "Failed to create symlink at $WT_ACTIVE_WORKTREE."
+      return 1
+    fi
+
+    trap - INT TERM
+    _WT_MIGRATE_TEMP_DIR=""
+    _WT_MIGRATE_ORIGINAL=""
+    _WT_MIGRATE_DEST=""
 
     # Update pre-existing worktree .git pointers to use the physical base path.
     # Before migration, worktrees pointed to the original location (now the symlink).
@@ -775,20 +877,35 @@ wt_setup_context() {
     echo "You can customize each value. Press Enter to keep the default."
     echo
 
+    if ! _wt_prompt_path_config "Active symlink path" "$WT_ACTIVE_WORKTREE"; then
+      echo
+      return 1
+    fi
+    WT_ACTIVE_WORKTREE="$_WT_PROMPT_PATH_RESULT"
+
+    if ! _wt_prompt_path_config "Main repository path" "$WT_MAIN_REPO_ROOT"; then
+      echo
+      return 1
+    fi
+    WT_MAIN_REPO_ROOT="$_WT_PROMPT_PATH_RESULT"
+
+    if ! _wt_prompt_path_config "Worktrees directory" "$WT_WORKTREES_BASE"; then
+      echo
+      return 1
+    fi
+    WT_WORKTREES_BASE="$_WT_PROMPT_PATH_RESULT"
+
+    if ! _wt_prompt_path_config "Metadata vault directory" "$WT_IDEA_FILES_BASE"; then
+      echo
+      return 1
+    fi
+    WT_IDEA_FILES_BASE="$_WT_PROMPT_PATH_RESULT"
+
     local input
-    read -erp "Active symlink path [$WT_ACTIVE_WORKTREE]: " input
-    WT_ACTIVE_WORKTREE="${input:-$WT_ACTIVE_WORKTREE}"
-
-    read -erp "Main repository path [$WT_MAIN_REPO_ROOT]: " input
-    WT_MAIN_REPO_ROOT="${input:-$WT_MAIN_REPO_ROOT}"
-
-    read -erp "Worktrees directory [$WT_WORKTREES_BASE]: " input
-    WT_WORKTREES_BASE="${input:-$WT_WORKTREES_BASE}"
-
-    read -erp "Metadata vault directory [$WT_IDEA_FILES_BASE]: " input
-    WT_IDEA_FILES_BASE="${input:-$WT_IDEA_FILES_BASE}"
-
-    read -erp "Default base branch [$WT_BASE_BRANCH]: " input
+    if ! read -erp "Default base branch [$WT_BASE_BRANCH]: " input; then
+      echo
+      return 1
+    fi
     WT_BASE_BRANCH="${input:-$WT_BASE_BRANCH}"
 
     echo
