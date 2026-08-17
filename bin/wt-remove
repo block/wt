@@ -76,6 +76,13 @@ REMOVE_MERGED=false
 DELETE_BRANCH=false
 ON_DIRTY=warn  # warn | skip | remove
 
+_validate_on_dirty() {
+  if [[ "$ON_DIRTY" != "warn" && "$ON_DIRTY" != "skip" && "$ON_DIRTY" != "remove" ]]; then
+    error "Invalid --on-dirty mode: $ON_DIRTY (must be warn, skip, or remove)"
+    exit 1
+  fi
+}
+
 # Parse arguments
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -97,10 +104,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --on-dirty=*)
       ON_DIRTY="${1#--on-dirty=}"
-      if [[ "$ON_DIRTY" != "warn" && "$ON_DIRTY" != "skip" && "$ON_DIRTY" != "remove" ]]; then
-        error "Invalid --on-dirty mode: $ON_DIRTY (must be warn, skip, or remove)"
-        exit 1
-      fi
+      _validate_on_dirty
       shift
       ;;
     --on-dirty)
@@ -109,10 +113,7 @@ while [[ $# -gt 0 ]]; do
         exit 1
       fi
       ON_DIRTY="$2"
-      if [[ "$ON_DIRTY" != "warn" && "$ON_DIRTY" != "skip" && "$ON_DIRTY" != "remove" ]]; then
-        error "Invalid --on-dirty mode: $ON_DIRTY (must be warn, skip, or remove)"
-        exit 1
-      fi
+      _validate_on_dirty
       shift 2
       ;;
     -*)
@@ -215,8 +216,9 @@ _do_remove_worktree() {
   # Remove the worktree
   echo "Removing: $wt_path ($wt_branch)"
   cd "$WT_MAIN_REPO_ROOT"
-  if ! git worktree remove --force -- "$wt_path" 2>/dev/null; then
-    error "Failed to remove $wt_path"
+  local git_err
+  if ! git_err="$(git worktree remove --force -- "$wt_path" 2>&1)"; then
+    error "Failed to remove $wt_path: $git_err"
     return 1
   fi
   success "Worktree removed: $wt_path"
@@ -244,16 +246,16 @@ _do_remove_worktree() {
   elif [[ "$mode" == "merged" ]]; then
     # Branch is verified merged (regular or squash) — safe to force-delete
     # (git branch -d fails on squash-merged branches since it only checks ancestry)
-    if git -C "$WT_MAIN_REPO_ROOT" branch -D "$wt_branch" 2>/dev/null; then
+    if git_err="$(git -C "$WT_MAIN_REPO_ROOT" branch -D "$wt_branch" 2>&1)"; then
       success "Branch '$wt_branch' deleted."
     else
-      warn "Could not delete branch '$wt_branch'"
+      warn "Could not delete branch '$wt_branch': $git_err"
     fi
   elif [[ "$DELETE_BRANCH" == "true" ]]; then
-    if git -C "$WT_MAIN_REPO_ROOT" branch -d "$wt_branch" 2>/dev/null; then
+    if git_err="$(git -C "$WT_MAIN_REPO_ROOT" branch -d "$wt_branch" 2>&1)"; then
       success "Branch '$wt_branch' deleted."
     else
-      warn "Branch '$wt_branch' has unmerged changes."
+      warn "Could not delete branch '$wt_branch': $git_err"
       if prompt_confirm "  Force delete branch? [y/N]" "n"; then
         git -C "$WT_MAIN_REPO_ROOT" branch -D "$wt_branch"
         success "Branch '$wt_branch' force-deleted."
@@ -261,10 +263,10 @@ _do_remove_worktree() {
     fi
   elif [[ "$SKIP_CONFIRM" != "true" ]]; then
     if prompt_confirm "Delete branch '$wt_branch'? [y/N]" "n"; then
-      if git -C "$WT_MAIN_REPO_ROOT" branch -d "$wt_branch" 2>/dev/null; then
+      if git_err="$(git -C "$WT_MAIN_REPO_ROOT" branch -d "$wt_branch" 2>&1)"; then
         success "Branch '$wt_branch' deleted."
       else
-        warn "Branch '$wt_branch' has unmerged changes."
+        warn "Could not delete branch '$wt_branch': $git_err"
         if prompt_confirm "  Force delete branch? [y/N]" "n"; then
           git -C "$WT_MAIN_REPO_ROOT" branch -D "$wt_branch"
           success "Branch '$wt_branch' force-deleted."
@@ -409,6 +411,7 @@ if [[ ${#RESOLVED_WORKTREES[@]} -eq 0 ]]; then
 fi
 
 # Wrapper: confirmation logic + core removal for explicit (non-merged) path
+# Returns: 0 = removed, 1 = removal failed, 2 = skipped (dirty policy or user declined)
 _remove_one_worktree() {
   local wt_path="$1"
 
@@ -420,13 +423,13 @@ _remove_one_worktree() {
 
   # Check dirty worktree policy
   if ! _check_dirty "$wt_path"; then
-    return 1
+    return 2
   fi
 
   # Confirmation (only for single target — multi already confirmed in bulk)
   if [[ "$SKIP_CONFIRM" != "true" && ${#RESOLVED_WORKTREES[@]} -eq 1 ]]; then
     if ! prompt_confirm "Are you sure you want to remove this worktree? [y/N]" "n"; then
-      return 1
+      return 2
     fi
   fi
 
@@ -474,5 +477,11 @@ else
   # Single target
   echo
   echo "Selected worktree to remove: ${RESOLVED_WORKTREES[0]}"
-  _remove_one_worktree "${RESOLVED_WORKTREES[0]}" || true
+  rc=0
+  _remove_one_worktree "${RESOLVED_WORKTREES[0]}" || rc=$?
+  # A skip/decline (rc=2) keeps the historical exit-0 contract; only a real
+  # removal failure propagates non-zero.
+  if [[ $rc -ne 0 && $rc -ne 2 ]]; then
+    exit "$rc"
+  fi
 fi

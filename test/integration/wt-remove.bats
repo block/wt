@@ -155,6 +155,48 @@ create_removable_worktree() {
     assert [ -d "$not_worktree" ]
 }
 
+@test "wt-remove exits non-zero and surfaces git's reason when removal fails" {
+    local wt_path
+    wt_path=$(create_removable_worktree "locked-wt")
+    git -C "$REPO" worktree lock "$wt_path"
+
+    run "$TEST_HOME/.wt/bin/wt-remove" -y "$wt_path"
+    assert_failure
+    assert_output --partial "Failed to remove"
+    assert_output --partial "locked working tree"
+    assert [ -d "$wt_path" ]
+}
+
+@test "wt-remove exits 0 when user declines the removal confirmation" {
+    local wt_path
+    wt_path=$(create_removable_worktree "decline-wt")
+
+    run bash -c 'echo "n" | "'"$TEST_HOME/.wt/bin/wt-remove"'" "'"$wt_path"'"'
+    assert_success
+    assert [ -d "$wt_path" ]
+}
+
+@test "wt-remove exits 0 when user declines removing a dirty worktree" {
+    local wt_path
+    wt_path=$(create_removable_worktree "dirty-decline-wt")
+    echo "uncommitted" >> "$wt_path/file.txt"
+
+    run bash -c 'echo "n" | "'"$TEST_HOME/.wt/bin/wt-remove"'" -y "'"$wt_path"'"'
+    assert_success
+    assert [ -d "$wt_path" ]
+}
+
+@test "wt-remove -b surfaces git's reason when branch delete fails" {
+    local wt_path
+    wt_path=$(create_removable_worktree "unmerged-del")
+
+    run bash -c 'echo "n" | "'"$TEST_HOME/.wt/bin/wt-remove"'" -y -b "'"$wt_path"'"'
+    assert_success
+    assert [ ! -d "$wt_path" ]
+    assert_output --partial "Could not delete branch 'unmerged-del'"
+    assert_output --partial "not fully merged"
+}
+
 # =============================================================================
 # Help and usage tests
 # =============================================================================
@@ -395,6 +437,12 @@ create_removable_worktree() {
 
 @test "wt-remove --on-dirty=invalid fails with error" {
     run "$TEST_HOME/.wt/bin/wt-remove" --on-dirty=invalid
+    assert_failure
+    assert_output --partial "Invalid --on-dirty mode"
+}
+
+@test "wt-remove --on-dirty invalid (two-token form) fails with error" {
+    run "$TEST_HOME/.wt/bin/wt-remove" --on-dirty invalid
     assert_failure
     assert_output --partial "Invalid --on-dirty mode"
 }
