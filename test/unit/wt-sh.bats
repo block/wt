@@ -19,6 +19,25 @@ teardown() {
     grep -q 'adopt)' "$PROJECT_ROOT/wt.sh"
 }
 
+# =============================================================================
+# Tests for wt cd help handling
+# =============================================================================
+
+@test "wt cd --help shows help and exits 0" {
+    REPO=$(create_mock_repo "$BATS_TEST_TMPDIR/repo")
+    create_test_context "test" "$REPO"
+
+    # source returns nonzero when no completion file exists in the test HOME,
+    # so chain with ";" to let the exit status reflect `wt cd --help` itself
+    run bash -c 'source "'"$PROJECT_ROOT"'/wt.sh"; wt cd --help'
+    assert_success
+    assert_output --partial "Usage:"
+
+    run bash -c 'source "'"$PROJECT_ROOT"'/wt.sh"; wt cd -h'
+    assert_success
+    assert_output --partial "Usage:"
+}
+
 @test "_WT_ROOT default in wt.sh matches INSTALL_DIR in install.sh" {
     # Extract the default path from wt.sh: _WT_ROOT="${_WT_ROOT:-$HOME/.wt}"
     local wt_line

@@ -50,7 +50,7 @@ fi
 wt_require_valid_config || exit 1
 
 usage() {
-  cat >&2 <<EOF
+  cat <<EOF
 Usage: $(basename "$0") [-y|--yes] [source-directory] [target-directory]
 
 Options:

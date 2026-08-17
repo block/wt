@@ -151,6 +151,12 @@ teardown() {
     assert_output --partial "Usage:"
 }
 
+@test "wt-metadata-export -h prints help to stdout" {
+    run --separate-stderr "$TEST_HOME/.wt/bin/wt-metadata-export" -h
+    assert_success
+    assert_output --partial "Usage:"
+}
+
 # =============================================================================
 # Explicit path arguments tests
 # =============================================================================

@@ -83,7 +83,11 @@ wt_require_valid_config || exit 1
 wt_source wt-adopt
 
 usage() {
-  echo "Usage: $(basename "$0") [git worktree add arguments...]"
+  echo "Usage: $(basename "$0") [-y|--yes] [git worktree add arguments...]"
+  echo
+  echo "Options:"
+  echo "  -y, --yes           Auto-confirm prompts (e.g. reuse an existing branch with -b)"
+  echo "  -h, --help          Show this help"
   echo
   echo "Examples:"
   echo "  # Create new worktree for existing branch:"
@@ -104,9 +108,24 @@ usage() {
   echo "        \$WT_WORKTREES_BASE/<branch-name>"
 }
 
-ARGS=("$@")
+ARGS=()
+SKIP_CONFIRM=false
+for arg in "$@"; do
+  case "$arg" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    -y|--yes)
+      SKIP_CONFIRM=true
+      ;;
+    *)
+      ARGS+=("$arg")
+      ;;
+  esac
+done
 
-if [[ $# -eq 0 ]]; then
+if [[ ${#ARGS[@]} -eq 0 ]]; then
   usage
   exit 1
 fi
@@ -121,27 +140,37 @@ if [[ ! -d "$WT_MAIN_REPO_ROOT" ]]; then
 fi
 cd "$WT_MAIN_REPO_ROOT"
 
-# Detect whether we are creating a new branch: look for -b or --branch and capture name
+# Detect whether we are creating a new branch: look for -b or --branch and capture name.
+# git worktree add accepts only "-b <name>", so --branch/--branch=/-b= are rewritten to it.
 creating_new_branch=0
 branch_name=""
+NORMALIZED_ARGS=()
 i=0
 while [[ $i -lt ${#ARGS[@]} ]]; do
   arg="${ARGS[$i]}"
   case "$arg" in
     -b|--branch)
       creating_new_branch=1
+      NORMALIZED_ARGS+=("-b")
       # Next argument should be the branch name
       if (( i + 1 < ${#ARGS[@]} )); then
         branch_name="${ARGS[$((i + 1))]}"
+        NORMALIZED_ARGS+=("$branch_name")
+        i=$((i + 1))
       fi
       ;;
     -b=*|--branch=*)
       creating_new_branch=1
       branch_name="${arg#*=}"
+      NORMALIZED_ARGS+=("-b" "$branch_name")
+      ;;
+    *)
+      NORMALIZED_ARGS+=("$arg")
       ;;
   esac
   i=$((i + 1))
 done
+ARGS=("${NORMALIZED_ARGS[@]}")
 
 ########################################
 # Fast path: NOT creating a new branch #
@@ -168,7 +197,7 @@ if [[ $creating_new_branch -eq 0 ]]; then
     exit 1
   fi
 
-  if [[ $nonopt_count -eq 1 && $# -eq 1 ]]; then
+  if [[ $nonopt_count -eq 1 && ${#ARGS[@]} -eq 1 ]]; then
     #
     # Convenience mode:
     #   wt-add <branch>
@@ -280,8 +309,8 @@ restore_state() {
 
 # Ensure we restore on normal exit and most error signals
 trap restore_state EXIT
-trap restore_state INT
-trap restore_state TERM
+trap 'restore_state; exit 130' INT
+trap 'restore_state; exit 143' TERM
 
 # 2. If directory has uncommitted changes, stash them with a unique name
 if [[ -n "$(git status --porcelain)" ]]; then
@@ -316,14 +345,22 @@ if [[ "${WT_SKIP_PULL:-0}" != "1" ]]; then
     timeout_cmd="gtimeout"
   fi
   
+  pull_status=0
   if [[ -n "$timeout_cmd" ]]; then
-    if ! "$timeout_cmd" 30 git pull --ff-only; then
-      warn "Pull failed or timed out. Continuing with current state."
-    fi
+    "$timeout_cmd" 30 git pull --ff-only || pull_status=$?
+    pull_fail_msg="Pull failed or timed out. Continuing with current state."
   else
-    if ! git pull --ff-only; then
-      warn "Could not fast-forward $WT_BASE_BRANCH. Continuing with current state."
-    fi
+    git pull --ff-only || pull_status=$?
+    pull_fail_msg="Could not fast-forward $WT_BASE_BRANCH. Continuing with current state."
+  fi
+  # SIGINT delivered to the foreground git child does not fire this script's INT
+  # trap, so a Ctrl-C'd pull surfaces only as exit 130 here; abort instead of
+  # creating the worktree from a possibly stale base.
+  if [[ $pull_status -eq 130 ]]; then
+    error "git pull was interrupted; aborting."
+    exit 130
+  elif [[ $pull_status -ne 0 ]]; then
+    warn "$pull_fail_msg"
   fi
 else
   info "Skipping git pull (WT_SKIP_PULL=1)"
@@ -388,9 +425,11 @@ fi
 if git show-ref --verify --quiet "refs/heads/$branch_name"; then
   warn "Branch '$branch_name' already exists."
   echo
-  if ! prompt_confirm "Create worktree for the existing branch instead? [Y/n]" "y"; then
-    echo "Aborted."
-    exit 1
+  if [[ "$SKIP_CONFIRM" != "true" ]]; then
+    if ! prompt_confirm "Create worktree for the existing branch instead? [Y/n]" "y"; then
+      echo "Aborted."
+      exit 1
+    fi
   fi
   
   # Remove -b/--branch from args and just checkout existing branch
