@@ -186,7 +186,7 @@ _cleanup_bazel_output_base() {
   path_hash="$(_wt_md5_string "$wt_path" 2>/dev/null)" || return 0
   [[ -n "$path_hash" ]] || return 0
 
-  local root output_base size
+  local root output_base size permission_error remove_error
   for root in \
     "$HOME/Library/Caches/bazel/_bazel_${USER:-}" \
     "/private/var/tmp/_bazel_${USER:-}" \
@@ -198,10 +198,15 @@ _cleanup_bazel_output_base() {
     [[ -d "$output_base/execroot" ]] || continue
 
     size="$(du -sh "$output_base" 2>/dev/null | cut -f1)"
-    if rm -rf "$output_base" 2>/dev/null; then
+    # Bazel may leave generated directories read-only. find does not follow
+    # symlinks, so this changes permissions only inside this output base.
+    if ! permission_error="$(find "$output_base" -type d ! -perm -u+w -exec chmod u+w {} + 2>&1)"; then
+      warn "Could not make Bazel output base writable: $output_base: $permission_error"
+    fi
+    if remove_error="$(rm -rf "$output_base" 2>&1)"; then
       success "Bazel output base removed: $output_base (freed ${size:-unknown})"
     else
-      warn "Could not remove Bazel output base: $output_base"
+      warn "Could not remove Bazel output base: $output_base: $remove_error"
     fi
   done
   return 0

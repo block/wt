@@ -581,6 +581,32 @@ _hash_for_path() {
     assert [ -d "$root/$other_hash" ]
 }
 
+@test "wt-remove reaps a bazel output base with read-only directories" {
+    export USER="wtuser"
+    local wt_path
+    wt_path=$(create_removable_worktree "bazel-read-only")
+    wt_path="$(cd "$wt_path" && pwd)"
+
+    local hash
+    hash="$(_hash_for_path "$wt_path")"
+
+    local root="$TEST_HOME/Library/Caches/bazel/_bazel_wtuser"
+    local output_base="$root/$hash"
+    local external_dir="$TEST_HOME/external-cache"
+    mkdir -p "$output_base/execroot/wksp/nested" "$external_dir"
+    echo "artifact" > "$output_base/execroot/wksp/nested/out.bin"
+    echo "keep" > "$external_dir/keep.txt"
+    ln -s "$external_dir" "$output_base/execroot/wksp/external"
+    chmod u-w "$output_base/execroot/wksp/nested" "$output_base/execroot/wksp" "$output_base/execroot"
+
+    run "$TEST_HOME/.wt/bin/wt-remove" -y "$wt_path"
+    assert_success
+    assert [ ! -d "$wt_path" ]
+    assert [ ! -e "$output_base" ]
+    assert [ -f "$external_dir/keep.txt" ]
+    assert_output --partial "Bazel output base removed"
+}
+
 @test "wt-remove reaps output base from the linux cache root" {
     export USER="wtuser"
     local wt_path
